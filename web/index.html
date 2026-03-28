@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản Lý Dự Án - Propack VP</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- DataTables CSS -->
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+    <!-- Bootstrap Select CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/css/bootstrap-select.min.css">
+    
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Tab Navigation Styles */
+        .main-tabs {
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 1rem;
+        }
+        
+        .main-tabs .nav-link {
+            border: none;
+            color: #6c757d;
+            padding: 0.75rem 1.25rem;
+            font-weight: 500;
+            position: relative;
+            transition: all 0.2s;
+        }
+        
+        .main-tabs .nav-link:hover {
+            color: var(--primary-color);
+            background: transparent;
+        }
+        
+        .main-tabs .nav-link.active {
+            color: var(--primary-color);
+            background: transparent;
+            border: none;
+        }
+        
+        .main-tabs .nav-link.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--primary-color);
+            border-radius: 3px 3px 0 0;
+        }
+        
+        .main-tabs .nav-link i {
+            margin-right: 0.5rem;
+        }
+        
+        /* Tab Content Container */
+        .tab-content-wrapper {
+            min-height: calc(100vh - 200px);
+        }
+        
+        .tab-pane-custom {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        .tab-pane-custom.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* Loading overlay */
+        .module-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+        }
+        
+        /* Mobile tab adjustments */
+        @media (max-width: 768px) {
+            .main-tabs .nav-link {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.875rem;
+            }
+            
+            .main-tabs .nav-link i {
+                margin-right: 0.25rem;
+            }
+            
+            .main-tabs .nav-link span {
+                display: none;
+            }
+        }
+        
+        /* Badge for notice count */
+        .nav-tab-badge {
+            font-size: 0.65rem;
+            padding: 0.15rem 0.4rem;
+            margin-left: 0.25rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Modal -->
+    <div class="modal fade" id="login-modal" data-bs-backdrop="static" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header login-modal-header">
+                    <div class="text-center w-100">
+                        <i class="bi bi-folder-fill login-icon"></i>
+                        <h4 class="modal-title login-title" data-i18n="login_title">Quản Lý Dự Án</h4>
+                        <p class="login-subtitle" data-i18n="login_subtitle">Đăng nhập để tiếp tục</p>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <form id="login-form">
+                        <div class="mb-3">
+                            <label for="login-username" class="form-label" data-i18n="username">Tên đăng nhập</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                <input type="text" class="form-control" id="login-username" 
+                                       placeholder="Nhập tên đăng nhập" data-i18n-placeholder="username" required autofocus>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="login-password" class="form-label" data-i18n="password">Mật khẩu</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-lock"></i></span>
+                                <input type="password" class="form-control" id="login-password" 
+                                       placeholder="Nhập mật khẩu" data-i18n-placeholder="password" autocomplete="current-password" required>
+                                <button class="btn btn-outline-secondary" type="button" id="toggle-password">
+                                    <i class="bi bi-eye" id="toggle-password-icon"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember-me">
+                            <label class="form-check-label" for="remember-me" data-i18n="remember_me">Ghi nhớ đăng nhập</label>
+                        </div>
+                        <div class="alert alert-danger d-none" id="login-error">
+                            <i class="bi bi-exclamation-circle-fill me-2"></i>
+                            <span id="login-error-text"></span>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 btn-login" id="btn-login-submit">
+                            <span class="spinner-border spinner-border-sm d-none" id="login-spinner"></span>
+                            <span id="login-btn-text" data-i18n="login_btn">Đăng nhập</span>
+                        </button>
+                    </form>
+                </div>
+                <div class="modal-footer justify-content-center">
+                    <small class="text-muted" data-i18n="use_system_account">Sử dụng tài khoản từ hệ thống</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Header / Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-folder"></i> <span data-i18n="app_title">Quản Lý Dự Án - Propack VP</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#projects" data-tab="projects">
+                            <i class="bi bi-table"></i> <span data-i18n="nav_projects">Dự Án</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#notices" data-tab="notices">
+                            <i class="bi bi-bell"></i> <span data-i18n="nav_notices">Thông báo</span>
+                            <span class="badge bg-danger nav-tab-badge" id="notice-badge" style="display: none;">0</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#taomabanve" data-tab="taomabanve">
+                            <i class="bi bi-plus-circle"></i> <span data-i18n="nav_taomabanve">Tạo Mã Bản Vẽ</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#profile" data-tab="profile">
+                            <i class="bi bi-person"></i> <span data-i18n="nav_profile">Hồ Sơ</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#ai" data-tab="ai">
+                            <i class="bi bi-robot"></i> <span data-i18n="nav_ai">PropackAI</span>
+                        </a>
+                    </li>
+                </ul>
+                <!-- Language Selector -->
+                <div class="navbar-nav me-2">
+                    <div class="dropdown">
+                        <button class="btn btn-outline-light btn-sm dropdown-toggle" type="button" id="language-selector" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-globe"></i> <span id="current-lang-label">VI</span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="language-selector">
+                            <li><a class="dropdown-item" href="#" data-lang="vi" id="lang-option-vi"><span data-i18n="language_vi">🇻🇳 VI</span></a></li>
+                            <li><a class="dropdown-item" href="#" data-lang="zh" id="lang-option-zh"><span data-i18n="language_zh">🇨🇳 中文</span></a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center" id="user-section" style="display: none;">
+                    <span class="text-white me-3" id="user-info">
+                        <i class="bi bi-person-circle"></i> <span id="user-name"></span>
+                    </span>
+                    <button class="btn btn-outline-light btn-sm me-2" id="btn-submit-log" data-bs-toggle="modal" data-bs-target="#log-modal">
+                        <i class="bi bi-journal-text"></i> <span data-i18n="submit_feedback">Gửi Phản hồi</span>
+                    </button>
+                    <button class="btn btn-outline-light btn-sm" id="btn-logout">
+                        <i class="bi bi-box-arrow-right"></i> <span data-i18n="logout">Đăng xuất</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auth Overlay (shown when not logged in) -->
+    <div id="auth-overlay" class="auth-overlay"></div>
+
+    <!-- Main Content -->
+    <div class="container-fluid mt-3" id="main-content">
+        <!-- Main Tab Navigation -->
+        <ul class="nav nav-tabs main-tabs" id="main-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-projects" data-bs-toggle="tab" data-bs-target="#projects-content" type="button" role="tab">
+                    <i class="bi bi-table"></i> <span data-i18n="nav_projects">Dự Án</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-notices" data-bs-toggle="tab" data-bs-target="#notices-content" type="button" role="tab">
+                    <i class="bi bi-bell"></i> <span data-i18n="nav_notices">Thông báo</span>
+                    <span class="badge bg-danger nav-tab-badge" id="tab-notice-badge" style="display: none;">0</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-taomabanve" data-bs-toggle="tab" data-bs-target="#taomabanve-content" type="button" role="tab">
+                    <i class="bi bi-plus-circle"></i> <span data-i18n="nav_taomabanve">Tạo Mã Bản Vẽ</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-profile" data-bs-toggle="tab" data-bs-target="#profile-content" type="button" role="tab">
+                    <i class="bi bi-person"></i> <span data-i18n="nav_profile">Hồ Sơ</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-ai" data-bs-toggle="tab" data-bs-target="#ai-content" type="button" role="tab">
+                    <i class="bi bi-robot"></i> <span data-i18n="nav_ai">PropackAI</span>
+                </button>
+            </li>
+        </ul>
+        
+        <!-- Tab Content -->
+        <div class="tab-content" id="main-tab-content">
+            <!-- Projects Tab Content -->
+            <div class="tab-pane fade show active" id="projects-content" role="tabpanel">
+                <!-- Loading placeholder -->
+                <div class="module-loading" id="projects-loading">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p class="mt-2 text-muted" data-i18n="loading_projects">Đang tải dữ liệu dự án...</p>
+                    </div>
+                </div>
+                <!-- Content will be loaded via JS -->
+                <div id="projects-container" style="display: none;"></div>
+            </div>
+            
+            <!-- Notices Tab Content -->
+            <div class="tab-pane fade" id="notices-content" role="tabpanel">
+                <div class="module-loading" id="notices-loading">
+                    <div class="text-center">
+                        <div class="spinner-border text-info" role="status"></div>
+                        <p class="mt-2 text-muted" data-i18n="loading_notices">Đang tải thông báo...</p>
+                    </div>
+                </div>
+                <div id="notices-container" style="display: none;"></div>
+            </div>
+            
+            <!-- Create Code Tab Content -->
+            <div class="tab-pane fade" id="taomabanve-content" role="tabpanel">
+                <div class="module-loading" id="taomabanve-loading">
+                    <div class="text-center">
+                        <div class="spinner-border text-success" role="status"></div>
+                        <p class="mt-2 text-muted" data-i18n="loading_taomabanve">Đang tải trang tạo mã...</p>
+                    </div>
+                </div>
+                <div id="taomabanve-container" style="display: none;"></div>
+            </div>
+            
+            <!-- Profile Tab Content -->
+            <div class="tab-pane fade" id="profile-content" role="tabpanel">
+                <div class="module-loading" id="profile-loading">
+                    <div class="text-center">
+                        <div class="spinner-border text-secondary" role="status"></div>
+                        <p class="mt-2 text-muted" data-i18n="loading_profile">Đang tải hồ sơ...</p>
+                    </div>
+                </div>
+                <div id="profile-container" style="display: none;"></div>
+            </div>
+            
+            <!-- AI Tab Content -->
+            <div class="tab-pane fade" id="ai-content" role="tabpanel">
+                <div class="module-loading" id="ai-loading">
+                    <div class="text-center">
+                        <div class="spinner-border text-warning" role="status"></div>
+                        <p class="mt-2 text-muted" data-i18n="loading_ai">Đang tải AI...</p>
+                    </div>
+                </div>
+                <div id="ai-container" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+    <!-- End of Main Content -->
+
+    <!-- Loading Toast - Non-blocking notification -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
+        <div id="loading-toast" class="toast bg-info text-white" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
+            <div class="toast-body d-flex align-items-center" id="loading-toast-message">
+                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                <span data-i18n="loading_data">Đang tải dữ liệu...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Submit Log Modal -->
+    <div class="modal fade" id="log-modal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-dark text-white">
+                    <h5 class="modal-title"><i class="bi bi-journal-text"></i> <span data-i18n="feedback_title">Gửi Phản Hồi</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="log-type" class="form-label" data-i18n="feedback_type">Loại log</label>
+                        <select class="form-select" id="log-type">
+                            <option value="general" data-i18n="feedback_type_general">Chung</option>
+                            <option value="error" data-i18n="feedback_type_error">Lỗi</option>
+                            <option value="debug" data-i18n="feedback_type_debug">Debug</option>
+                            <option value="login" data-i18n="feedback_type_login">Đăng nhập</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="log-content" class="form-label" data-i18n="feedback_content">Nội dung log</label>
+                        <textarea class="form-control" id="log-content" rows="10" 
+                                  placeholder="Nhập nội dung phản hồi cần gửi..." data-i18n-placeholder="feedback_content_placeholder"></textarea>
+                    </div>
+                    <div class="alert alert-danger d-none" id="log-error">
+                        <i class="bi bi-exclamation-circle-fill me-2"></i>
+                        <span id="log-error-text"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" data-i18n="cancel">Hủy</button>
+                    <button type="button" class="btn btn-dark" id="btn-submit-log-confirm">
+                        <span class="spinner-border spinner-border-sm d-none" id="submit-log-spinner"></span>
+                        <i class="bi bi-send"></i> <span data-i18n="feedback_submit">Gửi phản hồi</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div class="toast" id="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <strong class="me-auto" id="toast-title" data-i18n="info">Thông báo</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body" id="toast-message">
+                Message here
+            </div>
+        </div>
+    </div>
+
+    <!-- i18n (Internationalization) -->
+    <script src="js/i18n.js"></script>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Bootstrap Select JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-select@1.14.0-beta3/dist/js/bootstrap-select.min.js"></script>
+    
+    <script src="js/api.js"></script>
+    <script src="js/components.js"></script>
+    <script src="js/app.js"></script>
+    
+    <script>
+        // Initialize the app when page loads
+        window.addEventListener('load', function() {
+            console.log('App initializing...');
+            console.log('jQuery version:', $.fn.jquery);
+            console.log('Bootstrap available:', typeof bootstrap !== 'undefined');
+        });
+    </script>
+</body>
+</html>

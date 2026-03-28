@@ -1,0 +1,2982 @@
+﻿"""
+SQLite Database Helper for Project Tracking V2
+Module này cung cấp các hàm để làm việc với SQLite database
+Bao gồm: Projects, Users, Customers management
+"""
+
+import sqlite3
+import json
+import os
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Union
+
+# Đường dẫn database
+DB_PATH = 'DB.db'
+
+# In-memory cache for load_all
+_data_cache = None
+_cache_loaded = False
+
+
+def get_db_path():
+    """Lấy đường dẫn database"""
+    return DB_PATH
+
+
+def init_db():
+    """Khởi tạo database với bảng projects (id và tracking_id đã hợp nhất)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Tạo bảng projects - tracking_id làm PRIMARY KEY duy nhất
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            tracking_id INTEGER PRIMARY KEY,
+            data TEXT NOT NULL,
+            sales_name VARCHAR(100),
+            user_id INTEGER,
+            is_pending VARCHAR(10) DEFAULT 'no',
+            accepted_by VARCHAR(100),
+            accepted_at TEXT,
+            urgency_level VARCHAR(20),
+            desired_solution_time TEXT
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+    print(f"[DB] Database initialized at {DB_PATH}")
+
+
+def init_db_v2():
+    """
+    Khởi tạo database V2 với tất cả bảng mới
+    Bao gồm: users, customers, projects (normalized với columns riêng biệt)
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Bảng users (User Profile)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            passwords VARCHAR(255) NOT NULL,
+            role VARCHAR(20) NOT NULL DEFAULT 'sales',
+            full_name VARCHAR(100) NOT NULL,
+            employee_id VARCHAR(20),
+            department VARCHAR(50) DEFAULT 'Sales',
+            status VARCHAR(20) DEFAULT 'active',
+            last_login TEXT
+        )
+    ''')
+    
+    # Bảng customers (Danh sách khách hàng)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(200) UNIQUE NOT NULL,
+            contact_person VARCHAR(100),
+            phone VARCHAR(50),
+            email VARCHAR(100),
+            address TEXT
+        )
+    ''')
+    
+    # Bảng projects - NORMALIZED với columns riêng biệt (thay vì JSON blob)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            tracking_id INTEGER PRIMARY KEY,
+            -- 19 cột dữ liệu từ JSON trước đây
+            Created_Date DATE,
+            khach_hang VARCHAR(200),
+            nhan_vien_kinh_doanh VARCHAR(100),
+            ten_san_pham VARCHAR(200),
+            quy_cach TEXT,
+            nguoi_lien_he_kh VARCHAR(100),
+            so_luong INTEGER,
+            ma_po VARCHAR(50),
+            ma_ban_ve VARCHAR(50),
+            ma_ban_ve_ky_thuat VARCHAR(50),
+            ma_me VARCHAR(50),
+            loai_san_pham VARCHAR(100),
+            nhan_vien_thiet_ke VARCHAR(100),
+            tinh_trang_hoan_thanh VARCHAR(100),
+            urgency_level VARCHAR(20),
+            thoi_gian_mong_muon_ban_ve TEXT,
+            thoi_gian_hoan_thanh_ke_hoach TEXT,
+            -- Metadata columns
+            sales_name VARCHAR(100),
+            user_id INTEGER,
+            is_pending VARCHAR(10) DEFAULT 'no',
+            accepted_by VARCHAR(100),
+            accepted_at TEXT,
+            urgency_level VARCHAR(20),
+            desired_solution_time TEXT
+        )
+    ''')
+    
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ma_po ON projects(ma_po)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ten_san_pham ON projects(ten_san_pham)')
+    
+    conn.commit()
+    conn.close()
+    print(f"[DB] Database V2 normalized initialized at {DB_PATH}")
+
+
+def migrate_ngay_to_created_date():
+    """
+    Migration: Đổi tên cột 'ngay' thành 'Created_Date'
+    Returns: bool
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Kiểm tra nếu cột 'ngay' còn tồn tại
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'ngay' not in columns and 'Created_Date' not in columns:
+            print("[DB] Cột 'ngay' và 'Created_Date' không tồn tại")
+            conn.close()
+            return True
+        
+        if 'Created_Date' in columns:
+            print("[DB] Cột 'Created_Date' đã tồn tại, không cần migrate")
+            conn.close()
+            return True
+        
+        print("[DB] Bắt đầu migrate 'ngay' → 'Created_Date'...")
+        
+        # Bước 1: Tạo bảng tạm với schema mới (đổi tên ngay → Created_Date)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS projects_new (
+                tracking_id INTEGER PRIMARY KEY,
+                Created_Date DATE,
+                khach_hang VARCHAR(200),
+                nhan_vien_kinh_doanh VARCHAR(100),
+                ten_san_pham VARCHAR(200),
+                quy_cach TEXT,
+                nguoi_lien_he_kh VARCHAR(100),
+                so_luong INTEGER,
+                ma_po VARCHAR(50),
+                ma_ban_ve VARCHAR(50),
+                ma_ban_ve_ky_thuat VARCHAR(50),
+                ma_me VARCHAR(50),
+                loai_san_pham VARCHAR(100),
+                nhan_vien_thiet_ke VARCHAR(100),
+                tinh_trang_hoan_thanh VARCHAR(100),
+                urgency_level VARCHAR(20),
+                thoi_gian_mong_muon_ban_ve TEXT,
+                thoi_gian_hoan_thanh_ke_hoach TEXT,
+                sales_name VARCHAR(100),
+                sales_id INTEGER,
+                is_pending VARCHAR(10) DEFAULT 'no',
+                accepted_by VARCHAR(100),
+                accepted_at TEXT,
+                urgency_level VARCHAR(20),
+                desired_solution_time TEXT
+            )
+        ''')
+        
+        # Bước 2: Copy dữ liệu từ bảng cũ sang bảng mới
+        cursor.execute("SELECT * FROM projects")
+        old_columns = [desc[0] for desc in cursor.description]
+        
+        # Map columns (đổi ngay → Created_Date)
+        column_mapping = {}
+        for col in old_columns:
+            if col == 'ngay':
+                column_mapping[col] = 'Created_Date'
+            else:
+                column_mapping[col] = col
+        
+        # Insert dữ liệu
+        insert_cols = ', '.join(column_mapping.values())
+        placeholders = ', '.join(['?' for _ in column_mapping])
+        
+        cursor.execute(f"SELECT {', '.join(old_columns)} FROM projects")
+        for row in cursor.fetchall():
+            # Chuyển đổi row dict với key mới
+            row_dict = dict(zip(old_columns, row))
+            new_row = [row_dict.get(col) for col in old_columns]
+            cursor.execute(
+                f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
+                new_row
+            )
+        
+        # Bước 3: Xóa bảng cũ và đổi tên bảng mới
+        cursor.execute("DROP TABLE projects")
+        cursor.execute("ALTER TABLE projects_new RENAME TO projects")
+        
+        # Bước 4: Cập nhật index
+        cursor.execute("DROP INDEX IF EXISTS idx_projects_ngay")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_projects_created_date ON projects(Created_Date)")
+        
+        conn.commit()
+        conn.close()
+        
+        print("[DB] Migration 'ngay' → 'Created_Date' hoàn tất")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error migrating 'ngay' to 'Created_Date': {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def migrate_projects_schema():
+    """
+    Migration: Hợp nhất id và tracking_id trong bảng projects
+    - Tạo bảng mới với tracking_id làm PRIMARY KEY
+    - Copy dữ liệu từ bảng cũ
+    - Xóa bảng cũ và đổi tên bảng mới
+    Returns: bool
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Kiểm tra nếu bảng cũ có cột 'id'
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'id' not in columns:
+            print("[DB] Projects table already migrated (no 'id' column)")
+            conn.close()
+            return True
+        
+        print("[DB] Starting projects schema migration...")
+        
+        # Bước 1: Tạo bảng tạm với schema mới
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS projects_new (
+                tracking_id INTEGER PRIMARY KEY,
+                data TEXT NOT NULL,
+                sales_name VARCHAR(100),
+                sales_id INTEGER,
+                is_pending VARCHAR(10) DEFAULT 'no',
+                accepted_by VARCHAR(100),
+                accepted_at TEXT,
+                urgency_level VARCHAR(20),
+                desired_solution_time TEXT
+            )
+        ''')
+        
+        # Bước 2: Copy dữ liệu từ bảng cũ sang bảng mới
+        # Lấy tất cả columns từ bảng cũ
+        cursor.execute("SELECT * FROM projects")
+        old_columns = [desc[0] for desc in cursor.description]
+        
+        # Map columns
+        column_mapping = {
+            'tracking_id': 'tracking_id',
+            'data': 'data',
+            'sales_name': 'sales_name',
+            'sales_id': 'sales_id',
+            'is_pending': 'is_pending',
+            'accepted_by': 'accepted_by',
+            'accepted_at': 'accepted_at',
+            'urgency_level': 'urgency_level',
+            'desired_solution_time': 'desired_solution_time'
+        }
+        
+        # Insert dữ liệu
+        insert_cols = ', '.join(column_mapping.keys())
+        placeholders = ', '.join(['?' for _ in column_mapping])
+        
+        cursor.execute(f"SELECT {insert_cols} FROM projects")
+        for row in cursor.fetchall():
+            cursor.execute(
+                f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
+                row
+            )
+        
+        # Bước 3: Xóa bảng cũ và đổi tên bảng mới
+        cursor.execute("DROP TABLE projects")
+        cursor.execute("ALTER TABLE projects_new RENAME TO projects")
+        
+        conn.commit()
+        conn.close()
+        
+        print("[DB] Projects schema migration completed successfully")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error migrating projects schema: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def migrate_to_v2():
+    """
+    Migrate database từ V1 sang V2
+    - Tạo bảng users và customers mới
+    - Thêm columns mới vào projects
+    - Hợp nhất id và tracking_id
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Kiểm tra và tạo bảng users
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            passwords VARCHAR(255) NOT NULL,
+            role VARCHAR(20) NOT NULL DEFAULT 'sales',
+            full_name VARCHAR(100) NOT NULL,
+            employee_id VARCHAR(20),
+            department VARCHAR(50) DEFAULT 'Sales',
+            status VARCHAR(20) DEFAULT 'active',
+            last_login TEXT,
+            user_created_at TEXT
+        )
+    ''')
+    
+    # Migration: Thêm cột user_created_at nếu chưa có (cho DB cũ)
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN user_created_at TEXT')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    
+    # Migration: Thêm cột email và phone cho profile
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN email VARCHAR(100)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    
+    try:
+        cursor.execute('ALTER TABLE users ADD COLUMN phone VARCHAR(50)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    
+    # Tạo bảng user_permissions (permissions cho từng user)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_permissions (
+            permission_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            permission VARCHAR(50) NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+            UNIQUE(user_id, permission)
+        )
+    ''')
+    
+    # Kiểm tra và tạo bảng customers
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name VARCHAR(200) UNIQUE NOT NULL,
+            contact_person VARCHAR(100),
+            phone VARCHAR(50),
+            email VARCHAR(100),
+            address TEXT
+        )
+    ''')
+    
+    # Thêm columns mới vào bảng projects (nếu chưa có)
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN sales_name VARCHAR(100)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN sales_id INTEGER')
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute("ALTER TABLE projects ADD COLUMN is_pending VARCHAR(10) DEFAULT 'no'")
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN accepted_by VARCHAR(100)')
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN accepted_at TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN urgency_level VARCHAR(20)')
+    except sqlite3.OperationalError:
+        pass
+    
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN desired_solution_time TEXT')
+    except sqlite3.OperationalError:
+        pass
+    
+    # Tạo indexes
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_permissions_user_id ON user_permissions(user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_pending ON projects(is_pending)')
+    
+    conn.commit()
+    conn.close()
+    
+    # Migration: Hợp nhất id và tracking_id
+    migrate_projects_schema()
+    
+    print(f"[DB] Database migrated to V2")
+
+
+def get_connection():
+    """Lấy kết nối database"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# Mapping từ JSON keys sang database columns
+JSON_TO_COLUMN_MAP = {
+    "Tracking ID": "tracking_id",
+    "Ngày": "Created_Date",
+    "Khách hàng": "khach_hang",
+    "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+    "Nhân viên KD": "nhan_vien_kinh_doanh",  # Thêm mapping cho frontend
+    "Tên sản phẩm": "ten_san_pham",
+    "Quy cách": "quy_cach",
+    "Người liên hệ\n(KH)": "nguoi_lien_he_kh",
+    "Người liên hệ (KH)": "nguoi_lien_he_kh",
+    "Số lượng": "so_luong",
+    "Mã PO": "ma_po",
+    "Mã bản vẽ": "ma_ban_ve",
+    "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": "ma_ban_ve_ky_thuat",
+    "Mã mẹ ": "ma_me",
+    "Loại sản phẩm": "loai_san_pham",
+    "Nhân viên thiết kế": "nhan_vien_thiet_ke",
+    "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh",
+    "Mức độ khẩn cấp": "urgency_level",
+    "Thời gian mong muốn có bản vẽ": "thoi_gian_mong_muon_ban_ve",
+    "Thời gian hoàn thành kế hoạch": "thoi_gian_hoan_thanh_ke_hoach"
+}
+
+# Database columns cho projects (normalized)
+PROJECT_COLUMNS = [
+    "tracking_id", "Created_Date", "khach_hang", "nhan_vien_kinh_doanh",
+    "ten_san_pham", "quy_cach", "nguoi_lien_he_kh", "so_luong",
+    "ma_po", "ma_ban_ve", "ma_ban_ve_ky_thuat", "ma_me",
+    "loai_san_pham", "nhan_vien_thiet_ke", "tinh_trang_hoan_thanh",
+    "thoi_gian_mong_muon_ban_ve", "thoi_gian_hoan_thanh_ke_hoach",
+    "sales_name", "user_id", "is_pending", "accepted_by",
+    "accepted_at", "urgency_level", "desired_solution_time"
+]
+
+
+def migrate_json_to_columns():
+    """
+    Migration: Parse JSON từ cột 'data' và insert vào các columns riêng biệt
+    Returns: (success: bool, migrated_count: int)
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra nếu bảng đã có columns mới
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" in columns:
+            print("[DB] Bảng projects đã được migrate (có column 'Created_Date')")
+            conn.close()
+            return True, 0
+        
+        print("[DB] Bắt đầu migrate JSON → columns...")
+        
+        # Lấy tất cả dữ liệu từ bảng cũ
+        cursor.execute("SELECT tracking_id, data, sales_name, sales_id, is_pending, accepted_by, accepted_at, urgency_level, desired_solution_time FROM projects")
+        rows = cursor.fetchall()
+        
+        if not rows:
+            print("[DB] Không có dữ liệu để migrate")
+            conn.close()
+            return True, 0
+        
+        # Tạo bảng mới với schema normalized
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS projects_new (
+                tracking_id INTEGER PRIMARY KEY,
+                Created_Date DATE,
+                khach_hang VARCHAR(200),
+                nhan_vien_kinh_doanh VARCHAR(100),
+                ten_san_pham VARCHAR(200),
+                quy_cach TEXT,
+                nguoi_lien_he_kh VARCHAR(100),
+                so_luong INTEGER,
+                ma_po VARCHAR(50),
+                ma_ban_ve VARCHAR(50),
+                ma_ban_ve_ky_thuat VARCHAR(50),
+                ma_me VARCHAR(50),
+                loai_san_pham VARCHAR(100),
+                nhan_vien_thiet_ke VARCHAR(100),
+                tinh_trang_hoan_thanh VARCHAR(100),
+                urgency_level VARCHAR(20),
+                thoi_gian_mong_muon_ban_ve TEXT,
+                thoi_gian_hoan_thanh_ke_hoach TEXT,
+                sales_name VARCHAR(100),
+                sales_id INTEGER,
+                is_pending VARCHAR(10) DEFAULT 'no',
+                accepted_by VARCHAR(100),
+                accepted_at TEXT,
+                urgency_level VARCHAR(20),
+                desired_solution_time TEXT
+            )
+        ''')
+        
+        migrated_count = 0
+        for row in rows:
+            tracking_id = row['tracking_id']
+            metadata = {
+                'sales_name': row['sales_name'],
+                'sales_id': row['sales_id'],
+                'is_pending': row['is_pending'],
+                'accepted_by': row['accepted_by'],
+                'accepted_at': row['accepted_at'],
+                'urgency_level': row['urgency_level'],
+                'desired_solution_time': row['desired_solution_time']
+            }
+            
+            # Parse JSON
+            try:
+                data_json = json.loads(row['data']) if row['data'] else {}
+            except:
+                data_json = {}
+            
+            # Map JSON sang columns
+            record = {'tracking_id': tracking_id}
+            for json_key, col_name in JSON_TO_COLUMN_MAP.items():
+                record[col_name] = data_json.get(json_key, '')
+            
+            # Thêm metadata
+            for key, value in metadata.items():
+                if value is not None:
+                    record[key] = value
+            
+            # Insert vào bảng mới
+            placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+            insert_cols = ', '.join(PROJECT_COLUMNS)
+            values = [record.get(col) for col in PROJECT_COLUMNS]
+            
+            cursor.execute(
+                f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
+                values
+            )
+            migrated_count += 1
+        
+        # Xóa bảng cũ và đổi tên
+        cursor.execute("DROP TABLE projects")
+        cursor.execute("ALTER TABLE projects_new RENAME TO projects")
+        
+        # Tạo indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_created_date ON projects(Created_Date)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_khach_hang ON projects(khach_hang)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_sales_id ON projects(sales_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_pending ON projects(is_pending)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ma_po ON projects(ma_po)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ten_san_pham ON projects(ten_san_pham)')
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Migration completed: {migrated_count} records migrated")
+        return True, migrated_count
+        
+    except Exception as e:
+        print(f"[DB] Error migrating JSON to columns: {e}")
+        import traceback
+        traceback.print_exc()
+        return False, 0
+
+
+def load_all():
+    """
+    Load tất cả dữ liệu từ DB.db
+    Sử dụng in-memory cache để tăng hiệu suất
+    Returns: list of dictionaries (danh sách records)
+    """
+    global _data_cache, _cache_loaded
+    
+    # Return cached data if available
+    if _cache_loaded and _data_cache is not None:
+        return _data_cache
+    
+    try:
+        if not os.path.exists(DB_PATH):
+            print(f"[DB] Database file {DB_PATH} not found, creating new one")
+            init_db_v2()
+            return []
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema - nếu có column 'Created_Date' thì dùng normalized query
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" in columns:
+            # Schema mới - đọc trực tiếp từ columns
+            cursor.execute('SELECT * FROM projects ORDER BY tracking_id DESC')
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # Chuyển đổi sang format cũ để tương thích với UI
+            # Lưu ý: sales_name được map về "Nhân viên kinh doanh" thay vì metadata riêng
+            data = []
+            for row in rows:
+                record = dict(row)
+                # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
+                sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                
+                # Rename columns về format cũ (với khoảng trắng)
+                # Bao gồm cả "Nhân viên KD" cho frontend
+                old_format = {
+                    "Tracking ID": record.get("tracking_id"),
+                    "Ngày": record.get("Created_Date"),
+                    "Ngày khởi tạo": record.get("Created_Date"),
+                    "Khách hàng": record.get("khach_hang"),
+                    "Nhân viên KD": sales_name_value,  # Thêm cho frontend
+                    "Nhân viên kinh doanh": sales_name_value,
+                    "Tên sản phẩm": record.get("ten_san_pham"),
+                    "Quy cách": record.get("quy_cach"),
+                    "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                    "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                    "Số lượng": record.get("so_luong"),
+                    "Mã PO": record.get("ma_po"),
+                    "Mã bản vẽ": record.get("ma_ban_ve"),
+                    "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                    "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã mẹ ": record.get("ma_me"),
+                    "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                    "Loại sản phẩm": record.get("loai_san_pham"),
+                    "Hạng mục": record.get("loai_san_pham"),
+                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                    "Mức độ khẩn cấp": record.get("urgency_level"),
+                    "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                    "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                    # Metadata columns (không bao gồm sales_name vì đã gộp vào Nhân viên kinh doanh)
+                    "user_id": record.get("user_id"),
+                    "User ID": record.get("user_id"),
+                    "is_pending": record.get("is_pending"),
+                    "Trạng thái chờ": record.get("is_pending"),
+                    "accepted_by": record.get("accepted_by"),
+                    "Người nhận": record.get("accepted_by"),
+                    "accepted_at": record.get("accepted_at"),
+                    "Thời gian nhận": record.get("accepted_at"),
+                    "urgency_level": record.get("urgency_level"),
+                    "Mức độ khẩn cấp": record.get("urgency_level"),
+                    "desired_solution_time": record.get("desired_solution_time")
+                }
+                data.append(old_format)
+        else:
+            # Schema cũ - đọc từ JSON
+            cursor.execute('SELECT tracking_id, data FROM projects ORDER BY tracking_id DESC')
+            rows = cursor.fetchall()
+            conn.close()
+            
+            # Chuyển đổi từ JSON string sang dictionary
+            data = []
+            for row in rows:
+                record = json.loads(row['data'])
+                data.append(record)
+            
+            # Auto-migrate
+            print("[DB] Auto-migrating JSON to columns...")
+            migrate_json_to_columns()
+        
+        print(f"[DB] Loaded {len(data)} records from database")
+        
+        # Save to cache
+        _data_cache = data
+        _cache_loaded = True
+        
+        return data
+    
+    except Exception as e:
+        print(f"[DB] Error loading data: {e}")
+        return []
+
+
+def invalidate_cache():
+    """
+    Xóa cache để buộc load lại dữ liệu từ DB
+    Được gọi khi có thay đổi dữ liệu (add, update, delete)
+    """
+    global _data_cache, _cache_loaded
+    _data_cache = None
+    _cache_loaded = False
+    print("[DB] Cache invalidated")
+
+
+def save_all(data):
+    """
+    Lưu tất cả dữ liệu vào DB
+    Args:
+        data: list of dictionaries (danh sách records)
+    Returns: bool
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Xóa tất cả dữ liệu cũ
+        cursor.execute('DELETE FROM projects')
+        
+        # Thêm dữ liệu mới vào columns
+        for record in data:
+            tracking_id = record.get('Tracking ID')
+            
+            # Map từ format cũ sang columns
+            # Hỗ trợ nhiều key: 'Mã mẹ ', 'Mã mẹ', 'Mã thành phẩm (Mã mẹ)'
+            ma_me = record.get('Mã mẹ ') or record.get('Mã mẹ') or record.get('Mã thành phẩm (Mã mẹ)', '')
+            nguoi_lien_he = record.get('Người liên hệ\n(KH)') or record.get('Người liên hệ (KH)', '')
+            
+            # Xử lý nhân viên KD - hỗ trợ cả 'Nhân viên KD' và 'Nhân viên kinh doanh'
+            nhan_vien_kd = record.get('Nhân viên KD') or record.get('Nhân viên kinh doanh') or ''
+            
+            values = [
+                tracking_id,
+                record.get('Ngày'),
+                record.get('Khách hàng'),
+                nhan_vien_kd,  # Sử dụng biến đã xử lý
+                record.get('Tên sản phẩm'),
+                record.get('Quy cách'),
+                nguoi_lien_he,
+                record.get('Số lượng'),
+                record.get('Mã PO'),
+                record.get('Mã bản vẽ'),
+                record.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+                ma_me,
+                record.get('Loại sản phẩm'),
+                record.get('Nhân viên thiết kế'),
+                record.get('Tình trạng hoàn thành dự án'),
+                record.get('Thời gian mong muốn có bản vẽ'),
+                record.get('Thời gian hoàn thành kế hoạch'),
+                None, None, 'no', None, None, None
+            ]
+            
+            placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+            insert_cols = ', '.join(PROJECT_COLUMNS)
+            
+            cursor.execute(
+                f"INSERT INTO projects ({insert_cols}) VALUES ({placeholders})",
+                values
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        # Invalidate cache
+        invalidate_cache()
+        
+        print(f"[DB] Saved {len(data)} records to database")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error saving data: {e}")
+        return False
+
+
+def add_record(record):
+    """
+    Thêm một bản ghi mới
+    Args:
+        record: dictionary (bản ghi mới)
+    Returns:
+        record với tracking_id mới, hoặc None nếu lỗi
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Lấy tracking_id lớn nhất hiện tại
+        cursor.execute('SELECT MAX(tracking_id) as max_id FROM projects')
+        result = cursor.fetchone()
+        new_tracking_id = (result['max_id'] or 0) + 1
+        
+        # Map từ format cũ sang columns
+        # Hỗ trợ nhiều key: 'Mã mẹ ', 'Mã mẹ', 'Mã thành phẩm (Mã mẹ)'
+        ma_me = record.get('Mã mẹ ') or record.get('Mã mẹ') or record.get('Mã thành phẩm (Mã mẹ)', '')
+        nguoi_lien_he = record.get('Người liên hệ\n(KH)') or record.get('Người liên hệ (KH)', '')
+        
+        # Xử lý nhân viên KD - hỗ trợ cả 'Nhân viên KD' và 'Nhân viên kinh doanh'
+        nhan_vien_kd = record.get('Nhân viên KD') or record.get('Nhân viên kinh doanh') or ''
+        
+        values = [
+            new_tracking_id,
+            record.get('Ngày'),
+            record.get('Khách hàng'),
+            nhan_vien_kd,  # Sử dụng biến đã xử lý
+            record.get('Tên sản phẩm'),
+            record.get('Quy cách'),
+            nguoi_lien_he,
+            record.get('Số lượng'),
+            record.get('Mã PO'),
+            record.get('Mã bản vẽ'),
+            record.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+            ma_me,
+            record.get('Loại sản phẩm'),
+            record.get('Nhân viên thiết kế'),
+            record.get('Tình trạng hoàn thành dự án'),
+            record.get('Thời gian mong muốn có bản vẽ'),
+            record.get('Thời gian hoàn thành kế hoạch'),
+            record.get('sales_name'),
+            record.get('user_id'),
+            record.get('is_pending', 'no'),
+            record.get('accepted_by'),
+            record.get('accepted_at'),
+            record.get('urgency_level'),
+            record.get('desired_solution_time')
+        ]
+        
+        placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+        insert_cols = ', '.join(PROJECT_COLUMNS)
+        
+        cursor.execute(
+            f"INSERT INTO projects ({insert_cols}) VALUES ({placeholders})",
+            values
+        )
+        
+        record['Tracking ID'] = new_tracking_id
+        
+        conn.commit()
+        conn.close()
+        
+        # Invalidate cache
+        invalidate_cache()
+        
+        print(f"[DB] Added record with tracking_id={new_tracking_id}")
+        return record
+    
+    except Exception as e:
+        print(f"[DB] Error adding record: {e}")
+        return None
+
+
+def update_record(tracking_id, new_data):
+    """
+    Cập nhật một bản ghi theo tracking_id
+    Args:
+        tracking_id: int
+        new_data: dictionary (dữ liệu mới)
+    Returns:
+        bool: True nếu thành công, False nếu lỗi
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" in columns:
+            # Schema mới - update columns riêng biệt
+            # Xây dựng SET clause (không có updated_at)
+            set_clauses = []
+            values = []
+            
+            column_mapping = {
+                'Ngày': 'Created_Date',
+                'Ngày khởi tạo': 'Created_Date',
+                'Khách hàng': 'khach_hang',
+                'Nhân viên KD': 'nhan_vien_kinh_doanh',  # Thêm mapping cho frontend
+                'Nhân viên kinh doanh': 'nhan_vien_kinh_doanh',
+                'Tên sản phẩm': 'ten_san_pham',
+                'Quy cách': 'quy_cach',
+                'Người liên hệ\n(KH)': 'nguoi_lien_he_kh',
+                'Người liên hệ (KH)': 'nguoi_lien_he_kh',
+                'Số lượng': 'so_luong',
+                'Mã PO': 'ma_po',
+                'Mã bản vẽ': 'ma_ban_ve',
+                'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'ma_ban_ve',
+                'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
+                'Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
+                'Mã mẹ ': 'ma_me',
+                'Mã mẹ': 'ma_me',
+                'Mã thành phẩm (Mã mẹ)': 'ma_me',
+                'Loại sản phẩm': 'loai_san_pham',
+                'Hạng mục': 'loai_san_pham',
+                'Nhân viên thiết kế': 'nhan_vien_thiet_ke',
+                'Kỹ sư thiết kế': 'nhan_vien_thiet_ke',
+                'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
+                'Mức độ khẩn cấp': 'urgency_level',
+                'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
+                'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach',
+                'sales_name': 'sales_name',
+                'user_id': 'user_id',
+                'User ID': 'user_id',
+                'is_pending': 'is_pending',
+                'Trạng thái chờ': 'is_pending',
+                'accepted_by': 'accepted_by',
+                'Người nhận': 'accepted_by',
+                'accepted_at': 'accepted_at',
+                'Thời gian nhận': 'accepted_at',
+                'urgency_level': 'urgency_level',
+                'Mức độ khẩn cấp': 'urgency_level',
+                'desired_solution_time': 'desired_solution_time'
+            }
+            
+            for old_key, col_name in column_mapping.items():
+                if old_key in new_data:
+                    set_clauses.append(f"{col_name} = ?")
+                    values.append(new_data[old_key])
+            
+            values.append(tracking_id)
+            
+            query = f"UPDATE projects SET {', '.join(set_clauses)} WHERE tracking_id = ?"
+            cursor.execute(query, values)
+        else:
+            # Schema cũ - update JSON
+            new_data['Tracking ID'] = tracking_id
+            data_json = json.dumps(new_data, ensure_ascii=False)
+            
+            cursor.execute(
+                'UPDATE projects SET data = ?, updated_at = ? WHERE tracking_id = ?',
+                (data_json, datetime.now().isoformat(), tracking_id)
+            )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        # Invalidate cache
+        invalidate_cache()
+        
+        print(f"[DB] Updated record tracking_id={tracking_id}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error updating record: {e}")
+        return False
+
+
+def delete_records(tracking_ids):
+    """
+    Xóa các bản ghi theo danh sách tracking_ids
+    Args:
+        tracking_ids: list of int
+    Returns:
+        int: số bản ghi đã xóa
+    """
+    try:
+        if not tracking_ids:
+            return 0
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Xóa theo thứ tự giảm dần để tránh index issues
+        for tid in sorted(tracking_ids, reverse=True):
+            cursor.execute('DELETE FROM projects WHERE tracking_id = ?', (tid,))
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        # Invalidate cache
+        invalidate_cache()
+        
+        print(f"[DB] Deleted {deleted_count} records")
+        return deleted_count
+    
+    except Exception as e:
+        print(f"[DB] Error deleting records: {e}")
+        return 0
+
+
+def reindex_tracking_id():
+    """
+    Đánh lại Tracking ID cho tất cả bản ghi (bắt đầu từ 1)
+    Returns: bool
+    """
+    try:
+        # Load tất cả dữ liệu
+        all_data = load_all()
+        
+        if not all_data:
+            return True
+        
+        # Sắp xếp theo tracking_id cũ
+        all_data.sort(key=lambda x: x.get('Tracking ID', 0))
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Xóa tất cả
+        cursor.execute('DELETE FROM projects')
+        
+        # Thêm lại với tracking_id mới
+        for i, record in enumerate(all_data, start=1):
+            record['Tracking ID'] = i
+            # Hỗ trợ nhiều key: 'Mã mẹ ', 'Mã mẹ', 'Mã thành phẩm (Mã mẹ)'
+            ma_me = record.get('Mã mẹ ') or record.get('Mã mẹ') or record.get('Mã thành phẩm (Mã mẹ)', '')
+            nguoi_lien_he = record.get('Người liên hệ\n(KH)') or record.get('Người liên hệ (KH)', '')
+            
+            values = [
+                i,
+                record.get('Ngày'),
+                record.get('Khách hàng'),
+                record.get('Nhân viên kinh doanh'),
+                record.get('Tên sản phẩm'),
+                record.get('Quy cách'),
+                nguoi_lien_he,
+                record.get('Số lượng'),
+                record.get('Mã PO'),
+                record.get('Mã bản vẽ'),
+                record.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+                ma_me,
+                record.get('Loại sản phẩm'),
+                record.get('Nhân viên thiết kế'),
+                record.get('Tình trạng hoàn thành dự án'),
+                record.get('Thời gian mong muốn có bản vẽ'),
+                record.get('Thời gian hoàn thành kế hoạch'),
+                None, None, 'no', None, None, None
+            ]
+            
+            placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+            insert_cols = ', '.join(PROJECT_COLUMNS)
+            
+            cursor.execute(
+                f"INSERT INTO projects ({insert_cols}) VALUES ({placeholders})",
+                values
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Reindexed {len(all_data)} records")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error reindexing: {e}")
+        return False
+
+
+def search_data(data, search_text, columns=None):
+    """
+    Tìm kiếm trong dữ liệu
+    Args:
+        data: list of records
+        search_text: string to search
+        columns: list of columns to search in (optional)
+    Returns:
+        list: kết quả tìm kiếm
+    """
+    if not search_text:
+        return data
+    
+    search_text = search_text.lower().strip()
+    if not columns:
+        columns = []
+    
+    results = []
+    for item in data:
+        found = False
+        for key, value in item.items():
+            if value and search_text in str(value).lower():
+                found = True
+                break
+        if found:
+            results.append(item)
+    
+    return results
+
+
+def filter_data(data, column_filters):
+    """
+    Lọc dữ liệu theo column filters
+    Args:
+        data: list of records
+        column_filters: dict {column_key: [selected_values]}
+    Returns:
+        list: kết quả lọc
+    """
+    if not column_filters:
+        return data
+    
+    results = []
+    for item in data:
+        match = True
+        for column_key, selected_values in column_filters.items():
+            item_value = str(item.get(column_key, ""))
+            if item_value not in selected_values:
+                match = False
+                break
+        if match:
+            results.append(item)
+    
+    return results
+
+
+def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+    """
+    Tìm kiếm TRỰC TIẾP bằng SQL (hiệu suất cao)
+    Thay vì load all data rồi filter bằng Python, sử dụng SQL WHERE
+    
+    Args:
+        search_text: string to search
+        page: int (trang hiện tại, bắt đầu từ 1)
+        limit: int (số bản ghi mỗi trang)
+        sort_by: string (tên cột sắp xếp)
+        sort_order: string ('asc' hoặc 'desc')
+    Returns:
+        dict: {data, total, page, limit, total_pages}
+    """
+    try:
+        if not os.path.exists(DB_PATH):
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" not in columns:
+            # Schema cũ - fallback về Python filter
+            conn.close()
+            all_data = load_all()
+            filtered = search_data(all_data, search_text)
+            return get_paged_data(filtered, page, limit, sort_by, sort_order)
+        
+        # Validate limit
+        limit = min(limit, 500)
+        offset = (page - 1) * limit
+        
+        # Build search query with SQL LIKE
+        # Tìm kiếm trên nhiều cột quan trọng
+        search_columns = [
+            "khach_hang", "ten_san_pham", "quy_cach", "ma_po", 
+            "ma_ban_ve", "ma_ban_ve_ky_thuat", "ma_me",
+            "nhan_vien_kinh_doanh", "nhan_vien_thiet_ke",
+            "loai_san_pham", "tinh_trang_hoan_thanh"
+        ]
+        
+        search_pattern = f"%{search_text}%"
+        where_clauses = []
+        for col in search_columns:
+            if col in columns:
+                where_clauses.append(f"{col} LIKE ?")
+        
+        if not where_clauses:
+            where_clause = "1=1"
+            params = []
+        else:
+            where_clause = " OR ".join(where_clauses)
+            params = [search_pattern] * len(where_clauses)
+        
+        # Get total count with search
+        count_sql = f"SELECT COUNT(*) as total FROM projects WHERE {where_clause}"
+        cursor.execute(count_sql, params)
+        total = cursor.fetchone()["total"]
+        
+        if total == 0:
+            conn.close()
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        # Map sort_by
+        sort_column_map = {
+            "Tracking ID": "tracking_id",
+            "Ngày": "Created_Date",
+            "Khách hàng": "khach_hang",
+            "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+            "Tên sản phẩm": "ten_san_pham",
+            "Quy cách": "quy_cach",
+            "Số lượng": "so_luong",
+            "Mã PO": "ma_po",
+            "Mã bản vẽ": "ma_ban_ve",
+            "Loại sản phẩm": "loai_san_pham",
+            "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
+        }
+        
+        db_sort_column = sort_column_map.get(sort_by, "tracking_id")
+        order_dir = "DESC" if sort_order == "desc" else "ASC"
+        
+        # Build main query with pagination
+        query = f"""
+            SELECT * FROM projects 
+            WHERE {where_clause}
+            ORDER BY {db_sort_column} {order_dir}
+            LIMIT ? OFFSET ?
+        """
+        
+        cursor.execute(query, params + [limit, offset])
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Convert to frontend format
+        data = _convert_rows_to_format(rows)
+        
+        total_pages = (total + limit - 1) // limit
+        
+        return {
+            "data": data,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages
+        }
+    
+    except Exception as e:
+        print(f"[DB] Error in search_data_sql: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback to Python filter
+        all_data = load_all()
+        filtered = search_data(all_data, search_text)
+        return get_paged_data(filtered, page, limit, sort_by, sort_order)
+
+
+def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+    """
+    Lọc dữ liệu TRỰC TIẾP bằng SQL (hiệu suất cao)
+    
+    Args:
+        column_filters: dict {column_key: [selected_values]}
+        page: int
+        limit: int
+        sort_by: string
+        sort_order: string
+    Returns:
+        dict: {data, total, page, limit, total_pages}
+    """
+    try:
+        if not os.path.exists(DB_PATH):
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        if not column_filters:
+            return get_paged_data_sql(page, limit, sort_by, sort_order)
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" not in columns:
+            conn.close()
+            all_data = load_all()
+            filtered = filter_data(all_data, column_filters)
+            return get_paged_data(filtered, page, limit, sort_by, sort_order)
+        
+        # Validate limit
+        limit = min(limit, 500)
+        offset = (page - 1) * limit
+        
+        # Build WHERE clauses from filters
+        # Map frontend column names to DB columns
+        filter_column_map = {
+            "Khách hàng": "khach_hang",
+            "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+            "Tên sản phẩm": "ten_san_pham",
+            "Loại sản phẩm": "loai_san_pham",
+            "Mã PO": "ma_po",
+            "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
+        }
+        
+        where_clauses = []
+        params = []
+        
+        for col_key, selected_values in column_filters.items():
+            if not selected_values:
+                continue
+            
+            db_col = filter_column_map.get(col_key, col_key)
+            if db_col in columns:
+                # Use IN clause for multiple values
+                placeholders = ','.join(['?' for _ in selected_values])
+                where_clauses.append(f"{db_col} IN ({placeholders})")
+                params.extend(selected_values)
+        
+        if not where_clauses:
+            where_clause = "1=1"
+        else:
+            where_clause = " AND ".join(where_clauses)
+        
+        # Get total count
+        count_sql = f"SELECT COUNT(*) as total FROM projects WHERE {where_clause}"
+        cursor.execute(count_sql, params)
+        total = cursor.fetchone()["total"]
+        
+        if total == 0:
+            conn.close()
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        # Map sort_by
+        sort_column_map = {
+            "Tracking ID": "tracking_id",
+            "Ngày": "Created_Date",
+            "Khách hàng": "khach_hang",
+            "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+            "Tên sản phẩm": "ten_san_pham",
+            "Quy cách": "quy_cach",
+            "Số lượng": "so_luong",
+            "Mã PO": "ma_po",
+            "Mã bản vẽ": "ma_ban_ve",
+            "Loại sản phẩm": "loai_san_pham",
+            "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
+        }
+        
+        db_sort_column = sort_column_map.get(sort_by, "tracking_id")
+        order_dir = "DESC" if sort_order == "desc" else "ASC"
+        
+        # Build main query
+        query = f"""
+            SELECT * FROM projects 
+            WHERE {where_clause}
+            ORDER BY {db_sort_column} {order_dir}
+            LIMIT ? OFFSET ?
+        """
+        
+        cursor.execute(query, params + [limit, offset])
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Convert to frontend format
+        data = _convert_rows_to_format(rows)
+        
+        total_pages = (total + limit - 1) // limit
+        
+        return {
+            "data": data,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages
+        }
+    
+    except Exception as e:
+        print(f"[DB] Error in filter_data_sql: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback to Python filter
+        all_data = load_all()
+        filtered = filter_data(all_data, column_filters)
+        return get_paged_data(filtered, page, limit, sort_by, sort_order)
+
+
+def ensure_indexes():
+    """
+    Đảm bảo các indexes cần thiết tồn tại trong database
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Các indexes cần thiết cho tìm kiếm/sắp xếp
+        indexes = [
+            ("idx_projects_khach_hang", "projects", "khach_hang"),
+            ("idx_projects_ten_san_pham", "projects", "ten_san_pham"),
+            ("idx_projects_nhan_vien_kinh_doanh", "projects", "nhan_vien_kinh_doanh"),
+            ("idx_projects_ma_po", "projects", "ma_po"),
+            ("idx_projects_loai_san_pham", "projects", "loai_san_pham"),
+            ("idx_projects_tinh_trang_hoan_thanh", "projects", "tinh_trang_hoan_thanh"),
+        ]
+        
+        for index_name, table_name, column_name in indexes:
+            try:
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}({column_name})")
+            except sqlite3.OperationalError as e:
+                # Index có thể đã tồn tại
+                pass
+        
+        conn.commit()
+        conn.close()
+        
+        print("[DB] Database indexes ensured")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error ensuring indexes: {e}")
+        return False
+
+
+def _convert_rows_to_format(rows):
+    """
+    Convert database rows to frontend format (tối ưu - chỉ tạo keys cần thiết)
+    Frontend chỉ sử dụng 20 keys:
+    - Tracking ID, Ngày, Khách hàng, Nhân viên KD, Tên sản phẩm
+    - Quy cách, Người liên hệ\n(KH), Số lượng, Mã PO, Mã bản vẽ
+    - Mã bản vẽ kỹ thuật (sau khi đặt hàng), Mã mẹ, Loại sản phẩm
+    - Nhân viên thiết kế, Tình trạng hoàn thành dự án, Tính cấp bách
+    - Thời gian mong muốn có bản vẽ, Thời gian hoàn thành kế hoạch
+    - is_pending, accepted_by
+    """
+    data = []
+    for row in rows:
+        record = dict(row)
+        sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+        
+        # Tối ưu: Chỉ tạo 20 keys cần thiết cho frontend
+        # Bao gồm cả "Nhân viên KD" để frontend hiển thị đúng
+        old_format = {
+            "Tracking ID": record.get("tracking_id"),
+            "Ngày": record.get("Created_Date"),
+            "Khách hàng": record.get("khach_hang"),
+            "Nhân viên KD": sales_name_value,  # Thêm cho frontend
+            "Nhân viên kinh doanh": sales_name_value,  # Giữ lại để tương thích
+            "Tên sản phẩm": record.get("ten_san_pham"),
+            "Quy cách": record.get("quy_cach"),
+            "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+            "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+            "Số lượng": record.get("so_luong"),
+            "Mã PO": record.get("ma_po"),
+            "Mã bản vẽ": record.get("ma_ban_ve"),
+            "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+            "Mã mẹ": record.get("ma_me"),
+            "Loại sản phẩm": record.get("loai_san_pham"),
+            "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+            "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+            "Tính cấp bách": record.get("urgency_level"),
+            "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+            "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+            "is_pending": record.get("is_pending"),
+            "accepted_by": record.get("accepted_by")
+        }
+        data.append(old_format)
+    
+    return data
+
+
+def get_paged_data(data, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+    """
+    Lấy dữ liệu phân trang với sắp xếp
+    Args:
+        data: list of records
+        page: int (trang hiện tại, bắt đầu từ 1)
+        limit: int (số bản ghi mỗi trang)
+        sort_by: string (tên cột sắp xếp)
+        sort_order: string ('asc' hoặc 'desc')
+    Returns:
+        dict: {data, total, page, limit, total_pages}
+    """
+    # Sắp xếp dữ liệu
+    reverse = (sort_order == "desc")
+    
+    if sort_by == "Tracking ID":
+        sorted_data = sorted(data, key=lambda x: int(x.get(sort_by, 0)), reverse=reverse)
+    else:
+        sorted_data = sorted(data, key=lambda x: str(x.get(sort_by, "")).lower(), reverse=reverse)
+    
+    # Phân trang
+    start_idx = (page - 1) * limit
+    end_idx = min(start_idx + limit, len(sorted_data))
+    paged_data = sorted_data[start_idx:end_idx]
+    
+    return {
+        "data": paged_data,
+        "total": len(sorted_data),
+        "page": page,
+        "limit": limit,
+        "total_pages": (len(sorted_data) + limit - 1) // limit
+    }
+
+
+def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+    """
+    Lấy dữ liệu phân trang TRỰC TIẾP từ SQL (hiệu suất cao hơn)
+    Thay vì load all data rồi phân trang ở Python, thực hiện LIMIT/OFFSET ở SQL
+    
+    Args:
+        page: int (trang hiện tại, bắt đầu từ 1)
+        limit: int (số bản ghi mỗi trang)
+        sort_by: string (tên cột sắp xếp)
+        sort_order: string ('asc' hoặc 'desc')
+    Returns:
+        dict: {data, total, page, limit, total_pages}
+    """
+    try:
+        if not os.path.exists(DB_PATH):
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" not in columns:
+            # Schema cũ - fallback về phân trang Python
+            conn.close()
+            data = load_all()
+            return get_paged_data(data, page, limit, sort_by, sort_order)
+        
+        # Map sort_by từ format client sang database column
+        sort_column_map = {
+            "Tracking ID": "tracking_id",
+            "Ngày": "Created_Date",
+            "Khách hàng": "khach_hang",
+            "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+            "Tên sản phẩm": "ten_san_pham",
+            "Quy cách": "quy_cach",
+            "Số lượng": "so_luong",
+            "Mã PO": "ma_po",
+            "Mã bản vẽ": "ma_ban_ve",
+            "Loại sản phẩm": "loai_san_pham",
+            "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
+        }
+        
+        db_sort_column = sort_column_map.get(sort_by, "tracking_id")
+        
+        # Validate limit to prevent excessive memory usage
+        limit = min(limit, 500)  # Max 500 records per page
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Get total count first (efficient with SQL COUNT)
+        cursor.execute("SELECT COUNT(*) as total FROM projects")
+        total = cursor.fetchone()["total"]
+        
+        if total == 0:
+            conn.close()
+            return {"data": [], "total": 0, "page": page, "limit": limit, "total_pages": 0}
+        
+        # Build query with SQL LIMIT/OFFSET and ORDER BY
+        order_dir = "DESC" if sort_order == "desc" else "ASC"
+        
+        # Use parameterized query to prevent SQL injection
+        query = f"""
+            SELECT * FROM projects 
+            ORDER BY {db_sort_column} {order_dir}
+            LIMIT ? OFFSET ?
+        """
+        
+        cursor.execute(query, (limit, offset))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Convert to format compatible with frontend (reuse optimized function)
+        data = _convert_rows_to_format(rows)
+        
+        total_pages = (total + limit - 1) // limit
+        
+        return {
+            "data": data,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages
+        }
+    
+    except Exception as e:
+        print(f"[DB] Error in get_paged_data_sql: {e}")
+        # Fallback to Python-based pagination
+        data = load_all()
+        return get_paged_data(data, page, limit, sort_by, sort_order)
+
+
+def migrate_from_json(json_path='DB.json', backup=True):
+    """
+    Migration dữ liệu từ JSON file sang SQLite database
+    Args:
+        json_path: đường dẫn file JSON cũ
+        backup: bool, có backup file JSON cũ không
+    Returns:
+        bool: True nếu thành công
+    """
+    try:
+        print(f"[DB] Starting migration from {json_path} to {DB_PATH}")
+        
+        # Kiểm tra file JSON tồn tại
+        if not os.path.exists(json_path):
+            print(f"[DB] JSON file {json_path} not found, creating new database")
+            init_db()
+            return True
+        
+        # Load dữ liệu từ JSON
+        for encoding in ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1']:
+            try:
+                with open(json_path, 'r', encoding=encoding) as f:
+                    raw_data = f.read()
+                    clean_data = ''.join(c for c in raw_data if c.isprintable() or c in ['\n', '\r'])
+                    data = json.loads(clean_data)
+                    print(f"[DB] Loaded {len(data)} records from JSON with encoding {encoding}")
+                    break
+            except Exception as e:
+                print(f"[DB] Try encoding {encoding} failed: {e}")
+                continue
+        else:
+            print(f"[DB] Failed to load JSON file")
+            return False
+        
+        # Backup file JSON cũ nếu cần
+        if backup:
+            backup_path = json_path + '.backup'
+            try:
+                os.rename(json_path, backup_path)
+                print(f"[DB] Backed up JSON to {backup_path}")
+            except Exception as e:
+                print(f"[DB] Warning: Could not backup JSON file: {e}")
+        
+        # Khởi tạo database mới
+        init_db()
+        
+        # Import dữ liệu
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        for record in data:
+            tracking_id = record.get('Tracking ID')
+            data_json = json.dumps(record, ensure_ascii=False)
+            cursor.execute(
+                'INSERT INTO projects (tracking_id, data) VALUES (?, ?)',
+                (tracking_id, data_json)
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Migration completed. {len(data)} records migrated.")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Migration error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+# Các hàm bổ sung cho SQLite-specific queries
+
+def get_record_by_tracking_id(tracking_id):
+    """
+    Lấy một bản ghi theo tracking_id
+    Args:
+        tracking_id: int
+    Returns:
+        dict hoặc None
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if "Created_Date" in columns:
+            # Schema mới - đọc trực tiếp từ columns
+            cursor.execute('SELECT * FROM projects WHERE tracking_id = ?', (tracking_id,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                record = dict(row)
+                # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
+                sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                
+                # Chuyển về format cũ để tương thích
+                return {
+                    "Tracking ID": record.get("tracking_id"),
+                    "Ngày": record.get("Created_Date"),
+                    "Ngày khởi tạo": record.get("Created_Date"),
+                    "Khách hàng": record.get("khach_hang"),
+                    "Nhân viên kinh doanh": sales_name_value,
+                    "Tên sản phẩm": record.get("ten_san_pham"),
+                    "Quy cách": record.get("quy_cach"),
+                    "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                    "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                    "Số lượng": record.get("so_luong"),
+                    "Mã PO": record.get("ma_po"),
+                    "Mã bản vẽ": record.get("ma_ban_ve"),
+                    "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                    "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã mẹ ": record.get("ma_me"),
+                    "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                    "Loại sản phẩm": record.get("loai_san_pham"),
+                    "Hạng mục": record.get("loai_san_pham"),
+                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                    "Tính cấp bách": record.get("tinh_cap_bach"),
+                    "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                    "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                    "user_id": record.get("user_id"),
+                    "User ID": record.get("user_id"),
+                    "is_pending": record.get("is_pending"),
+                    "Trạng thái chờ": record.get("is_pending"),
+                    "accepted_by": record.get("accepted_by"),
+                    "Người nhận": record.get("accepted_by"),
+                    "accepted_at": record.get("accepted_at"),
+                    "Thời gian nhận": record.get("accepted_at"),
+                    "urgency_level": record.get("urgency_level"),
+                    "Mức độ khẩn cấp": record.get("urgency_level"),
+                    "desired_solution_time": record.get("desired_solution_time")
+                }
+            return None
+        else:
+            # Schema cũ - đọc từ JSON
+            cursor.execute('SELECT data FROM projects WHERE tracking_id = ?', (tracking_id,))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if result:
+                return json.loads(result['data'])
+            return None
+    
+    except Exception as e:
+        print(f"[DB] Error getting record: {e}")
+        return None
+
+
+def get_record_by_id(tracking_id):
+    """
+    Alias for get_record_by_tracking_id - Lấy một bản ghi theo tracking_id
+    Args:
+        tracking_id: int
+    Returns:
+        dict hoặc None
+    """
+    return get_record_by_tracking_id(tracking_id)
+
+
+def count_records():
+    """
+    Đếm tổng số bản ghi
+    Returns:
+        int
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(*) as count FROM projects')
+        result = cursor.fetchone()
+        
+        conn.close()
+        
+        return result['count'] if result else 0
+    
+    except Exception as e:
+        print(f"[DB] Error counting records: {e}")
+        return 0
+
+
+def vacuum():
+    """
+    Tối ưu hóa database (shrink file size)
+    Returns:
+        bool
+    """
+    try:
+        conn = get_connection()
+        conn.execute('VACUUM')
+        conn.close()
+        print(f"[DB] Database vacuumed")
+        return True
+    except Exception as e:
+        print(f"[DB] Vacuum error: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    # Test khi chạy trực tiếp
+    print("Testing DB Helper V2...")
+    
+    # Migrate to V2
+    migrate_to_v2()
+    
+    # Initialize database
+    init_db()
+    init_db_v2()
+    
+    # Load data
+    data = load_all()
+    print(f"Loaded {len(data)} records")
+    
+    # Count records
+    count = count_records()
+    print(f"Total records: {count}")
+
+
+# ==================== USER MANAGEMENT FUNCTIONS ====================
+
+def add_user(user_data: Dict[str, Any]) -> Optional[int]:
+    """
+    Thêm user mới vào database
+    Args:
+        user_data: dict chứa username, passwords, role, full_name, employee_id, department
+    Returns:
+        user_id mới hoặc None nếu lỗi
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Lấy thời gian tạo user
+        created_at = datetime.now().isoformat()
+        
+        cursor.execute('''
+            INSERT INTO users (username, passwords, role, full_name, employee_id, department, status, user_created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
+        ''', (
+            user_data['username'],
+            user_data['passwords'],
+            user_data.get('role', 'sales'),
+            user_data['full_name'],
+            user_data.get('employee_id'),
+            user_data.get('department', 'Sales'),
+            created_at
+        ))
+        
+        user_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Added user {user_data['username']} with id={user_id}, created_at={created_at}")
+        return user_id
+    
+    except Exception as e:
+        print(f"[DB] Error adding user: {e}")
+        return None
+
+
+def get_user_by_username(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Lấy thông tin user theo username
+    Args:
+        username: tên đăng nhập
+    Returns:
+        dict chứa thông tin user hoặc None
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Tìm user không phân biệt hoa thường bằng COLLATE NOCASE
+        cursor.execute('SELECT * FROM users WHERE username = ? COLLATE NOCASE', (username,))
+        result = cursor.fetchone()
+        
+        conn.close()
+        
+        if result:
+            return dict(result)
+        return None
+    
+    except Exception as e:
+        print(f"[DB] Error getting user: {e}")
+        return None
+
+
+def get_all_users() -> List[Dict[str, Any]]:
+    """
+    Lấy danh sách tất cả users (bao gồm permissions)
+    Returns:
+        list of dict
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM users ORDER BY user_id DESC')
+        results = cursor.fetchall()
+        
+        # Fetch all permissions first to avoid cursor issues
+        cursor.execute('SELECT user_id, permission FROM user_permissions')
+        all_permissions = cursor.fetchall()
+        
+        # Build permissions dict
+        permissions_dict = {}
+        for perm_row in all_permissions:
+            uid = perm_row['user_id']
+            perm = perm_row['permission']
+            if uid not in permissions_dict:
+                permissions_dict[uid] = []
+            permissions_dict[uid].append(perm)
+        
+        users = []
+        for row in results:
+            user_dict = dict(row)
+            user_id = user_dict.get('user_id')
+            
+            # Get permissions from dict
+            permissions = permissions_dict.get(user_id, [])
+            
+            # Nếu không có permissions trong DB, lấy mặc định theo role
+            if not permissions and user_dict.get('role'):
+                permissions = get_default_permissions(user_dict['role'])
+            
+            user_dict['permissions'] = permissions
+            users.append(user_dict)
+        
+        conn.close()
+        
+        return users
+    
+    except Exception as e:
+        print(f"[DB] Error getting all users: {e}")
+        return []
+
+
+def update_user(user_id: int, user_data: Dict[str, Any]) -> bool:
+    """
+    Cập nhật thông tin user
+    Args:
+        user_id: ID của user
+        user_data: dict chứa thông tin cần cập nhật
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Build update query dynamically
+        allowed_fields = ['passwords', 'role', 'full_name', 'employee_id', 'department', 'status', 'email', 'phone']
+        updates = []
+        values = []
+        
+        for field in allowed_fields:
+            if field in user_data:
+                updates.append(f"{field} = ?")
+                values.append(user_data[field])
+        
+        if not updates:
+            return False
+        
+        values.append(user_id)
+        
+        query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = ?"
+        cursor.execute(query, values)
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        print(f"[DB] Updated user {user_id}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error updating user: {e}")
+        return False
+
+
+def delete_user(user_id: int) -> bool:
+    """
+    Xóa user
+    Args:
+        user_id: ID của user
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        print(f"[DB] Deleted user {user_id}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error deleting user: {e}")
+        return False
+
+
+def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+    """
+    Xác thực user đăng nhập
+    Args:
+        username: tên đăng nhập
+        password: mật khẩu
+    Returns:
+        dict chứa thông tin user (không có password) hoặc None
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, username, role, full_name, employee_id, department, status, last_login
+            FROM users 
+            WHERE username = ? AND passwords = ? AND status = 'active'
+        ''', (username.lower(), password))
+        
+        result = cursor.fetchone()
+        
+        # Update last_login
+        if result:
+            cursor.execute(
+                'UPDATE users SET last_login = ? WHERE user_id = ?',
+                (datetime.now().isoformat(), result['user_id'])
+            )
+            conn.commit()
+        
+        conn.close()
+        
+        if result:
+            return dict(result)
+        return None
+    
+    except Exception as e:
+        print(f"[DB] Error authenticating user: {e}")
+        return None
+
+
+# ==================== PERMISSION MANAGEMENT FUNCTIONS ====================
+
+# Default permissions cho mỗi role
+DEFAULT_PERMISSIONS = {
+    'sales': ['create_code', 'view_history', 'export', 'create_sales_record'],
+    'engineer': ['create_code', 'view_history', 'job_accept'],
+    'admin': ['create_code', 'view_history', 'delete_history', 'export', 'admin', 'job_accept'],
+    'IT': ['create_code', 'view_history', 'delete_history', 'export', 'admin', 'job_accept'],
+    'Pur': ['view_history', 'export']
+}
+
+# Tất cả permissions có thể có
+ALL_PERMISSIONS = ['create_code', 'view_history', 'delete_history', 'export', 'admin', 'job_accept']
+
+
+def get_default_permissions(role: str) -> List[str]:
+    """
+    Lấy danh sách permissions mặc định cho một role
+    Args:
+        role: tên role ('sales', 'engineer', 'admin', 'IT', 'Pur')
+    Returns:
+        list of permissions
+    """
+    return DEFAULT_PERMISSIONS.get(role, ['view_history'])
+
+
+def add_user_permission(user_id: int, permission: str) -> bool:
+    """
+    Thêm một permission cho user
+    Args:
+        user_id: ID của user
+        permission: tên permission
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'INSERT OR IGNORE INTO user_permissions (user_id, permission) VALUES (?, ?)',
+            (user_id, permission)
+        )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        print(f"[DB] Added permission '{permission}' for user {user_id}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error adding user permission: {e}")
+        return False
+
+
+def remove_user_permission(user_id: int, permission: str) -> bool:
+    """
+    Xóa một permission của user
+    Args:
+        user_id: ID của user
+        permission: tên permission
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'DELETE FROM user_permissions WHERE user_id = ? AND permission = ?',
+            (user_id, permission)
+        )
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        print(f"[DB] Removed permission '{permission}' for user {user_id}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error removing user permission: {e}")
+        return False
+
+
+def get_user_permissions(user_id: int) -> List[str]:
+    """
+    Lấy tất cả permissions của một user
+    Args:
+        user_id: ID của user
+    Returns:
+        list of permissions
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT permission FROM user_permissions WHERE user_id = ?',
+            (user_id,)
+        )
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        permissions = [row['permission'] for row in results]
+        print(f"[DB] Got {len(permissions)} permissions for user {user_id}")
+        return permissions
+    
+    except Exception as e:
+        print(f"[DB] Error getting user permissions: {e}")
+        return []
+
+
+def set_user_permissions(user_id: int, permissions: List[str]) -> bool:
+    """
+    Đặt tất cả permissions cho user (thay thế permissions cũ)
+    Args:
+        user_id: ID của user
+        permissions: list of permissions
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Xóa tất cả permissions cũ
+        cursor.execute('DELETE FROM user_permissions WHERE user_id = ?', (user_id,))
+        
+        # Thêm permissions mới
+        for permission in permissions:
+            cursor.execute(
+                'INSERT INTO user_permissions (user_id, permission) VALUES (?, ?)',
+                (user_id, permission)
+            )
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Set {len(permissions)} permissions for user {user_id}")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error setting user permissions: {e}")
+        return False
+
+
+def delete_user_permissions(user_id: int) -> bool:
+    """
+    Xóa tất cả permissions của một user
+    Args:
+        user_id: ID của user
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM user_permissions WHERE user_id = ?', (user_id,))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Deleted all permissions for user {user_id}")
+        return True
+    
+    except Exception as e:
+        print(f"[DB] Error deleting user permissions: {e}")
+        return False
+
+
+def has_user_permission(user_id: int, permission: str) -> bool:
+    """
+    Kiểm tra user có một permission cụ thể không
+    Args:
+        user_id: ID của user
+        permission: tên permission
+    Returns:
+        True nếu có permission
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT 1 FROM user_permissions WHERE user_id = ? AND permission = ?',
+            (user_id, permission)
+        )
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result is not None
+    
+    except Exception as e:
+        print(f"[DB] Error checking user permission: {e}")
+        return False
+
+
+def assign_default_permissions(user_id: int, role: str) -> bool:
+    """
+    Gán permissions mặc định cho user dựa trên role
+    Args:
+        user_id: ID của user
+        role: role của user
+    Returns:
+        True nếu thành công
+    """
+    permissions = get_default_permissions(role)
+    return set_user_permissions(user_id, permissions)
+
+
+def get_user_with_permissions(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Lấy thông tin user bao gồm permissions
+    Args:
+        username: tên đăng nhập
+    Returns:
+        dict chứa thông tin user và permissions, hoặc None
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Lấy thông tin user - tìm không phân biệt hoa thường
+        cursor.execute('SELECT * FROM users WHERE username = ? COLLATE NOCASE', (username,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return None
+        
+        user_dict = dict(user)
+        user_id = user_dict.get('user_id')
+        
+        # Lấy permissions
+        cursor.execute('SELECT permission FROM user_permissions WHERE user_id = ?', (user_id,))
+        permissions = [row['permission'] for row in cursor.fetchall()]
+        
+        # Nếu không có permissions trong DB, lấy mặc định theo role
+        if not permissions and user_dict.get('role'):
+            permissions = get_default_permissions(user_dict['role'])
+        
+        user_dict['permissions'] = permissions
+        conn.close()
+        
+        return user_dict
+    
+    except Exception as e:
+        print(f"[DB] Error getting user with permissions: {e}")
+        return None
+
+
+def ensure_default_users():
+    """
+    Đảm bảo các users mặc định tồn tại trong database.
+    Hàm này được gọi khi server khởi động để tạo các users mặc định nếu chưa tồn tại.
+    Users mặc định bao gồm: admin, ENG001-ENG006
+    """
+    # Danh sách users mặc định
+    default_users = [
+        {
+            'username': 'admin',
+            'passwords': '123',
+            'role': 'admin',
+            'full_name': 'Administrator',
+            'employee_id': None,
+            'department': 'Administration'
+        },
+        {
+            'username': 'ENG001',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 001',
+            'employee_id': 'ENG001',
+            'department': 'Engineering'
+        },
+        {
+            'username': 'ENG002',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 002',
+            'employee_id': 'ENG002',
+            'department': 'Engineering'
+        },
+        {
+            'username': 'ENG003',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 003',
+            'employee_id': 'ENG003',
+            'department': 'Engineering'
+        },
+        {
+            'username': 'ENG004',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 004',
+            'employee_id': 'ENG004',
+            'department': 'Engineering'
+        },
+        {
+            'username': 'ENG005',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 005',
+            'employee_id': 'ENG005',
+            'department': 'Engineering'
+        },
+        {
+            'username': 'ENG006',
+            'passwords': '123',
+            'role': 'engineer',
+            'full_name': 'Engineer 006',
+            'employee_id': 'ENG006',
+            'department': 'Engineering'
+        }
+    ]
+    
+    created_count = 0
+    for user_data in default_users:
+        # Kiểm tra xem user đã tồn tại chưa
+        existing = get_user_by_username(user_data['username'])
+        if not existing:
+            # Tạo user mới
+            user_id = add_user(user_data)
+            if user_id:
+                # Gán permissions mặc định theo role
+                assign_default_permissions(user_id, user_data['role'])
+                created_count += 1
+                print(f"[DB] Created default user: {user_data['username']} with role: {user_data['role']}")
+        else:
+            print(f"[DB] Default user already exists: {user_data['username']}")
+    
+    if created_count > 0:
+        print(f"[DB] Created {created_count} default users")
+    else:
+        print("[DB] All default users already exist")
+    
+    return created_count
+
+
+# ==================== CUSTOMER MANAGEMENT FUNCTIONS (DEPRECATED) ====================
+# Các hàm dưới đây đã bị loại bỏ khỏi chức năng chính.
+# Chúng được giữ lại để tương thích nhưng không còn được sử dụng bởi client.
+
+def add_customer(customer_data: Dict[str, Any]) -> Optional[int]:
+    """
+    DEPRECATED: Chức năng quản lý khách hàng đã bị loại bỏ.
+    Các hàm này được giữ lại để tương thích nhưng không còn được sử dụng.
+    
+    Args:
+        customer_data: dict chứa name, contact_person, phone, email, address
+    Returns:
+        customer id mới hoặc None nếu lỗi
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR IGNORE INTO customers (name, contact_person, phone, email, address)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            customer_data['name'],
+            customer_data.get('contact_person'),
+            customer_data.get('phone'),
+            customer_data.get('email'),
+            customer_data.get('address')
+        ))
+        
+        customer_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        
+        if customer_id and customer_id > 0:
+            print(f"[DB] Added customer {customer_data['name']} with id={customer_id}")
+            return customer_id
+        else:
+            # Customer already exists (due to UNIQUE constraint)
+            print(f"[DB] Customer {customer_data['name']} already exists")
+            return None
+    
+    except Exception as e:
+        print(f"[DB] Error adding customer: {e}")
+        return None
+
+
+def get_all_customers() -> List[Dict[str, Any]]:
+    """
+    DEPRECATED: Lấy danh sách tất cả khách hàng
+    
+    Returns:
+        list of dict
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM customers ORDER BY name')
+        results = cursor.fetchall()
+        
+        conn.close()
+        
+        return [dict(row) for row in results]
+    
+    except Exception as e:
+        print(f"[DB] Error getting customers: {e}")
+        return []
+
+
+def get_customer_names() -> List[str]:
+    """
+    DEPRECATED: Lấy danh sách tên khách hàng (cho ComboBox)
+    
+    Returns:
+        list of strings
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT name FROM customers ORDER BY name')
+        results = cursor.fetchall()
+        
+        conn.close()
+        
+        return [row['name'] for row in results]
+    
+    except Exception as e:
+        print(f"[DB] Error getting customer names: {e}")
+        return []
+
+
+def search_customers(search_text: str) -> List[str]:
+    """
+    DEPRECATED: Tìm kiếm khách hàng theo tên
+    
+    Args:
+        search_text: từ khóa tìm kiếm
+    Returns:
+        list of matching customer names
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            'SELECT name FROM customers WHERE name LIKE ? ORDER BY name',
+            (f'%{search_text}%',)
+        )
+        results = cursor.fetchall()
+        
+        conn.close()
+        
+        return [row['name'] for row in results]
+    
+    except Exception as e:
+        print(f"[DB] Error searching customers: {e}")
+        return []
+
+
+# ==================== NOTICE/PENDING PROJECT FUNCTIONS ====================
+
+def get_pending_notices(user_id: Union[int, None] = None) -> List[Dict[str, Any]]:
+    """
+    Lấy danh sách pending notices (is_pending = 'yes')
+    Args:
+        user_id: nếu specified, chỉ lấy notices của user đó
+    Returns:
+        list of pending projects
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_new_schema = "Created_Date" in columns
+        
+        if user_id:
+            cursor.execute('''
+                SELECT * FROM projects 
+                WHERE is_pending = 'yes' AND user_id = ?
+                ORDER BY tracking_id DESC
+            ''', (user_id,))
+        else:
+            cursor.execute('''
+                SELECT * FROM projects 
+                WHERE is_pending = 'yes'
+                ORDER BY tracking_id DESC
+            ''')
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        notices = []
+        for row in results:
+            record = dict(row)
+            
+            if has_new_schema:
+                # Schema mới - convert to old format
+                # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
+                sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                
+                old_format = {
+                    "Tracking ID": record.get("tracking_id"),
+                    "Ngày": record.get("Created_Date"),
+                    "Ngày khởi tạo": record.get("Created_Date"),
+                    "Khách hàng": record.get("khach_hang"),
+                    "Nhân viên kinh doanh": sales_name_value,
+                    "Tên sản phẩm": record.get("ten_san_pham"),
+                    "Quy cách": record.get("quy_cach"),
+                    "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                    "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                    "Số lượng": record.get("so_luong"),
+                    "Mã PO": record.get("ma_po"),
+                    "Mã bản vẽ": record.get("ma_ban_ve"),
+                    "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                    "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã mẹ ": record.get("ma_me"),
+                    "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                    "Loại sản phẩm": record.get("loai_san_pham"),
+                    "Hạng mục": record.get("loai_san_pham"),
+                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                    "Tính cấp bách": record.get("tinh_cap_bach"),
+                    "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                    "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                    "user_id": record.get("user_id"),
+                    "User ID": record.get("user_id"),
+                    "is_pending": record.get("is_pending"),
+                    "Trạng thái chờ": record.get("is_pending"),
+                    "accepted_by": record.get("accepted_by"),
+                    "Người nhận": record.get("accepted_by"),
+                    "accepted_at": record.get("accepted_at"),
+                    "Thời gian nhận": record.get("accepted_at"),
+                    "urgency_level": record.get("urgency_level"),
+                    "Mức độ khẩn cấp": record.get("urgency_level"),
+                    "desired_solution_time": record.get("desired_solution_time")
+                }
+                notices.append(old_format)
+            else:
+                # Schema cũ - parse JSON
+                # Schema cũ - parse JSON
+                if record.get('data'):
+                    data_parsed = json.loads(record['data'])
+                    notices.append(data_parsed)
+                else:
+                    notices.append(record)
+        
+        return notices
+    
+    except Exception as e:
+        print(f"[DB] Error getting pending notices: {e}")
+        return []
+
+
+def get_pending_count(user_id: Union[int, None] = None) -> int:
+    """
+    Đếm số pending notices
+    Args:
+        user_id: nếu specified, chỉ đếm notices của user đó
+    Returns:
+        số lượng pending projects
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        if user_id:
+            cursor.execute(
+                'SELECT COUNT(*) FROM projects WHERE is_pending = \'yes\' AND user_id = ?',
+                (user_id,)
+            )
+        else:
+            cursor.execute(
+                'SELECT COUNT(*) FROM projects WHERE is_pending = \'yes\''
+            )
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count
+    
+    except Exception as e:
+        print(f"[DB] Error getting pending count: {e}")
+        return 0
+
+
+def accept_job(tracking_id: int, engineer_name: str) -> bool:
+    """
+    Engineer nhận job từ pending notice
+    Args:
+        tracking_id: ID của project
+        engineer_name: tên engineer nhận job
+    Returns:
+        True nếu thành công
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Update project - chuyển từ 'yes' (pending) sang 'no' (accepted)
+        cursor.execute('''
+            UPDATE projects 
+            SET is_pending = 'no', accepted_by = ?, accepted_at = ?
+            WHERE tracking_id = ? AND is_pending = 'yes'
+        ''', (engineer_name, datetime.now().isoformat(), tracking_id))
+        
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        
+        print(f"[DB] Accept job tracking_id={tracking_id} by {engineer_name}, success={success}")
+        return success
+    
+    except Exception as e:
+        print(f"[DB] Error accepting job: {e}")
+        return False
+
+
+def add_sales_record(record_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Thêm bản ghi mới từ sales (với đầy đủ thông tin)
+    Args:
+        record_data: dict chứa tất cả thông tin project
+    Returns:
+        record với tracking_id mới hoặc None nếu lỗi
+    """
+    try:
+        # LOG: Debug logging cho Created_Date (Ngày khởi tạo)
+        # print(f"[DEBUG DB] ========== ADD SALES RECORD ==========")
+        # print(f"[DEBUG DB] Input 'Ngày' (từ New_Sales): {record_data.get('Ngày')}")
+        # print(f"[DEBUG DB] Input 'user_id': {record_data.get('user_id')}")
+        # print(f"[DEBUG DB] Input 'Khách hàng': {record_data.get('Khách hàng')}")
+        # print(f"[DEBUG DB] ======================================")
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Lấy tracking_id mới
+        cursor.execute('SELECT MAX(tracking_id) as max_id FROM projects')
+        result = cursor.fetchone()
+        new_tracking_id = (result['max_id'] or 0) + 1
+        
+        # Map từ format cũ sang columns
+        ngay_value = record_data.get('Ngày')
+        values = [
+            new_tracking_id,
+            ngay_value,  # Created_Date
+            record_data.get('Khách hàng'),
+            record_data.get('Nhân viên kinh doanh'),
+            record_data.get('Tên sản phẩm'),
+            record_data.get('Quy cách'),
+            record_data.get('Người liên hệ\n(KH)') or record_data.get('Người liên hệ (KH)'),
+            record_data.get('Số lượng'),
+            record_data.get('Mã PO'),
+            record_data.get('Mã bản vẽ'),
+            record_data.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+            record_data.get('Mã mẹ ') or record_data.get('Mã mẹ') or record_data.get('Mã thành phẩm (Mã mẹ)', ''),
+            record_data.get('Loại sản phẩm'),
+            record_data.get('Nhân viên thiết kế'),
+            record_data.get('Tình trạng hoàn thành dự án'),
+            record_data.get('Tính cấp bách'),
+            record_data.get('Thời gian mong muốn có bản vẽ'),
+            record_data.get('Thời gian hoàn thành kế hoạch'),
+            record_data.get('sales_name'),
+            record_data.get('user_id'),
+            'yes',  # is_pending = 'yes' for new sales records
+            None,  # accepted_by
+            None,  # accepted_at
+            record_data.get('urgency_level'),
+            record_data.get('desired_solution_time')
+        ]
+        
+        placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+        insert_cols = ', '.join(PROJECT_COLUMNS)
+        
+        cursor.execute(
+            f"INSERT INTO projects ({insert_cols}) VALUES ({placeholders})",
+            values
+        )
+        
+        # LOG: Verify sau khi insert
+        # print(f"[DEBUG DB] Inserted record with tracking_id={new_tracking_id}")
+        # print(f"[DEBUG DB] Created_Date value in DB: {ngay_value}")
+        
+        record_data['Tracking ID'] = new_tracking_id
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[DB] Added sales record with tracking_id={new_tracking_id}")
+        return record_data
+    
+    except Exception as e:
+        print(f"[DB] Error adding sales record: {e}")
+        return None
+
+
+def get_projects_by_user(user_id: int) -> List[Dict[str, Any]]:
+    """
+    Lấy tất cả projects của một user
+    Args:
+        user_id: ID của user
+    Returns:
+        list of projects
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM projects 
+            WHERE user_id = ?
+            ORDER BY tracking_id DESC
+        ''', (user_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        projects = []
+        for row in results:
+            record = dict(row)
+            # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
+            sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+            
+            # Chuyển về format cũ
+            old_format = {
+                "Tracking ID": record.get("tracking_id"),
+                "Ngày": record.get("Created_Date"),
+                "Ngày khởi tạo": record.get("Created_Date"),
+                "Khách hàng": record.get("khach_hang"),
+                "Nhân viên kinh doanh": sales_name_value,
+                "Tên sản phẩm": record.get("ten_san_pham"),
+                "Quy cách": record.get("quy_cach"),
+                "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                "Số lượng": record.get("so_luong"),
+                "Mã PO": record.get("ma_po"),
+                "Mã bản vẽ": record.get("ma_ban_ve"),
+                "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                "Mã mẹ ": record.get("ma_me"),
+                "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                "Loại sản phẩm": record.get("loai_san_pham"),
+                "Hạng mục": record.get("loai_san_pham"),
+                "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                "Tính cấp bách": record.get("tinh_cap_bach"),
+                "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                "user_id": record.get("user_id"),
+                "User ID": record.get("user_id"),
+                "is_pending": record.get("is_pending"),
+                "Trạng thái chờ": record.get("is_pending"),
+                "accepted_by": record.get("accepted_by"),
+                "Người nhận": record.get("accepted_by"),
+                "accepted_at": record.get("accepted_at"),
+                "Thời gian nhận": record.get("accepted_at"),
+                "urgency_level": record.get("urgency_level"),
+                "Mức độ khẩn cấp": record.get("urgency_level"),
+                "desired_solution_time": record.get("desired_solution_time")
+            }
+            projects.append(old_format)
+        
+        return projects
+    
+    except Exception as e:
+        print(f"[DB] Error getting projects by sales: {e}")
+        return []
+
+
+def get_accepted_projects_by_engineer(engineer_name: str) -> List[Dict[str, Any]]:
+    """
+    Lấy các projects đã được engineer nhận
+    Args:
+        engineer_name: tên engineer
+    Returns:
+        list of accepted projects
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM projects 
+            WHERE accepted_by = ?
+            ORDER BY accepted_at DESC
+        ''', (engineer_name,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        projects = []
+        for row in results:
+            record = dict(row)
+            # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
+            sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+            
+            # Chuyển về format cũ
+            old_format = {
+                "Tracking ID": record.get("tracking_id"),
+                "Ngày": record.get("Created_Date"),
+                "Ngày khởi tạo": record.get("Created_Date"),
+                "Khách hàng": record.get("khach_hang"),
+                "Nhân viên kinh doanh": sales_name_value,
+                "Tên sản phẩm": record.get("ten_san_pham"),
+                "Quy cách": record.get("quy_cach"),
+                "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                "Số lượng": record.get("so_luong"),
+                "Mã PO": record.get("ma_po"),
+                "Mã bản vẽ": record.get("ma_ban_ve"),
+                "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                "Mã mẹ ": record.get("ma_me"),
+                "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                "Loại sản phẩm": record.get("loai_san_pham"),
+                "Hạng mục": record.get("loai_san_pham"),
+                "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                "Tính cấp bách": record.get("tinh_cap_bach"),
+                "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                "user_id": record.get("user_id"),
+                "User ID": record.get("user_id"),
+                "is_pending": record.get("is_pending"),
+                "Trạng thái chờ": record.get("is_pending"),
+                "accepted_by": record.get("accepted_by"),
+                "Người nhận": record.get("accepted_by"),
+                "accepted_at": record.get("accepted_at"),
+                "Thời gian nhận": record.get("accepted_at"),
+                "urgency_level": record.get("urgency_level"),
+                "Mức độ khẩn cấp": record.get("urgency_level"),
+                "desired_solution_time": record.get("desired_solution_time")
+            }
+            projects.append(old_format)
+        
+        return projects
+    
+    except Exception as e:
+        print(f"[DB] Error getting accepted projects: {e}")
+        return []
+
+
+def get_all_notices_for_engineer(engineer_name: str) -> List[Dict[str, Any]]:
+    """
+    Lấy tất cả notices cho engineer (bao gồm cả pending và accepted)
+    Args:
+        engineer_name: tên engineer
+    Returns:
+        list of all notices (pending + accepted)
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Kiểm tra schema
+        cursor.execute("PRAGMA table_info(projects)")
+        columns = [col[1] for col in cursor.fetchall()]
+        has_new_schema = "Created_Date" in columns
+        
+        # Lấy cả job đang chờ VÀ job đã được engineer này nhận
+        cursor.execute('''
+            SELECT * FROM projects 
+            WHERE is_pending = 'yes' OR accepted_by = ?
+            ORDER BY tracking_id DESC
+        ''', (engineer_name,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        notices = []
+        for row in results:
+            record = dict(row)
+            
+            if has_new_schema:
+                # Schema mới - convert to old format
+                sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                
+                old_format = {
+                    "Tracking ID": record.get("tracking_id"),
+                    "Ngày": record.get("Created_Date"),
+                    "Ngày khởi tạo": record.get("Created_Date"),
+                    "Khách hàng": record.get("khach_hang"),
+                    "Nhân viên kinh doanh": sales_name_value,
+                    "Tên sản phẩm": record.get("ten_san_pham"),
+                    "Quy cách": record.get("quy_cach"),
+                    "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
+                    "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                    "Số lượng": record.get("so_luong"),
+                    "Mã PO": record.get("ma_po"),
+                    "Mã bản vẽ": record.get("ma_ban_ve"),
+                    "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                    "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "Mã mẹ ": record.get("ma_me"),
+                    "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                    "Loại sản phẩm": record.get("loai_san_pham"),
+                    "Hạng mục": record.get("loai_san_pham"),
+                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+                    "Tính cấp bách": record.get("tinh_cap_bach"),
+                    "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                    "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+                    "user_id": record.get("user_id"),
+                    "User ID": record.get("user_id"),
+                    "is_pending": record.get("is_pending"),
+                    "Trạng thái chờ": record.get("is_pending"),
+                    "accepted_by": record.get("accepted_by"),
+                    "Người nhận": record.get("accepted_by"),
+                    "accepted_at": record.get("accepted_at"),
+                    "Thời gian nhận": record.get("accepted_at"),
+                    "urgency_level": record.get("urgency_level"),
+                    "Mức độ khẩn cấp": record.get("urgency_level"),
+                    "desired_solution_time": record.get("desired_solution_time")
+                }
+                notices.append(old_format)
+            else:
+                # Schema cũ - parse JSON
+                if record.get('data'):
+                    data_parsed = json.loads(record['data'])
+                    notices.append(data_parsed)
+                else:
+                    notices.append(record)
+        
+        return notices
+    
+    except Exception as e:
+        print(f"[DB] Error getting all notices for engineer: {e}")
+        return []
+

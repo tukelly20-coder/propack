@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Công cụ tra cứu mã liệu</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <!-- Header -->
+    <header class="app-header">
+        <div class="header-brand">
+            <i class="fas fa-folder-open header-icon"></i>
+            <div class="header-text">
+                <h1>Công cụ tra cứu mã liệu</h1>
+                <span class="header-subtitle">Material Document Search</span>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="icon-btn" id="btn-refresh" title="Làm mới trạng thái (F5)">
+                <i class="fas fa-sync-alt"></i>
+            </button>
+            <button class="icon-btn" id="btn-about" title="Thông tin phiên bản">
+                <i class="fas fa-info-circle"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-container">
+        <!-- Left Panel: Search & Results -->
+        <div class="left-panel">
+            <!-- Search Card -->
+            <div class="card search-card">
+                <div class="card-header">
+                    <i class="fas fa-search card-icon"></i>
+                    <span>Tra cứu mã</span>
+                </div>
+                <div class="card-body">
+                    <div class="search-input-wrapper">
+                        <i class="fas fa-barcode search-icon"></i>
+                        <input type="text" id="txt-code" 
+                               placeholder="Nhập mã code (VD: PABC123...)" 
+                               autocomplete="off"
+                               autofocus>
+                        <button class="clear-btn" id="btn-clear-input" title="Xóa">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="search-actions">
+                        <button id="btn-search" class="btn-primary">
+                            <i class="fas fa-search"></i> Tìm kiếm
+                        </button>
+                    </div>
+                    
+                    <!-- History Section -->
+                    <div class="history-section">
+                        <div class="history-header">
+                            <label for="history-combo">
+                                <i class="fas fa-history"></i> Lịch sử tìm kiếm
+                            </label>
+                            <button id="btn-clear-history" class="btn-text btn-danger-text" title="Xóa lịch sử">
+                                <i class="fas fa-trash-alt"></i> Xóa
+                            </button>
+                        </div>
+                        <select id="history-combo" class="hidden">
+                            <option value="">-- Chọn từ lịch sử --</option>
+                        </select>
+                        <div class="history-chips" id="history-chips">
+                            <!-- History chips will be added dynamically -->
+                        </div>
+                    </div>
+                    
+                    <div class="keyboard-hints">
+                        <span class="hint-badge"><kbd>Enter</kbd> Tìm kiếm</span>
+                        <span class="hint-badge"><kbd>↑↓</kbd> Lịch sử</span>
+                        <span class="hint-badge"><kbd>Esc</kbd> Xóa</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Card -->
+            <div class="card results-card">
+                <div class="card-header">
+                    <i class="fas fa-list card-icon"></i>
+                    <span>Kết quả</span>
+                    <span class="badge" id="result-count">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="results-info" id="results-info">
+                        <i class="fas fa-info-circle"></i> Nhập mã để tìm kiếm
+                    </div>
+                    
+                    <div class="matches-list-container">
+                        <select id="list-matches" multiple size="8">
+                            <!-- Items will be added dynamically -->
+                        </select>
+                    </div>
+                    
+                    <div class="action-buttons">
+                        <button id="btn-open-selected" class="btn-secondary" disabled>
+                            <i class="fas fa-folder"></i> Mở được chọn
+                        </button>
+                        <button id="btn-open-all" class="btn-secondary" disabled>
+                            <i class="fas fa-folder-open"></i> Mở tất cả
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="status-bar">
+                <div class="status-indicator">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Sẵn sàng</span>
+                </div>
+                <div class="progress-container hidden" id="progress-container">
+                    <div class="progress-bar" id="progress-bar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Logs -->
+        <div class="right-panel">
+            <div class="card log-card">
+                <div class="card-header">
+                    <i class="fas fa-terminal card-icon"></i>
+                    <span>Nhật ký hệ thống</span>
+                    <button id="btn-clear-log" class="btn-icon-small" title="Xóa log">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+                <div class="log-container" id="txt-log">
+                    <div class="log-entry log-info">
+                        <span class="log-time">--:--:--</span>
+                        <span class="log-message">Hệ thống sẵn sàng. Nhập mã để tìm kiếm...</span>
+                    </div>
+                </div>
+                <div class="log-footer">
+                    <button id="btn-copy-log" class="btn-small">
+                        <i class="fas fa-copy"></i> Copy log
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay hidden" id="loading">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p class="loading-text">Đang xử lý...</p>
+        </div>
+    </div>
+
+    <!-- Copy Modal -->
+    <div class="modal hidden" id="copy-modal">
+        <div class="modal-content">
+            <div class="modal-icon success">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h3>Đã copy đường dẫn!</h3>
+            <p id="copy-count"></p>
+            <p class="modal-hint">Dán (Ctrl+V) vào Windows Explorer để mở thư mục</p>
+            <button id="btn-close-modal" class="btn-primary">
+                <i class="fas fa-check"></i> Đóng
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast hidden" id="toast">
+        <i class="fas fa-info-circle"></i>
+        <span id="toast-message"></span>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
