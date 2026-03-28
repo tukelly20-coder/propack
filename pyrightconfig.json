@@ -1,0 +1,14 @@
+{
+  "include": [
+    "src",
+    "api_server.py",
+    "server.py",
+    "client.py"
+  ],
+  "extraPaths": [
+    "src"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false
+}
