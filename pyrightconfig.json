@@ -1,14 +1,33 @@
 {
   "include": [
-    "src",
-    "api_server.py",
-    "server.py",
-    "client.py"
+    "src/**/*.py",
+    "routes/**/*.py",
+    "tests/**/*.py"
   ],
-  "extraPaths": [
-    "src"
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "in use*/**"
   ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
   "reportMissingImports": true,
-  "reportMissingTypeStubs": false
+  "reportMissingTypeStubs": false,
+  "reportGeneralTypeIssues": true,
+  "reportOptionalMemberAccess": true,
+  "reportUnusedExpression": true,
+  "reportUnusedImport": false,
+  "analysisLogLevel": "Error",
+  "autoSearchPaths": true,
+  "diagnosticMode": {
+    "openFilesOnly": false
+  },
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ]
 }

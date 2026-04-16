@@ -40,7 +40,47 @@ ENV/
 
 # Logs
 *.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Session data (contains sensitive info)
+sessions.json
+credentials.json
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.bak
+temp/
+tmp/
+
+# Test databases
+test_*.db
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# KiloCode files
+.kilo/
+.kilocode/
+
+# Excel files (large binary)
+*.xlsx
+*.xls
+
+# Used codes (large JSON) - Data file, not source code
+used_codes.json

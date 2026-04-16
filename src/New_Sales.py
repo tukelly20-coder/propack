@@ -327,8 +327,12 @@ class NewSalesDialog(QDialog):
         form_layout.addRow(self.contact_label, self.contact_input)
         form_layout.addRow(self.so_luong_label, self.so_luong_input)
         form_layout.addRow(self.mapo_label, self.mapo_input)
+        form_layout.addRow(self.loaisanpham_label, self.loaisanpham_input)
+        
+        # 图纸编码 section
         form_layout.addRow(self.mabave_label, self.mabave_input)
         form_layout.addRow(self.mabavkythuat_label, self.mabavkythuat_input)
+        form_layout.addRow(self.mame_label, self.mame_input)
         
         # Urgency section
         form_layout.addRow(self.urgency_label, self.urgency_combo)
@@ -453,10 +457,10 @@ class NewSalesDialog(QDialog):
             "Người liên hệ\n(KH)": self.contact_input.text().strip(),
             "Số lượng": self.so_luong_input.text().strip(),
             "Mã PO": self.mapo_input.text().strip(),
+            "Loại sản phẩm": self.loaisanpham_input.text().strip(),
             "Mã bản vẽ": self.mabave_input.text().strip(),
             "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": self.mabavkythuat_input.text().strip(),
-            "Mã mẹ": "",
-            "Loại sản phẩm": "",
+            "Mã mẹ": self.mame_input.text().strip(),
             "Nhân viên thiết kế": "",
             "Tình trạng hoàn thành dự án": "",
             "Thời gian mong muốn có bản vẽ": desired_time,

@@ -118,7 +118,7 @@ function renderProjectsContent() {
                     <!-- Group 1: Main Actions -->
                     <div class="col-auto">
                         <div class="btn-group" role="group">
-                            <button class="btn btn-success btn-sm" id="btn-add-project" title="${t('add_project')}">
+                            <button class="btn btn-success btn-sm" id="btn-add-project" title="${t('add_project')}" data-bs-toggle="tooltip" data-bs-placement="top">
                                 <i class="bi bi-plus-circle"></i> <span data-i18n="add">${t('add')}</span>
                             </button>
                             <button class="btn btn-warning btn-sm" id="btn-edit-project" disabled title="${t('edit_project')}">
@@ -213,7 +213,7 @@ function renderProjectsContent() {
         <!-- Data Table -->
         <div class="card">
             <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
+                <div class="table-responsive" style="max-height: calc(100vh - 250px); overflow-y: auto;">
                     <table id="projects-table" class="table table-striped table-hover table-bordered mb-0" 
                            style="width: 100%; table-layout: fixed;">
                         <thead class="table-light">
@@ -288,7 +288,7 @@ function renderProjectsContent() {
         
         <!-- Add/Edit Modal -->
         <div class="modal fade" id="project-modal" tabindex="-1" data-bs-backdrop="static">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header bg-primary text-white">
                         <h5 class="modal-title" id="modal-title-project">${t('add_project_title')}</h5>
@@ -344,6 +344,25 @@ function renderProjectsContent() {
                                     <label class="form-label">${t('form_mapo')}</label>
                                     <input type="text" class="form-control" id="field-mapo">
                                 </div>
+                                <div class="col-12">
+                                    <label class="form-label">${t('form_loaisanpham')}</label>
+                                    <select class="form-select" id="field-loaisanpham">
+                                        <option value="">${t('select_loaisanpham')}</option>
+                                        <option value="SJT散件图">SJT - ${t('loaisanpham_sjt')}</option>
+                                        <option value="WLJ物料架">WLJ - ${t('loaisanpham_wlj')}</option>
+                                        <option value="ZZC周转车">ZZC - ${t('loaisanpham_zzc')}</option>
+                                        <option value="GZT工作台">GZT - ${t('loaisanpham_gzt')}</option>
+                                        <option value="WCP无尘棚">WCP - ${t('loaisanpham_wcp')}</option>
+                                        <option value="LSX流水线">LSX - ${t('loaisanpham_lsx')}</option>
+                                        <option value="ZWJ转弯机">ZWJ - ${t('loaisanpham_zwj')}</option>
+                                        <option value="GZL改造类">GZL - ${t('loaisanpham_gzl')}</option>
+                                        <option value="BSX倍速线">BSX - ${t('loaisanpham_bsx')}</option>
+                                        <option value="WLL围栏类">WLL - ${t('loaisanpham_wll')}</option>
+                                        <option value="GTX滚筒线">GTX - ${t('loaisanpham_gtx')}</option>
+                                        <option value="ZHT展会图">ZHT - ${t('loaisanpham_zht')}</option>
+                                        <option value="LHX老化线">LHX - ${t('loaisanpham_lhx')}</option>
+                                    </select>
+                                </div>
                             </div>
                             
                             <!-- Mã bản vẽ -->
@@ -375,25 +394,6 @@ function renderProjectsContent() {
                             </div>
                             <div class="row g-3">
                                 <div class="col-12">
-                                    <label class="form-label">${t('form_loaisanpham')}</label>
-                                    <select class="form-select" id="field-loaisanpham">
-                                        <option value="">${t('select_loaisanpham')}</option>
-                                        <option value="SJT散件图">SJT - ${t('loaisanpham_sjt')}</option>
-                                        <option value="WLJ物料架">WLJ - ${t('loaisanpham_wlj')}</option>
-                                        <option value="ZZC周转车">ZZC - ${t('loaisanpham_zzc')}</option>
-                                        <option value="GZT工作台">GZT - ${t('loaisanpham_gzt')}</option>
-                                        <option value="WCP无尘棚">WCP - ${t('loaisanpham_wcp')}</option>
-                                        <option value="LSX流水线">LSX - ${t('loaisanpham_lsx')}</option>
-                                        <option value="ZWJ转弯机">ZWJ - ${t('loaisanpham_zwj')}</option>
-                                        <option value="GZL改造类">GZL - ${t('loaisanpham_gzl')}</option>
-                                        <option value="BSX倍速线">BSX - ${t('loaisanpham_bsx')}</option>
-                                        <option value="WLL围栏类">WLL - ${t('loaisanpham_wll')}</option>
-                                        <option value="GTX滚筒线">GTX - ${t('loaisanpham_gtx')}</option>
-                                        <option value="ZHT展会图">ZHT - ${t('loaisanpham_zht')}</option>
-                                        <option value="LHX老化线">LHX - ${t('loaisanpham_lhx')}</option>
-                                    </select>
-                                </div>
-                                <div class="col-12">
                                     <label class="form-label">${t('form_kysu')}</label>
                                     <input type="text" class="form-control" id="field-kysu">
                                 </div>
@@ -418,7 +418,7 @@ function renderProjectsContent() {
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">${t('form_tg_mongmuon')}</label>
-                                    <input type="datetime-local" class="form-control" id="field-tg-mongmuon">
+                                    <input type="date" class="form-control" id="field-tg-mongmuon">
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">${t('form_tg_hoanthanh')}</label>
@@ -437,7 +437,7 @@ function renderProjectsContent() {
         
         <!-- View Detail Modal -->
         <div class="modal fade" id="view-modal-project" tabindex="-1">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header bg-info text-white">
                         <h5 class="modal-title"><i class="bi bi-eye"></i> ${t('view_project_title')}</h5>
@@ -480,8 +480,108 @@ function renderProjectsContent() {
 function setupProjectsEvents() {
     // Add button
     $('#btn-add-project').click(function() {
+        console.log('[Projects] Add button clicked');
         showProjectModal();
     });
+    
+    // Also handle touch events specifically for mobile
+    $('#btn-add-project').on('touchstart', function(e) {
+        console.log('[Projects] Add button touchstart');
+        $(this).trigger('click');
+    });
+    
+    // ===== MODAL CLEANUP EVENT LISTENERS =====
+    // Cleanup khi modal đóng hoàn toàn - QUAN TRỌNG cho việc tạo nhiều project liên tục
+    const projectModal = document.getElementById('project-modal');
+    let isModalCleaningUp = false; // Flag để tránh cleanup nhiều lần
+    
+    if (projectModal) {
+        // Event khi modal bắt đầu đóng (hide)
+        projectModal.addEventListener('hide.bs.modal', function() {
+            console.log('[Projects] Modal hide started...');
+            isModalCleaningUp = true;
+        });
+        
+        // Event khi modal đóng hoàn toàn (hidden)
+        projectModal.addEventListener('hidden.bs.modal', function() {
+            console.log('[Projects] Modal hidden - performing cleanup...');
+            
+            // 1. Destroy selectpicker hoàn toàn
+            const select = $('#field-khachhang');
+            try {
+                // Kiểm tra và destroy nếu tồn tại
+                if (select.hasClass('bootstrap-select')) {
+                    select.selectpicker('destroy');
+                    console.log('[Projects] Selectpicker destroyed on modal close');
+                }
+            } catch (e) {
+                console.warn('[Projects] Error destroying selectpicker:', e);
+            }
+            
+            // Reset tất cả class và style của select
+            select.removeClass('bootstrap-select show');
+            select.css('display', '');
+            select.removeAttr('data-live-search');
+            select.removeData('selectpicker');
+            
+            // QUAN TRỌNG: Xóa TẤT CẢ các DOM elements do selectpicker tạo ra
+            // Đây là nguyên nhân chính của lỗi "stacked" dropdown
+            select.next('.bootstrap-select').remove();  // Xóa container div
+            select.nextAll('.bootstrap-select').remove();  // Xóa bất kỳ container thừa nào
+            
+            // Xóa tất cả .bootstrap-select containers trong modal
+            $('#project-modal').find('.bootstrap-select').each(function() {
+                $(this).remove();
+            });
+            
+            // 2. Reset form hoàn toàn
+            try {
+                $('#project-form')[0].reset();
+                $('#tracking-id').val('');
+            } catch (e) {
+                console.warn('[Projects] Error resetting form:', e);
+            }
+            
+            // 3. Xóa tất cả modal backdrop
+            $('.modal-backdrop').each(function() {
+                // Chỉ xóa backdrop không thuộc modal nào đang active
+                const $this = $(this);
+                let hasActiveModal = false;
+                $('.modal.show').each(function() {
+                    if ($(this).attr('id') !== 'project-modal') {
+                        hasActiveModal = true;
+                    }
+                });
+                if (!hasActiveModal) {
+                    $this.remove();
+                }
+            });
+            
+            // 4. Reset body state - chỉ khi không còn modal nào khác
+            setTimeout(function() {
+                const activeModals = $('.modal.show').length;
+                if (activeModals === 0) {
+                    document.body.classList.remove('modal-open');
+                    document.body.style.overflow = '';
+                    document.body.style.paddingRight = '';
+                }
+            }, 100);
+            
+            // Reset flag sau khi cleanup
+            setTimeout(function() {
+                isModalCleaningUp = false;
+            }, 200);
+            
+            console.log('[Projects] Cleanup complete');
+        });
+        
+        // Event khi modal bắt đầu hiển thị (show) - reset state
+        projectModal.addEventListener('show.bs.modal', function() {
+            console.log('[Projects] Modal showing - preparing...');
+            // Reset state trước khi mở modal
+            isModalCleaningUp = false;
+        });
+    }
     
     // Edit button
     $('#btn-edit-project').click(function() {
@@ -956,7 +1056,7 @@ function renderProjectsTable() {
         
         // Column: TG mong muốn
         if (ProjectsState.visibleColumns.tg_mongmuon) {
-            html += `<td>${formatDateTime(project['TG mong muốn'])}</td>`;
+            html += `<td>${formatDate(project['TG mong muốn'])}</td>`;
         }
         
         // Column: TG hoàn thành
@@ -1107,24 +1207,113 @@ function updatePagination() {
 // ============================================
 
 /**
- * Show project modal for add
+ * Show project modal for add - COMPLETE REBUILD
+ * Đập đi xây lại hoàn toàn dropdown khách hàng
  */
-function showProjectModal() {
-    $('#project-form')[0].reset();
+async function showProjectModal() {
+    console.log('[Projects] Opening new project modal...');
+    
+    const select = $('#field-khachhang');
+    const modalElement = document.getElementById('project-modal');
+    
+    // ===== BƯỚC 1: DESTROY COMPLETELY SELECTPICKER CŨ =====
+    // Hoàn toàn loại bỏ selectpicker cũ nếu tồn tại trước khi mở modal
+    
+    // QUAN TRỌNG: Xóa TẤT CẢ các DOM elements do selectpicker tạo ra TRƯỚC KHI destroy
+    // Đây là nguyên nhân chính của lỗi "stacked" dropdown
+    select.next('.bootstrap-select').remove();
+    select.nextAll('.bootstrap-select').remove();
+    
+    // Xóa tất cả .bootstrap-select containers trong modal (phòng ngừa)
+    $('#project-modal').find('.bootstrap-select').each(function() {
+        $(this).remove();
+    });
+    
+    try {
+        if (select.hasClass('bootstrap-select')) {
+            select.selectpicker('destroy');
+            console.log('[Projects] Destroyed existing selectpicker');
+        }
+    } catch (e) {
+        console.warn('[Projects] selectpicker destroy error:', e);
+    }
+    
+    // Remove any residual bootstrap classes/data
+    select.removeClass('bootstrap-select show');
+    select.removeAttr('data-live-search');
+    select.removeData('selectpicker');
+    select.css('display', '');
+    
+    // ===== BƯỚC 2: RESET FORM COMPLETELY =====
+    try {
+        $('#project-form')[0].reset();
+    } catch (e) {
+        console.warn('[Projects] Form reset error:', e);
+    }
     $('#tracking-id').val('');
+    $('#tracking-id').removeData('original-customer');
     $('#modal-title-project').text(t('add_project_title'));
     
-    // Set default date
+    // ===== BƯỚC 3: RESET DROPDOWN COMPLETELY =====
+    // Chỉ xóa các options khách hàng (giữ lại option mặc định từ HTML template)
+    select.find('option:not(:first)').remove();
+    
+    console.log('[Projects] Reset dropdown, loading customers...');
+    
+    // ===== BƯỚC 4: LOAD CUSTOMERS FROM API =====
+    try {
+        const customers = await loadCustomers();
+        console.log('[Projects] Loaded customers:', customers.length);
+        
+        // Thêm tất cả customer options
+        customers.forEach(customer => {
+            // Format: {code} {name} {phonetic} {english_name}
+            const displayText = [customer.code, customer.name, customer.phonetic, customer.english_name]
+                .filter(val => val)
+                .join(' ');
+            
+            const option = document.createElement('option');
+            option.value = customer.name; // Use name as value - IMPORTANT: giữ nguyên key
+            option.text = displayText;
+            option.setAttribute('data-subtext', customer.code || '');
+            select.append(option);
+        });
+        
+        console.log('[Projects] Added', customers.length, 'customer options');
+        
+    } catch (error) {
+        console.error('[Projects] Error loading customers:', error);
+        showToast(t('error'), t('load_error'), 'error');
+    }
+    
+    // ===== BƯỚC 5: KHỞI TẠO SELECTPICKER MỚI =====
+    select.selectpicker({
+        liveSearch: true,
+        liveSearchNormalize: true,
+        liveSearchPlaceholder: t('liveSearch_placeholder'),
+        showSubtext: false,
+        size: 10,
+        width: '100%',
+        noneSelectedText: t('select_customer'),
+        title: t('select_customer')
+    });
+    
+    // QUAN TRỌNG: Ẩn select gốc để tránh hiển thị 2 dropdown
+    select.css('display', 'none');
+    select.selectpicker('render');
+    
+    console.log('[Projects] Selectpicker initialized');
+    
+    // ===== BƯỚC 6: SET DEFAULT DATE =====
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     $('#field-ngay').val(now.toISOString().slice(0, 16));
     
-    // Auto-fill current logged in user's name as sales person
+    // ===== BƯỚC 7: AUTO-FILL CURRENT USER =====
     const currentUserStr = localStorage.getItem('current_user');
     if (currentUserStr) {
         try {
             const currentUser = JSON.parse(currentUserStr);
-            // Get the full name of the current user
             const fullName = currentUser.full_name || currentUser.username || '';
             if (fullName) {
                 $('#field-nhanvienkd').val(fullName);
@@ -1134,27 +1323,33 @@ function showProjectModal() {
         }
     }
     
-    // Populate customer dropdown
-    populateCustomerDropdown();
-    
-    // Refresh selectpicker after modal is shown
-    const modalElement = document.getElementById('project-modal');
-    const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
-    
-    modalElement.addEventListener('shown.bs.modal', function() {
-        // Ensure dropdown is properly initialized
-        const select = $('#field-khachhang');
-        if (select.hasClass('bootstrap-select')) {
-            select.selectpicker('refresh');
-        } else {
-            select.selectpicker('render');
-        }
-    }, { once: true }); // Use once: true to prevent duplicate listeners
-    
-    // Update form labels with i18n
+    // ===== BƯỚC 8: UPDATE LABELS =====
     updateProjectFormLabels();
     
+    // ===== BƯỚC 9: SHOW MODAL =====
+    // Kiểm tra và đảm bảo modal đã ở trạng thái sẵn sàng
+    if (modalElement.classList.contains('show')) {
+        console.log('[Projects] Modal already showing, skipping...');
+        return;
+    }
+    
+    const modal = bootstrap.Modal.getOrCreateInstance(modalElement, {
+        backdrop: 'static',
+        keyboard: true
+    });
     modal.show();
+    
+    // ===== BƯỚC 10: REFRESH SELECTPICKER AFTER MODAL SHOW =====
+    // Refresh selectpicker sau khi modal hiển thị
+    setTimeout(function() {
+        const selectEl = $('#field-khachhang');
+        if (selectEl.hasClass('bootstrap-select')) {
+            selectEl.selectpicker('refresh');
+            console.log('[Projects] Selectpicker refreshed after modal show');
+        }
+    }, 150);
+    
+    console.log('[Projects] Modal opened');
 }
 
 /**
@@ -1404,7 +1599,22 @@ async function saveProject() {
     const isEditMode = !!trackingId;
     
     // Validation - Kiểm tra các trường bắt buộc
-    const khachhang = $('#field-khachhang').val().trim();
+    // IMPORTANT: Lấy giá trị từ selectpicker đúng cách
+    let khachhang = '';
+    const selectKhachhang = $('#field-khachhang');
+    
+    if (selectKhachhang.hasClass('bootstrap-select')) {
+        // Lấy giá trị từ selectpicker
+        khachhang = selectKhachhang.selectpicker('val');
+    } else {
+        // Lấy giá trị trực tiếp từ select
+        khachhang = selectKhachhang.val();
+    }
+    
+    khachhang = khachhang ? khachhang.trim() : '';
+    
+    console.log('[Projects] Save - Khachhang value:', khachhang);
+    
     const tensanpham = $('#field-tensanpham').val().trim();
     const lienhe = $('#field-lienhe').val().trim();
     
@@ -1467,6 +1677,21 @@ async function saveProject() {
         
         if (result.success) {
             showToast(t('success'), trackingId ? t('toast_project_updated') : t('toast_project_created'), 'success');
+            
+            // NEW: Update AI System State when project is created/updated
+            // FIX: Add defensive check for AI module availability
+            if (typeof updateAISystemState === 'function') {
+                try {
+                    const projectName = formData['Tên sản phẩm'] || formData['Tracking ID'];
+                    const action = trackingId ? 'update_project' : 'create_project';
+                    updateAISystemState(projectName, 'project_management', action, {
+                        tracking_id: trackingId || result.tracking_id,
+                        customer: formData['Khách hàng']
+                    });
+                } catch (err) {
+                    console.warn('[Projects] Error updating AI state:', err);
+                }
+            }
             
             // Hide modal
             bootstrap.Modal.getInstance('#project-modal').hide();

@@ -1,0 +1,120 @@
+/**
+ * CSS Variables - Color, Font, Spacing definitions
+ * Part of modular CSS refactoring
+ */
+
+/* ================================ */
+/* Root Variables                    */
+/* ================================ */
+
+:root {
+    /* Primary Colors */
+    --primary-color: #1976D2;
+    --primary-dark: #1565C0;
+    --primary-light: #42A5F5;
+
+    /* Semantic Colors */
+    --success-color: #28a745;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+    --info-color: #17a2b8;
+
+    /* Neutral Colors */
+    --light-gray: #f8f9fa;
+    --border-color: #dee2e6;
+    --text-muted: #6c757d;
+    --text-primary: #212529;
+    --text-secondary: #495057;
+
+    /* Gradients */
+    --login-bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+
+    /* Typography */
+    --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-size-base: 14px;
+    --font-size-sm: 13px;
+    --font-size-xs: 12px;
+
+    /* Spacing */
+    --spacing-xs: 0.25rem;
+    --spacing-sm: 0.5rem;
+    --spacing-md: 1rem;
+    --spacing-lg: 1.5rem;
+    --spacing-xl: 2rem;
+
+    /* Border Radius */
+    --border-radius-sm: 4px;
+    --border-radius-md: 6px;
+    --border-radius-lg: 8px;
+    --border-radius-xl: 12px;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-md: 0 2px 4px rgba(0,0,0,0.1);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.15);
+    --shadow-xl: 0 10px 40px rgba(0,0,0,0.2);
+
+    /* Z-index layers */
+    --z-dropdown: 1000;
+    --z-sticky: 1020;
+    --z-fixed: 1030;
+    --z-modal-backdrop: 1040;
+    --z-modal: 1050;
+    --z-popover: 1060;
+    --z-tooltip: 1070;
+    --z-toast: 9999;
+
+    /* Table row heights */
+    --table-row-height: 36px;
+    --table-row-height-compact: 32px;
+}
+
+/* ================================ */
+/* Color Utility Variables           */
+/* ================================ */
+
+:root {
+    /* Status Colors - Background */
+    --status-pending-bg: #FFFFC8;
+    --status-accepted-bg: #C8FFC8;
+    --status-in-progress-bg: #C8E0FF;
+    --status-completed-bg: #90EE90;
+    --status-overdue-bg: #FFC8C8;
+
+    /* Urgency Colors - Background */
+    --urgency-normal-bg: #C8FFC8;
+    --urgency-urgent-bg: #FFFFC8;
+    --urgency-very-urgent-bg: #FFC8C8;
+
+    /* Stat Card Gradients */
+    --stat-primary-gradient: linear-gradient(135deg, #1976D2 0%, #42A5F5 100%);
+    --stat-danger-gradient: linear-gradient(135deg, #dc3545 0%, #e4606d 100%);
+    --stat-success-gradient: linear-gradient(135deg, #28a745 0%, #48c764 100%);
+    --stat-warning-gradient: linear-gradient(135deg, #ffc107 0%, #ffcd39 100%);
+
+    /* AI Status Gradients */
+    --ai-status-default: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    --ai-status-error: linear-gradient(90deg, #dc3545 0%, #c82333 100%);
+    --ai-status-success: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+}
+
+/* ================================ */
+/* Animation Variables               */
+/* ================================ */
+
+:root {
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.2s ease;
+    --transition-slow: 0.3s ease;
+}
+
+/* ================================ */
+/* Scrollbar Variables                */
+/* ================================ */
+
+:root {
+    --scrollbar-width: 10px;
+    --scrollbar-track: #f1f1f1;
+    --scrollbar-thumb: #c1c1c1;
+    --scrollbar-thumb-hover: #a8a8a8;
+}

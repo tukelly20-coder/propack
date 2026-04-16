@@ -1,0 +1,711 @@
+/**
+ * Layout Styles - Navbar, Containers, Page-specific layouts
+ * Part of modular CSS refactoring
+ */
+
+/* ================================ */
+/* Navbar                           */
+/* ================================ */
+
+.navbar {
+    box-shadow: var(--shadow-md);
+}
+
+.navbar-brand {
+    font-weight: 600;
+}
+
+#user-section {
+    display: flex;
+    align-items: center;
+}
+
+#user-info {
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+/* Auto-refresh indicator */
+.auto-refresh-indicator {
+    font-size: 0.75rem;
+    opacity: 0.8;
+}
+
+/* ================================ */
+/* Main Content Layout               */
+/* ================================ */
+
+#main-content {
+    display: none;
+}
+
+body > .container-fluid > .row {
+    min-height: calc(100vh - 2rem);
+    align-items: stretch;
+}
+
+/* Left column - full height */
+body > .container-fluid > .row > .col-lg-8,
+body > .container-fluid > .row > .col-md-7 {
+    display: flex;
+    flex-direction: column;
+}
+
+/* History card - natural height based on content */
+body > .container-fluid > .row > .col-lg-8 > .card,
+body > .container-fluid > .row > .col-md-7 > .card {
+    height: auto;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+body > .container-fluid > .row > .col-lg-8 > .card > .card-body,
+body > .container-fluid > .row > .col-md-7 > .card > .card-body {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+body > .container-fluid > .row > .col-lg-8 > .card > .card-body > .table-responsive,
+body > .container-fluid > .row > .col-md-7 > .card > .card-body > .table-responsive {
+    flex: 1;
+    overflow: auto;
+    max-height: none;
+}
+
+/* ================================ */
+/* Tab Navigation                   */
+/* ================================ */
+
+.main-tabs {
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.main-tabs .nav-link {
+    border: none;
+    color: var(--text-muted);
+    padding: 0.75rem 1.25rem;
+    font-weight: 500;
+    position: relative;
+    transition: all var(--transition-base);
+}
+
+.main-tabs .nav-link:hover {
+    color: var(--primary-color);
+    background: transparent;
+}
+
+.main-tabs .nav-link.active {
+    color: var(--primary-color);
+    background: transparent;
+    border: none;
+}
+
+.main-tabs .nav-link.active::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--primary-color);
+    border-radius: 3px 3px 0 0;
+}
+
+.main-tabs .nav-link i {
+    margin-right: 0.5rem;
+}
+
+.tab-content-wrapper {
+    min-height: calc(100vh - 200px);
+}
+
+.tab-pane-custom {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.tab-pane-custom.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Force visibility for debugging */
+.tab-pane.show {
+    display: block;
+    opacity: 1;
+}
+
+.tab-pane.show.active {
+    display: block;
+    opacity: 1;
+    visibility: visible;
+}
+
+/* ================================ */
+/* Stats Row for Code History        */
+/* ================================ */
+
+#code-history-stats {
+    border-bottom: 1px solid var(--border-color);
+    padding: 0.35rem 0.5rem;
+    background: transparent;
+}
+
+#code-history-stats .row {
+    margin: 0;
+    gap: 0.25rem;
+}
+
+#code-history-stats .col-3 {
+    padding: 0 0.15rem;
+}
+
+/* ================================ */
+/* Filter Section                    */
+/* ================================ */
+
+.filter-section {
+    background: linear-gradient(180deg, var(--light-gray) 0%, #ffffff 100%);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+    border-radius: var(--border-radius-xl);
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.filter-section .form-label {
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 0;
+}
+
+.filter-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.filter-controls .btn-group {
+    flex-wrap: wrap;
+}
+
+.filter-controls .form-select {
+    min-width: 140px;
+}
+
+.filter-controls #search-input {
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.filter-section .vr {
+    height: 24px;
+    background-color: var(--border-color);
+    width: 1px;
+    margin: 0 0.5rem;
+    align-self: center;
+}
+
+/* ================================ */
+/* Toolbar                          */
+/* ================================ */
+
+.toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.toolbar-group .vr {
+    height: 24px;
+}
+
+/* ================================ */
+/* Stats Cards Row                  */
+/* ================================ */
+
+.stats-row {
+    margin-bottom: 1.5rem;
+}
+
+.stats-row .col-md-3 {
+    margin-bottom: 0.75rem;
+}
+
+/* ================================ */
+/* Table Card (Notices)             */
+/* ================================ */
+
+#notices-table + .card {
+    border-radius: var(--border-radius-xl);
+    overflow: hidden;
+}
+
+#notices-table + .card .card-header {
+    background: linear-gradient(180deg, #6c757d 0%, #5a6268 100%);
+    border-bottom: none;
+    padding: 0.75rem 1rem;
+}
+
+#notices-table + .card .card-header h5 {
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+#notices-table + .card .card-header .text-white-50 {
+    font-size: 0.8rem;
+}
+
+#notices-table + .card .table-responsive {
+    max-height: calc(100vh - 450px);
+    overflow-y: auto;
+}
+
+/* ================================ */
+/* Module Loading                   */
+/* ================================ */
+
+.module-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+}
+
+/* ================================ */
+/* AI Status Bar                    */
+/* ================================ */
+
+.ai-status-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: var(--ai-status-default);
+    color: white;
+    padding: 10px 20px;
+    font-size: var(--font-size-sm);
+    z-index: var(--z-toast);
+    display: none;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    font-weight: 500;
+}
+
+.ai-status-bar.active {
+    display: block;
+    animation: slideDown 0.3s ease;
+}
+
+.ai-status-bar.error {
+    background: var(--ai-status-error);
+}
+
+.ai-status-bar.success {
+    background: var(--ai-status-success);
+}
+
+.ai-status-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.ai-status-icon {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.ai-status-text {
+    flex: 1;
+}
+
+/* AI Message Status Indicator */
+.ai-message-status {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--light-gray);
+    border-radius: var(--border-radius-sm);
+    border-left: 3px solid #667eea;
+}
+
+.ai-message-status .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    flex-shrink: 0;
+}
+
+.ai-message-status.success {
+    border-left-color: var(--success-color);
+    color: var(--success-color);
+    background: #d4edda;
+}
+
+.ai-message-status.error {
+    border-left-color: var(--danger-color);
+    color: var(--danger-color);
+    background: #f8d7da;
+}
+
+.ai-message-status.thinking {
+    border-left-color: #6f42c1;
+    background: #f3e8ff;
+}
+
+.ai-message-status.calling_tool {
+    border-left-color: #fd7e14;
+    background: #fff3e0;
+}
+
+/* ================================ */
+/* Login Modal Header               */
+/* ================================ */
+
+.login-modal-header {
+    background: var(--login-bg-gradient);
+    padding: 40px 30px 30px;
+    border-bottom: none;
+    text-align: center;
+}
+
+.login-icon {
+    font-size: 48px;
+    color: white;
+    margin-bottom: 15px;
+    display: block;
+    animation: float 3s ease-in-out infinite;
+}
+
+.login-title {
+    color: white;
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.login-subtitle {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: var(--font-size-sm);
+    margin-bottom: 0;
+}
+
+/* ================================ */
+/* Generated Code Container          */
+/* ================================ */
+
+#generated-code-container {
+    animation: slideDown 0.3s ease;
+}
+
+#generated-code-container .input-group {
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+#generated-code {
+    border: none;
+    background-color: var(--light-gray);
+}
+
+/* Employee code info text */
+#employee-code + .form-text {
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    background-color: var(--light-gray);
+    border-radius: var(--border-radius-md);
+    border-left: 3px solid var(--info-color);
+}
+
+/* ================================ */
+/* Column Resize Styles              */
+/* ================================ */
+
+/* Resize handle - vertical bar on right edge of header */
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    background-color: transparent;
+    z-index: 20;
+    transition: background-color var(--transition-fast);
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+    background-color: rgba(25, 118, 210, 0.25);
+}
+
+/* Visual indicator when resizing */
+body.resizing {
+    cursor: col-resize;
+    user-select: none;
+}
+
+body.resizing * {
+    cursor: col-resize;
+}
+
+/* Prevent text selection during resize */
+body.resizing .table {
+    pointer-events: none;
+}
+
+body.resizing .table * {
+    pointer-events: none;
+}
+
+/* Minimum width for table cells */
+#code-history-table th,
+#code-history-table td {
+    min-width: 40px;
+}
+
+/* Show resize handles only on desktop */
+@media (min-width: 768px) {
+    .resize-handle {
+        display: block;
+    }
+}
+
+/* Hide resize handles on mobile */
+@media (max-width: 767px) {
+    .resize-handle {
+        display: none;
+    }
+}
+
+/* ================================ */
+/* Responsive Adjustments            */
+/* ================================ */
+
+@media (max-width: 1200px) {
+    .column-selector-popup {
+        right: auto;
+        left: 0;
+    }
+}
+
+@media (max-width: 991px) {
+    .filter-controls {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .filter-controls .vr {
+        display: none;
+    }
+    .filter-controls > * {
+        width: 100%;
+    }
+    .filter-controls .btn-group {
+        justify-content: center;
+    }
+    .filter-controls #search-input {
+        min-width: 100%;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 768px) {
+    #projects-table {
+        font-size: 12px;
+    }
+
+    .btn-sm {
+        padding: 0.2rem 0.5rem;
+        font-size: 12px;
+    }
+
+    .toolbar-group {
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+
+    .toolbar-group .vr {
+        display: none;
+    }
+
+    #filter-status,
+    #filter-urgency {
+        width: 100%;
+    }
+
+    #search-input-project {
+        width: 100%;
+    }
+
+    .main-tabs .nav-link {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.875rem;
+    }
+
+    .main-tabs .nav-link i {
+        margin-right: 0.25rem;
+    }
+
+    .main-tabs .nav-link span {
+        display: none;
+    }
+}
+
+@media (max-width: 576px) {
+    .form-floating > .form-control,
+    .form-floating > .form-select {
+        padding: 1rem 0.75rem;
+    }
+
+    .btn-lg {
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+
+    .btn-lg + .btn-lg,
+    .btn-lg + .btn,
+    .btn + .btn-lg {
+        margin-left: 0;
+        margin-top: 0.5rem;
+    }
+
+    /* Code history stats */
+    #code-history-stats {
+        padding: 0.2rem 0.5rem;
+    }
+
+    #code-history-stats .d-flex {
+        gap: 0.35rem;
+        font-size: 0.75rem;
+    }
+
+    .vr {
+        height: 14px;
+        margin: 0 0.15rem;
+    }
+
+    /* Mobile table adjustments */
+    #code-history-table tbody td {
+        padding: 0.25rem 0.3rem;
+        font-size: 0.75rem;
+    }
+
+    #code-history-table thead th {
+        padding: 0.4rem 0.25rem;
+        font-size: 0.7rem;
+    }
+
+    #code-history-table .code-value {
+        font-size: 0.7rem;
+    }
+
+    #code-history-table .btn-sm {
+        padding: 0.1rem 0.25rem;
+    }
+
+    #code-history-table + .card-body .table-responsive {
+        max-height: 300px;
+    }
+
+    /* Filter section mobile */
+    .filter-section {
+        padding: 0.75rem;
+    }
+
+    .stat-card .stat-value {
+        font-size: 1.5rem;
+    }
+
+    .stat-card .card-body {
+        padding: 1rem;
+    }
+
+    #notices-table + .card .table-responsive {
+        max-height: calc(100vh - 500px);
+    }
+
+    /* Upload area mobile */
+    .upload-area {
+        padding: 1.5rem;
+    }
+
+    .upload-placeholder i {
+        font-size: 2.5rem;
+    }
+
+    .upload-preview-item {
+        width: 60px;
+        height: 60px;
+    }
+
+    /* Section header mobile */
+    .section-header .section-title {
+        font-size: 0.85rem;
+        padding: 0.4rem 1rem;
+    }
+
+    .section-header::before,
+    .section-header::after {
+        display: none;
+    }
+
+    /* Bootstrap select mobile */
+    .bootstrap-select > .btn {
+        font-size: 12px;
+        padding: 5px 10px;
+    }
+
+    .bootstrap-select .dropdown-menu li a {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
+}
+
+/* ================================ */
+/* Card Header Info Icon            */
+/* ================================ */
+
+.card-header .bi-info-circle {
+    opacity: 0.7;
+}
+
+/* ================================ */
+/* Loading pulse animation          */
+/* ================================ */
+
+.loading-pulse {
+    animation: pulse 1.5s ease-in-out infinite;
+}

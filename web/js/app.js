@@ -138,6 +138,11 @@ async function switchTab(tab) {
     
     // Trigger tab-specific init
     triggerTabInit(tab);
+    
+    // NEW: Update AI System State when user switches tabs
+    if (typeof updateAISystemState === 'function') {
+        updateAISystemState(null, 'tab_' + tab, 'switch_tab');
+    }
 }
 
 /**
@@ -283,8 +288,16 @@ async function loadAIModule() {
  */
 function loadScript(src) {
     return new Promise((resolve, reject) => {
+        // Check if script already exists
+        const scriptId = src.replace('.js', '-script').split('/').pop() + '-script';
+        if (document.getElementById(scriptId)) {
+            console.log('[App] Script already loaded:', src);
+            resolve();
+            return;
+        }
+        
         const script = document.createElement('script');
-        script.id = src.replace('.js', '-script').split('/').pop() + '-script';
+        script.id = scriptId;
         script.src = src;
         script.onload = resolve;
         script.onerror = reject;
@@ -414,8 +427,14 @@ async function handleLogin(e) {
             
             showToast(t('toast_success'), t('toast_login_success'), 'success');
             
-            // Load initial module
-            loadModule(AppState.currentTab);
+            // Dispatch custom event for modules that need to reload after login
+            // This will trigger AI module to reload sessions if already loaded
+            window.dispatchEvent(new CustomEvent('userAuthenticated', {
+                detail: { user: result.user }
+            }));
+            
+            // NOTE: Do NOT call loadModule here - it was already called during initial tab switch
+            // The modulesLoaded flag will be set when the module finishes loading
         } else {
             showLoginError(result.error || t('login_failed'));
         }
@@ -563,17 +582,9 @@ function setupNavigation() {
 }
 
 /**
- * Setup Submit Log modal handlers
+ * Handle submit log form submission with files
  */
-function setupSubmitLogModal() {
-    // Submit log form handler
-    $(document).on('click', '#btn-submit-log-confirm', handleSubmitLog);
-}
-
-/**
- * Handle submit log form submission
- */
-async function handleSubmitLog() {
+async function handleSubmitLogWithFiles() {
     const logType = $('#log-type').val();
     const logContent = $('#log-content').val().trim();
     
@@ -589,12 +600,94 @@ async function handleSubmitLog() {
     $('#submit-log-spinner').removeClass('d-none');
     $('#btn-submit-log-confirm').prop('disabled', true);
     
+    // Update status
+    if (logFileHandler && logFileHandler.hasFiles()) {
+        showUploadStatus('Đang tải files lên...', '');
+    }
+    
     try {
-        const result = await submitLog(logType, logContent);
+        let result;
+        
+        // Get files
+        const files = logFileHandler ? logFileHandler.getFiles() : [];
+        
+        if (files.length > 0) {
+            // Submit with files using XHR for progress
+            result = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const formData = new FormData();
+                
+                formData.append('content', logContent);
+                formData.append('type', logType);
+                formData.append('device_info_json', JSON.stringify(getDeviceInfo()));
+                
+                // Append files
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('attachments', files[i]);
+                }
+                
+                // Progress handler
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        showUploadStatus(`Đang tải lên: ${percent}%`, '');
+                    }
+                });
+                
+                // Load handler
+                xhr.addEventListener('load', () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            if (result.success) {
+                                resolve(result);
+                            } else {
+                                reject(new Error(result.error || 'Lỗi khi gửi log'));
+                            }
+                        } catch (e) {
+                            reject(new Error('Phản hồi server không hợp lệ'));
+                        }
+                    } else {
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            reject(new Error(result.error || `Lỗi HTTP ${xhr.status}`));
+                        } catch (e) {
+                            reject(new Error(`Lỗi HTTP ${xhr.status}: ${xhr.statusText}`));
+                        }
+                    }
+                });
+                
+                // Error handler
+                xhr.addEventListener('error', () => {
+                    reject(new Error('Lỗi kết nối. Vui lòng kiểm tra server đang chạy.'));
+                });
+                
+                // Open and send
+                xhr.open('POST', '/api/logs');
+                const token = getAuthToken();
+                if (token) {
+                    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+                }
+                xhr.timeout = 300000; // 5 minutes for large uploads
+                xhr.send(formData);
+            });
+        } else {
+            // Submit without files (original method)
+            result = await submitLog(logType, logContent);
+        }
         
         if (result.success) {
-            showToast(t('toast_success'), t('toast_feedback_sent'), 'success');
+            // Success message with file count
+            const message = result.files_count > 0 
+                ? `${t('toast_feedback_sent')} (${result.files_count} file(s))`
+                : t('toast_feedback_sent');
+            showToast(t('toast_success'), message, 'success');
+            
+            // Clear form
             $('#log-content').val('');
+            if (logFileHandler) {
+                logFileHandler.clearFiles();
+            }
             $('#log-modal').modal('hide');
         } else {
             throw new Error(result.error || 'Không thể gửi phản hồi');
@@ -603,6 +696,7 @@ async function handleSubmitLog() {
         console.error('[App] Submit log error:', error);
         $('#log-error-text').text(error.message || t('feedback_error'));
         $('#log-error').removeClass('d-none');
+        showUploadStatus('', '');
     } finally {
         $('#submit-log-spinner').addClass('d-none');
         $('#btn-submit-log-confirm').prop('disabled', false);
@@ -610,7 +704,216 @@ async function handleSubmitLog() {
 }
 
 // ============================================
-// NOTICE BADGE UPDATE
+// FILE UPLOAD HANDLER
+// ============================================
+
+let logFileHandler = null;
+
+/**
+ * File Upload Handler Class
+ * Quản lý việc chọn file, drag-drop, preview
+ */
+class FileUploadHandler {
+    constructor() {
+        this.files = [];
+        this.init();
+    }
+    
+    init() {
+        const uploadArea = document.getElementById('log-upload-area');
+        const fileInput = document.getElementById('log-attachments');
+        
+        if (!uploadArea || !fileInput) {
+            console.error('[FileUploadHandler] Upload elements not found');
+            return;
+        }
+        
+        // Click to select files
+        uploadArea.addEventListener('click', (e) => {
+            if (e.target.closest('.remove-file-btn')) return;
+            fileInput.click();
+        });
+        
+        // File input change
+        fileInput.addEventListener('change', (e) => {
+            this.handleFiles(e.target.files);
+            fileInput.value = ''; // Reset for re-selection
+        });
+        
+        // Drag and drop events
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            this.handleFiles(e.dataTransfer.files);
+        });
+        
+        console.log('[FileUploadHandler] Initialized');
+    }
+    
+    handleFiles(fileList) {
+        for (let i = 0; i < fileList.length; i++) {
+            const file = fileList[i];
+            // Check file type
+            if (!this.isValidFileType(file)) {
+                showToast('Lỗi', 'Chỉ chấp nhận file ảnh và video', 'error');
+                continue;
+            }
+            this.files.push(file);
+        }
+        this.renderPreview();
+    }
+    
+    isValidFileType(file) {
+        const validTypes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp',
+            'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm',
+            'video/x-matroska', 'video/x-flv', 'video/x-ms-wmv'
+        ];
+        return validTypes.includes(file.type);
+    }
+    
+    hasFiles() {
+        return this.files.length > 0;
+    }
+    
+    getFiles() {
+        return this.files;
+    }
+    
+    removeFile(index) {
+        this.files.splice(index, 1);
+        this.renderPreview();
+    }
+    
+    clearFiles() {
+        this.files = [];
+        this.renderPreview();
+    }
+    
+    renderPreview() {
+        const previewContainer = document.getElementById('log-upload-preview');
+        const uploadArea = document.getElementById('log-upload-area');
+        
+        if (!previewContainer) return;
+        
+        if (this.files.length === 0) {
+            previewContainer.innerHTML = '';
+            if (uploadArea) uploadArea.classList.remove('has-files');
+            return;
+        }
+        
+        if (uploadArea) uploadArea.classList.add('has-files');
+        
+        let html = '<div class="upload-preview-grid">';
+        this.files.forEach((file, index) => {
+            const isImage = file.type.startsWith('image/');
+            const previewClass = isImage ? 'image-preview' : 'video-preview';
+            const iconClass = isImage ? 'bi-image' : 'bi-video';
+            
+            html += `
+                <div class="preview-item">
+                    <div class="${previewClass}">
+                        ${isImage 
+                            ? `<img src="${URL.createObjectURL(file)}" alt="${file.name}" style="width:100%;height:100%;object-fit:cover;">` 
+                            : `<div class="video-placeholder"><i class="bi ${iconClass}"></i></div>`
+                        }
+                    </div>
+                    <div class="preview-info">
+                        <span class="preview-name" title="${file.name}">${this.truncateName(file.name)}</span>
+                        <span class="preview-size">${this.formatSize(file.size)}</span>
+                    </div>
+                    <button class="remove-file-btn" onclick="logFileHandler.removeFile(${index})" title="Xóa">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+            `;
+        });
+        html += '</div>';
+        previewContainer.innerHTML = html;
+    }
+    
+    truncateName(name) {
+        if (name.length <= 20) return name;
+        return name.substring(0, 15) + '...' + name.substring(name.lastIndexOf('.'));
+    }
+    
+    formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+}
+
+/**
+ * Show upload status message
+ * @param {string} message - Thông báo
+ * @param {string} type - Loại (success, error, '')
+ */
+function showUploadStatus(message, type) {
+    const statusEl = document.getElementById('log-upload-status');
+    if (!statusEl) return;
+    
+    if (!message) {
+        statusEl.innerHTML = '';
+        statusEl.style.display = 'none';
+        return;
+    }
+    
+    statusEl.innerHTML = message;
+    statusEl.style.display = 'block';
+    if (type) {
+        statusEl.className = `alert alert-${type === 'success' ? 'success' : 'danger'} mt-2`;
+    } else {
+        statusEl.className = 'alert alert-info mt-2';
+    }
+}
+
+// ============================================
+// SUBMIT LOG MODAL
+// ============================================
+
+/**
+ * Setup Submit Log modal handlers
+ */
+function setupSubmitLogModal() {
+    // Initialize file upload handler
+    logFileHandler = new FileUploadHandler();
+    
+    // Submit log form handler
+    $(document).on('click', '#btn-submit-log-confirm', handleSubmitLogWithFiles);
+    
+    // Clear files when modal is closed
+    $('#log-modal').on('hidden.bs.modal', function() {
+        if (logFileHandler) {
+            logFileHandler.clearFiles();
+        }
+        $('#log-content').val('');
+        $('#log-error').addClass('d-none');
+    });
+}
+
+// ============================================
+// EXPORT TO GLOBAL
+// ============================================
+
+window.switchTab = switchTab;
+window.updateNoticeBadge = updateNoticeBadge;
+window.AppState = AppState;
+window.logFileHandler = logFileHandler;
+
+// ============================================
+// NOTICE BADGE UPDATE (Moved after file handler)
 // ============================================
 
 /**
@@ -635,11 +938,3 @@ function updateNoticeBadge(count) {
         if (tabBadge) tabBadge.style.display = 'none';
     }
 }
-
-// ============================================
-// EXPORT TO GLOBAL
-// ============================================
-
-window.switchTab = switchTab;
-window.updateNoticeBadge = updateNoticeBadge;
-window.AppState = AppState;

@@ -1,0 +1,493 @@
+# -*- coding: utf-8 -*-
+"""
+OpenRouter AI Routes - Tách từ server.py
+Bao gồm các endpoints:
+- /api/openrouter/chat/stream
+- /api/openrouter/models
+- /api/openrouter/status
+"""
+
+def register_routes(app, config):
+    """Register OpenRouter AI routes with Flask app"""
+    from flask import request, jsonify, make_response, Response
+    import requests
+    import json
+    import os
+    import time
+    
+    # Import necessary modules
+    from src.chat_service import get_context_for_ai, detect_search_intent, search_for_ai_context
+    from src.system_prompt import DEFAULT_SYSTEM_PROMPT
+    from src.agent_planner import AgentPlanner
+    from src.agent_tools import get_extended_tool_definitions
+    
+    # Get config values
+    sessions = config.get('sessions')
+    sessions_lock = config.get('sessions_lock')
+    SYSTEM_PROMPT = config.get('SYSTEM_PROMPT', DEFAULT_SYSTEM_PROMPT)
+    safe_print = config.get('safe_print', print)
+    load_credentials = config.get('load_credentials')
+    OPENROUTER_RETRY_CONFIG = config.get('OPENROUTER_RETRY_CONFIG', {
+        'max_retries': 3,
+        'initial_delay_ms': 1000,
+        'max_delay_ms': 10000,
+        'timeout_seconds': 60
+    })
+    OPENROUTER_FALLBACK_MODELS = config.get('OPENROUTER_FALLBACK_MODELS', [
+        'meta-llama/llama-3.1-8b-instruct',
+        'qwen/qwen-2.5-7b-instruct'
+    ])
+    
+    # Helper functions
+    def is_rate_limit_error(response):
+        """Check if response indicates rate limiting (429)"""
+        try:
+            data = response.json() if hasattr(response, 'json') else json.loads(response)
+            if isinstance(data, dict):
+                error = data.get('error', {})
+                if isinstance(error, dict):
+                    code = error.get('code', 0)
+                    if code == 429:
+                        return True
+                    msg = str(error.get('message', '')).lower()
+                    if 'rate' in msg and 'limit' in msg:
+                        return True
+        except:
+            pass
+        return False
+    
+    def exponential_backoff(attempt, initial_delay_ms, max_delay_ms):
+        """Calculate delay with exponential backoff"""
+        delay = min(initial_delay_ms * (2 ** attempt), max_delay_ms)
+        import random
+        jitter = random.randint(0, 1000)
+        return (delay + jitter) / 1000
+    
+    # ========== OpenRouter Chat Stream Endpoint ==========
+    @app.route('/api/openrouter/chat/stream', methods=['POST', 'OPTIONS'])
+    def openrouter_chat_stream():
+        """Chat với OpenRouter AI với Streaming (SSE) với retry và fallback logic"""
+        
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            return response
+        
+        # Load OpenRouter API key từ credentials
+        credentials = load_credentials() if load_credentials else {}
+        api_key = credentials.get('openrouter_api_key', '')
+        
+        if not api_key:
+            return Response(
+                f"data: {json.dumps({'error': 'OpenRouter API key chưa được cấu hình'})}\n\n",
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            )
+        
+        data = request.get_json() or {}
+        message = data.get('message', '')
+        model = data.get('model', 'meta-llama/llama-3.1-8b-instruct')
+        history = data.get('history', [])
+        session_id = data.get('session_id', '')
+        
+        # Get user info from token
+        auth_header = request.headers.get('Authorization', '')
+        user_info_str = ''
+        user_id = None
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            with sessions_lock:
+                session_data = sessions.get(token)
+                if session_data:
+                    user = session_data.get('user', {})
+                    user_id = user.get('user_id')
+                    user_info_str = f"""
+## THÔNG TIN USER HIỆN TẠI
+- Username: {user.get('username', 'unknown')}
+- Role: {user.get('role', 'unknown')}
+- Full Name: {user.get('full_name', '')}
+- User ID: {user.get('user_id', '')}
+
+Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án của họ, hãy:
+- Nếu là Sales: Xem projects với user_id = {user.get('user_id', '')}
+- Nếu là Engineer: Xem projects với accepted_by = '{user.get('username', '')}'"
+"""
+        
+        # Get AI context from database if session_id provided
+        ai_context_str = ''
+        if session_id and user_id:
+            try:
+                ai_context_str = get_context_for_ai(session_id, user_id)
+                if ai_context_str:
+                    safe_print(f"[OpenRouter Stream] Loaded context for session: {session_id}")
+            except Exception as e:
+                safe_print(f"[OpenRouter Stream] Error loading context: {e}")
+        
+        # Get 3-layer memory context
+        memory_context = ''
+        if user_id:
+            try:
+                from src.ai_memory import assemble_memory_context
+                memory_context = assemble_memory_context(user_id, project_id=None, query=message)
+                if memory_context:
+                    safe_print(f"[OpenRouter Stream] Loaded memory context, length: {len(memory_context)}")
+            except Exception as e:
+                safe_print(f"[OpenRouter Stream] Error loading memory context: {e}")
+        
+        # Detect search intent and auto-search cross-session context
+        cross_session_context = ''
+        if user_id and message:
+            try:
+                should_search, keywords = detect_search_intent(message)
+                if should_search and keywords:
+                    safe_print(f"[OpenRouter Stream] Detected search intent in message, searching for: {keywords[:50]}...")
+                    cross_session_context = search_for_ai_context(user_id, keywords, limit=5)
+                    if cross_session_context:
+                        safe_print(f"[OpenRouter Stream] Found cross-session context, length: {len(cross_session_context)}")
+            except Exception as e:
+                safe_print(f"[OpenRouter Stream] Error in cross-session search: {e}")
+        
+        # Detect user intent for auto-tool execution
+        agent_intent = None
+        should_auto_execute = False
+        plan = None
+        if message:
+            try:
+                from src.intent_detector import detect_intent as detect_intent_func
+                intent_result = detect_intent_func(message)
+                agent_intent = intent_result
+                if intent_result.get('auto_trigger') and intent_result.get('confidence', 0) > 0.5:
+                    should_auto_execute = True
+                    safe_print(f"[OpenRouter Stream] Auto-trigger enabled for intent: {intent_result.get('intent')} (confidence: {intent_result.get('confidence', 0):.2f})")
+                    planner = AgentPlanner(int(user_id) if user_id else 1)
+                    plan = planner.plan(message, session_id)
+                    if plan.steps:
+                        safe_print(f"[OpenRouter Stream] Auto-executing {len(plan.steps)} tools: {[s['tool'] for s in plan.steps]}")
+                        plan = planner.execute_plan(plan)
+            except Exception as e:
+                safe_print(f"[OpenRouter Stream] Error in intent detection: {e}")
+        
+        if not message:
+            return Response(
+                f"data: {json.dumps({'error': 'Tin nhắn không được để trống'})}\n\n",
+                mimetype='text/event-stream',
+                headers={
+                    'Cache-Control': 'no-cache',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            )
+        
+        def generate_stream():
+            # Get retry config
+            max_retries = OPENROUTER_RETRY_CONFIG.get('max_retries', 3)
+            initial_delay = OPENROUTER_RETRY_CONFIG.get('initial_delay_ms', 1000)
+            max_delay = OPENROUTER_RETRY_CONFIG.get('max_delay_ms', 10000)
+            
+            # Track models tried
+            models_tried = [model]
+            current_model = model
+            
+            # 1. Gửi status: SENDING
+            yield f"data: {json.dumps({'type': 'status', 'value': 'sending'})}\n\n"
+            
+            # 2. Gửi status: THINKING
+            yield f"data: {json.dumps({'type': 'status', 'value': 'thinking'})}\n\n"
+            
+            # Build messages for OpenRouter API
+            system_content = SYSTEM_PROMPT + user_info_str
+            if ai_context_str:
+                system_content = system_content + "\n\n" + ai_context_str
+            if cross_session_context:
+                system_content = system_content + "\n\n" + cross_session_context
+            if memory_context:
+                system_content = system_content + "\n\n" + memory_context
+            
+            # Add agent context if tools were auto-executed
+            agent_context = ''
+            if agent_intent and should_auto_execute and plan:
+                tool_results_summary = []
+                for step in plan.steps:
+                    if step['executed'] and step['result']:
+                        result = step['result']
+                        if result.get('success'):
+                            tool_results_summary.append(f"- {step['tool']}: {str(result.get('result', ''))[:200]}")
+                if tool_results_summary:
+                    agent_context = "## KẾT QUẢ TÌM KIẾM TỰ ĐỘNG\n" + "\n".join(tool_results_summary)
+                    safe_print(f"[OpenRouter Stream] Added agent context: {len(agent_context)} chars")
+            
+            if agent_context:
+                system_content = system_content + "\n\n" + agent_context
+            
+            messages = [{"role": "system", "content": system_content}]
+            for msg in history:
+                role = msg.get('role', 'user')
+                if role == 'user':
+                    messages.append({"role": "user", "content": msg.get('content', '')})
+                else:
+                    messages.append({"role": "assistant", "content": msg.get('content', '')})
+            messages.append({"role": "user", "content": message})
+            
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream'
+            }
+            
+            payload = {
+                'model': current_model,
+                'messages': messages,
+                'stream': True
+            }
+            
+            # Try original model with retries first
+            for attempt in range(max_retries):
+                try:
+                    safe_print(f"[OpenRouter Stream] Attempt {attempt + 1}/{max_retries} with model: {current_model}")
+                    
+                    yield f"data: {json.dumps({'type': 'start'})}\n\n"
+                    
+                    response = requests.post(
+                        'https://openrouter.ai/api/v1/chat/completions',
+                        headers=headers,
+                        json=payload,
+                        stream=True,
+                        timeout=120
+                    )
+                    
+                    if response.status_code == 429:
+                        safe_print(f"[OpenRouter Stream] Rate limited (429) on attempt {attempt + 1}")
+                        if attempt < max_retries - 1:
+                            delay = exponential_backoff(attempt, initial_delay, max_delay)
+                            safe_print(f"[OpenRouter Stream] Waiting {delay:.2f}s before retry...")
+                            time.sleep(delay)
+                            continue
+                        else:
+                            break
+                    
+                    if response.status_code >= 400:
+                        safe_print(f"[OpenRouter Stream] Error: {response.status_code} - {response.text[:500]}")
+                        try:
+                            error_data = response.json()
+                            if is_rate_limit_error(response):
+                                if attempt < max_retries - 1:
+                                    delay = exponential_backoff(attempt, initial_delay, max_delay)
+                                    safe_print(f"[OpenRouter Stream] Rate limit detected, waiting {delay:.2f}s...")
+                                    time.sleep(delay)
+                                    continue
+                        except:
+                            pass
+                        
+                        if attempt < max_retries - 1:
+                            delay = exponential_backoff(attempt, initial_delay, max_delay)
+                            time.sleep(delay)
+                            continue
+                        else:
+                            break
+                    
+                    # Process streaming response
+                    full_response = ""
+                    
+                    yield f"data: {json.dumps({'type': 'status', 'value': 'streaming'})}\n\n"
+                    
+                    for line in response.iter_lines():
+                        if line:
+                            line = line.decode('utf-8')
+                            if line.startswith('data: '):
+                                try:
+                                    chunk_data = json.loads(line[6:])
+                                    
+                                    if chunk_data == '[DONE]':
+                                        break
+                                    
+                                    if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                        delta = chunk_data['choices'][0].get('delta', {})
+                                        if 'content' in delta and delta['content']:
+                                            content = delta['content']
+                                            full_response += content
+                                            safe_print(f"[OpenRouter Stream] Chunk received: length={len(content)}, total={len(full_response)}")
+                                            yield f"data: {json.dumps({'type': 'chunk', 'content': content, 'full': full_response})}\n\n"
+                                except json.JSONDecodeError:
+                                    continue
+                    
+                    yield f"data: {json.dumps({'type': 'status', 'value': 'done'})}\n\n"
+                    safe_print(f"[OpenRouter Stream] Done - full_response length: {len(full_response)}")
+                    if not full_response:
+                        safe_print(f"[OpenRouter Stream] WARNING: full_response is empty!")
+                    yield f"data: {json.dumps({'type': 'done', 'full': full_response})}\n\n"
+                    return
+                    
+                except requests.exceptions.Timeout:
+                    safe_print(f"[OpenRouter Stream] Timeout on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        delay = exponential_backoff(attempt, initial_delay, max_delay)
+                        time.sleep(delay)
+                        continue
+                except Exception as e:
+                    safe_print(f"[OpenRouter Stream] Exception: {e}")
+                    if attempt < max_retries - 1:
+                        delay = exponential_backoff(attempt, initial_delay, max_delay)
+                        time.sleep(delay)
+                        continue
+                    break
+            
+            # All retries failed, try fallback models
+            safe_print("[OpenRouter Stream] All retries exhausted, trying fallback models...")
+            
+            available_fallbacks = [m for m in OPENROUTER_FALLBACK_MODELS if m not in models_tried]
+            
+            for fallback_model in available_fallbacks:
+                try:
+                    safe_print(f"[OpenRouter Stream] Trying fallback model: {fallback_model}")
+                    models_tried.append(fallback_model)
+                    
+                    fallback_payload = payload.copy()
+                    fallback_payload['model'] = fallback_model
+                    
+                    yield f"data: {json.dumps({'type': 'start', 'model_switched': fallback_model})}\n\n"
+                    
+                    response = requests.post(
+                        'https://openrouter.ai/api/v1/chat/completions',
+                        headers=headers,
+                        json=fallback_payload,
+                        stream=True,
+                        timeout=120
+                    )
+                    
+                    if response.status_code == 429:
+                        safe_print(f"[OpenRouter Stream] Fallback model also rate limited")
+                        continue
+                    
+                    if response.status_code >= 400:
+                        safe_print(f"[OpenRouter Stream] Fallback error: {response.status_code}")
+                        continue
+                    
+                    full_response = ""
+                    for line in response.iter_lines():
+                        if line:
+                            line = line.decode('utf-8')
+                            if line.startswith('data: '):
+                                try:
+                                    chunk_data = json.loads(line[6:])
+                                    
+                                    if chunk_data == '[DONE]':
+                                        break
+                                    
+                                    if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                                        delta = chunk_data['choices'][0].get('delta', {})
+                                        if 'content' in delta and delta['content']:
+                                            content = delta['content']
+                                            full_response += content
+                                            safe_print(f"[OpenRouter Stream] Chunk received: length={len(content)}, total={len(full_response)}")
+                                            yield f"data: {json.dumps({'type': 'chunk', 'content': content, 'full': full_response})}\n\n"
+                                except json.JSONDecodeError:
+                                    continue
+                    
+                    safe_print(f"[OpenRouter Stream] Fallback Done - full_response length: {len(full_response)}")
+                    if not full_response:
+                        safe_print(f"[OpenRouter Stream] WARNING: Fallback full_response is empty!")
+                    yield f"data: {json.dumps({'type': 'done', 'full': full_response, 'model_used': fallback_model})}\n\n"
+                    safe_print(f"[OpenRouter Stream] Fallback model {fallback_model} succeeded!")
+                    return
+                    
+                except Exception as e:
+                    safe_print(f"[OpenRouter Stream] Fallback exception: {e}")
+                    continue
+            
+            # All failed
+            yield f"data: {json.dumps({'type': 'status', 'value': 'error'})}\n\n"
+            yield f"data: {json.dumps({'error': 'Tất cả model đều thất bại. Vui lòng thử lại sau hoặc chọn model khác.', 'code': 'ALL_MODELS_FAILED'})}\n\n"
+        
+        return Response(
+            generate_stream(),
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type'
+            }
+        )
+
+    # ========== OpenRouter Models Endpoint ==========
+    @app.route('/api/openrouter/models', methods=['GET', 'OPTIONS'])
+    def openrouter_models():
+        """Lấy danh sách models OpenRouter"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            return response
+        
+        credentials = load_credentials() if load_credentials else {}
+        api_key = credentials.get('openrouter_api_key', '')
+        
+        if not api_key:
+            return jsonify({
+                "success": False,
+                "error": "Chưa cấu hình OpenRouter API Key",
+                "models": []
+            }), 200
+        
+        # Return available OpenRouter models
+        models = [
+            {"name": "meta-llama/llama-3.1-8b-instruct", "display": "Llama 3.1 8B (Miễn phí)"},
+            {"name": "qwen/qwen-2.5-7b-instruct", "display": "Qwen 2.5 7B (Miễn phí)"},
+            {"name": "openai/gpt-4o-mini", "display": "GPT-4o Mini"},
+            {"name": "anthropic/claude-3-haiku", "display": "Claude 3 Haiku"}
+        ]
+        
+        return jsonify({
+            "success": True,
+            "models": models
+        })
+
+    # ========== OpenRouter Status Endpoint ==========
+    @app.route('/api/openrouter/status', methods=['GET', 'OPTIONS'])
+    def openrouter_status():
+        """Kiểm tra trạng thái OpenRouter API"""
+        if request.method == 'OPTIONS':
+            response = make_response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            return response
+        
+        credentials = load_credentials() if load_credentials else {}
+        api_key = credentials.get('openrouter_api_key', '')
+        
+        has_key = bool(api_key)
+        
+        # Test connection if API key exists
+        connected = False
+        error_msg = None
+        
+        if has_key:
+            try:
+                headers = {
+                    'Authorization': f'Bearer {api_key}',
+                    'Content-Type': 'application/json'
+                }
+                resp = requests.get(
+                    'https://openrouter.ai/api/v1/models',
+                    headers=headers,
+                    timeout=10
+                )
+                connected = resp.status_code < 400
+                if not connected:
+                    error_msg = f"HTTP {resp.status_code}"
+            except Exception as e:
+                error_msg = str(e)
+        
+        return jsonify({
+            "success": True,
+            "configured": has_key,
+            "connected": connected,
+            "error": error_msg
+        })
+    
+    print("[OpenRouter Routes] Registered successfully")

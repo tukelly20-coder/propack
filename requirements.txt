@@ -1,0 +1,43 @@
+# requirements.txt
+# Python dependencies for Propack VP Server
+
+# Core web framework
+Flask>=3.0.0
+flask-cors>=4.0.0
+
+# Database
+sqlite3 (built-in)
+
+# AI integrations
+requests>=2.31.0
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=4.1.0
+
+# Development tools
+black>=24.0.0
+flake8>=7.0.0
+mypy>=1.8.0
+
+# Type checking
+pyright>=1.1.350
+
+# Logging
+coloredlogs>=15.0.0
+
+# Security (optional - for password hashing)
+# bcrypt>=4.1.0
+
+# Production server (optional)
+# gunicorn>=21.0.0
+
+# Development
+# python-dotenv[dev]>=1.0.0

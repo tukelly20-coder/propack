@@ -588,6 +588,20 @@ async function handleCreateCode(e) {
             $('#generated-code-container').removeClass('d-none');
             $('#generated-code-container').show();
             
+            // NEW: Update AI System State when code is created
+            // FIX: Add defensive check for AI module availability
+            if (typeof updateAISystemState === 'function') {
+                try {
+                    updateAISystemState(null, 'create_code', 'create_code', {
+                        code: result.code,
+                        category: category,
+                        name: name
+                    });
+                } catch (err) {
+                    console.warn('[TaoMaBanVe] Error updating AI state:', err);
+                }
+            }
+            
             // Copy to clipboard automatically
             try {
                 await navigator.clipboard.writeText(result.code);

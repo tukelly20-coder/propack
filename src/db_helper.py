@@ -458,7 +458,9 @@ JSON_TO_COLUMN_MAP = {
     "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh",
     "Mức độ khẩn cấp": "urgency_level",
     "Thời gian mong muốn có bản vẽ": "thoi_gian_mong_muon_ban_ve",
-    "Thời gian hoàn thành kế hoạch": "thoi_gian_hoan_thanh_ke_hoach"
+    "TG mong muốn": "thoi_gian_mong_muon_ban_ve",
+    "Thời gian hoàn thành kế hoạch": "thoi_gian_hoan_thanh_ke_hoach",
+    "TG hoàn thành": "thoi_gian_hoan_thanh_ke_hoach"
 }
 
 # Database columns cho projects (normalized)
@@ -830,8 +832,8 @@ def add_record(record):
             record.get('Loại sản phẩm'),
             record.get('Nhân viên thiết kế'),
             record.get('Tình trạng hoàn thành dự án'),
-            record.get('Thời gian mong muốn có bản vẽ'),
-            record.get('Thời gian hoàn thành kế hoạch'),
+            record.get('Thời gian mong muốn có bản vẽ') or record.get('TG mong muốn'),
+            record.get('Thời gian hoàn thành kế hoạch') or record.get('TG hoàn thành'),
             record.get('sales_name'),
             record.get('user_id'),
             record.get('is_pending', 'no'),
@@ -913,8 +915,8 @@ def update_record(tracking_id, new_data):
                 'Kỹ sư thiết kế': 'nhan_vien_thiet_ke',
                 'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
                 'Mức độ khẩn cấp': 'urgency_level',
-                'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
-                'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach',
+                'TG mong muốn': 'thoi_gian_mong_muon_ban_ve',
+                'TG hoàn thành': 'thoi_gian_hoan_thanh_ke_hoach',
                 'sales_name': 'sales_name',
                 'user_id': 'user_id',
                 'User ID': 'user_id',
@@ -1444,7 +1446,10 @@ def _convert_rows_to_format(rows):
             "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
             "Tính cấp bách": record.get("urgency_level"),
             "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+            "TG mong muốn": record.get("thoi_gian_mong_muon_ban_ve"),
             "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+            "TG hoàn thành": record.get("thoi_gian_hoan_thanh_ke_hoach"),
+            "is_pending": record.get("is_pending"),
             "is_pending": record.get("is_pending"),
             "accepted_by": record.get("accepted_by")
         }

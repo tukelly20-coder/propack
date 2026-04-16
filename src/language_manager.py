@@ -596,7 +596,7 @@ UI_TEXT = {
         "notice_details_specs": "规格:",
         "notice_details_time_info": "⏰ 时间信息",
         "notice_details_urgency": "紧急程度:",
-        "notice_details_desired_time": "期望时间:",
+        "notice_details_desired_time": ":",
         "notice_details_sales_info": "👨‍💼 创建员工",
         "notice_details_sales_name": "姓名:",
         "notice_details_status_info": "📊 状态",

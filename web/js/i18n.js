@@ -739,7 +739,7 @@ const translations = {
         form_tg_hoanthanh: '计划完成时间',
         
         // Urgency options
-        urgency_normal_option: '普通',
+        urgency_normal_option: '正常',
         urgency_urgent_option: '紧急',
         urgency_very_urgent_option: '非常紧急',
         

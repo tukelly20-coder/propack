@@ -206,7 +206,7 @@ function renderNoticesContent() {
         <!-- Data Table -->
         <div class="card">
             <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
+                <div class="table-responsive" style="max-height: calc(100vh - 250px); overflow-y: auto;">
                     <table id="notices-table" class="table table-striped table-hover table-bordered mb-0" 
                            style="width: 100%; table-layout: fixed;">
                         <thead class="table-light sticky-top">
@@ -271,7 +271,7 @@ function renderNoticesContent() {
         
         <!-- Add/Edit Modal -->
         <div class="modal fade" id="notice-modal" tabindex="-1" data-bs-backdrop="static">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header bg-primary text-white">
                         <h5 class="modal-title" id="modal-title-notice">${t('add_notice')}</h5>
@@ -348,7 +348,7 @@ function renderNoticesContent() {
         
         <!-- View Detail Modal -->
         <div class="modal fade" id="view-modal-notice" tabindex="-1">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header bg-info text-white">
                         <h5 class="modal-title"><i class="bi bi-eye"></i> ${t('view_project_title')}</h5>

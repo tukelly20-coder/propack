@@ -1,0 +1,486 @@
+diff --git a/server.py b/server.py
+index 7fc2d3d..463142c 100644
+--- a/server.py
++++ b/server.py
+@@ -36,11 +36,6 @@ def safe_print(*args, **kwargs):
+     except (ValueError, OSError):
+         pass
+ 
+-# Flask Session Configuration
+-app.secret_key = 'propack-vp-secret-key-2024'
+-app.config['SESSION_COOKIE_HTTPONLY'] = True
+-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+-
+ # ========================================================================
+ # Flask App Setup
+ # ========================================================================
+@@ -51,6 +46,11 @@ import tempfile
+ app = Flask(__name__, 
+             template_folder='web/templates',
+             static_folder='web/static')
++
++# Flask Session Configuration (must be after app is defined)
++app.secret_key = 'propack-vp-secret-key-2024'
++app.config['SESSION_COOKIE_HTTPONLY'] = True
++app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+ # CORS configuration - cho phép request từ localhost, duckdns và WAN
+ # Also allow HTTPS origins
+ CORS(app, resources={
+@@ -91,7 +91,7 @@ CORS(app, resources={
+ # ========================================================================
+ # Import server modules
+ # ========================================================================
+-# Import DB helper
++# Import chat modules
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ from src.db_helper import (
+     init_db, init_db_v2, migrate_to_v2,
+@@ -106,6 +106,24 @@ from src.db_helper import (
+     get_projects_by_user, get_accepted_projects_by_engineer, get_all_notices_for_engineer
+ )
+ 
++# Import Chat modules for AI long-term memory
++from src import chat_db
++from src.chat_service import get_context_for_ai, init_user_ai_session, get_system_state, search_for_ai_context, detect_search_intent
++from src.chat_routes import register_chat_routes
++
++# Initialize chat database on startup
++def init_chat():
++    """Initialize all chat modules"""
++    try:
++        chat_db.init_chat_db()
++        register_chat_routes(app)
++        print("[Chat] Chat modules initialized successfully")
++    except Exception as e:
++        print(f"[Chat] Error initializing chat modules: {e}")
++
++# Run initialization
++init_chat()
++
+ # Import Tool Open core
+ tool_open_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Tool open")
+ sys.path.insert(0, tool_open_dir)
+@@ -285,16 +303,88 @@ init_db()
+ migrate_to_v2()
+ ensure_default_users()
+ 
++
++
+ # ========================================================================
+-# Session Management
++# Session Management (Persistent across server restarts)
+ # ========================================================================
+ import secrets
+ import time
++import json
++import os
++import atexit
+ 
+ sessions = {}
+ sessions_lock = threading.Lock()
+ SESSION_TIMEOUT = 3600 * 24  # 24 hours
+ 
++# Session persistence file
++SESSION_FILE = 'sessions.json'
++
++# Debounce timer for saving sessions
++_session_save_timer = None
++_session_save_lock = threading.Lock()
++
++def load_sessions_from_file():
++    """Load sessions from JSON file on startup"""
++    global sessions
++    if os.path.exists(SESSION_FILE):
++        try:
++            with open(SESSION_FILE, 'r', encoding='utf-8') as f:
++                loaded = json.load(f)
++                # Filter out expired sessions
++                current_time = time.time()
++                valid_sessions = {}
++                for token, data in loaded.items():
++                    created_at = data.get('created_at', 0)
++                    elapsed = current_time - created_at
++                    if elapsed < SESSION_TIMEOUT:
++                        valid_sessions[token] = data
++                    
++                sessions = valid_sessions
++                safe_print(f"[Sessions] Loaded {len(sessions)} valid sessions from file")
++        except Exception as e:
++            safe_print(f"[Sessions] Error loading sessions: {e}")
++            sessions = {}
++
++def save_sessions_to_file():
++    """Save sessions to JSON file (called on login/logout)"""
++    try:
++        with open(SESSION_FILE, 'w', encoding='utf-8') as f:
++            json.dump(dict(sessions), f, ensure_ascii=False, indent=2)
++    except Exception as e:
++        safe_print(f"[Sessions] Error saving sessions: {e}")
++
++def schedule_save_sessions():
++    """Schedule a debounced save (prevents excessive file writes)"""
++    global _session_save_timer
++    with _session_save_lock:
++        # Cancel existing timer if any
++        if _session_save_timer:
++            _session_save_timer.cancel()
++        # Schedule new save in 2 seconds
++        _session_save_timer = threading.Timer(2.0, save_sessions_to_file)
++        _session_save_timer.daemon = True
++        _session_save_timer.start()
++
++def cleanup_sessions():
++    """Save sessions on server shutdown (called by atexit)"""
++    global _session_save_timer
++    # Cancel pending timer
++    with _session_save_lock:
++        if _session_save_timer:
++            _session_save_timer.cancel()
++            _session_save_timer = None
++    # Force save all sessions
++    save_sessions_to_file()
++    safe_print("[Sessions] Sessions saved on shutdown")
++
++# Register cleanup for server shutdown
++atexit.register(cleanup_sessions)
++
++# Load sessions on server startup
++load_sessions_from_file()
++
+ # Rate limiting for login
+ LOGIN_RATE_LIMIT = 5
+ LOGIN_RATE_WINDOW = 300
+@@ -886,6 +976,9 @@ def api_login():
+                     'ip': client_ip
+                 }
+             
++            # Force save sessions to file immediately on login
++            save_sessions_to_file()
++            
+             # Remove password from response
+             user_info_copy = user_info.copy()
+             if 'passwords' in user_info_copy:
+@@ -912,6 +1005,9 @@ def api_logout():
+             if token in sessions:
+                 del sessions[token]
+     
++    # Force save sessions to file immediately on logout
++    save_sessions_to_file()
++    
+     return jsonify({"success": True, "message": "Đăng xuất thành công"})
+ 
+ 
+@@ -935,6 +1031,8 @@ def api_me():
+         
+         if remaining <= 0:
+             del sessions[token]
++            # Force save sessions to file when session expires
++            save_sessions_to_file()
+             return jsonify({"authenticated": False, "user": None, "reason": "expired"})
+         
+         # Check if close to expiration (< 5 minutes)
+@@ -1001,6 +1099,9 @@ def api_profile_update():
+         with sessions_lock:
+             sessions[token]['user'] = current_user
+         
++        # Force save sessions to file on profile update
++        save_sessions_to_file()
++        
+         return jsonify({
+             "success": True,
+             "message": "Cập nhật hồ sơ thành công",
+@@ -1295,6 +1396,7 @@ def api_logs():
+     
+     log_content = data.get('content', '')
+     log_type = data.get('type', 'general')
++    device_info = data.get('device_info', {})
+     
+     if not log_content:
+         return jsonify({"success": False, "error": "Nội dung log trống"}), 400
+@@ -1309,16 +1411,38 @@ def api_logs():
+             if session_data:
+                 username = session_data.get('user', {}).get('username', 'anonymous')
+     
++    # Get client IP
++    client_ip = request.remote_addr
++    
+     # Create log file
+     import datetime
+     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+     log_filename = f"web_log_{timestamp}.txt"
+     
++    # Build device info section
++    device_info_str = ""
++    if device_info:
++        screen_width = device_info.get('screenWidth', 0)
++        screen_height = device_info.get('screenHeight', 0)
++        device_info_str = f"""=== Thông tin thiết bị ===
++Browser: {device_info.get('browserName', 'unknown')} {device_info.get('browserVersion', '')}
++OS: {device_info.get('platform', 'unknown')}
++Device: {device_info.get('deviceType', 'unknown')}
++Screen: {screen_width}x{screen_height}
++Language: {device_info.get('language', 'unknown')}
++Timezone: {device_info.get('timezone', 'unknown')}
++User Agent: {device_info.get('userAgent', '')[:100]}...
++Online: {device_info.get('onLine', False)}
++Cookie Enabled: {device_info.get('cookieEnabled', False)}
++
++"""
++    
+     log_entry = f"""=== Web Log Submission ===
+ Thời gian: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+ Người dùng: {username}
+ Loại log: {log_type}
+-=== Nội dung ===
++Client IP: {client_ip}
++{device_info_str}=== Nội dung ===
+ {log_content}
+ 
+ """
+@@ -1659,14 +1783,33 @@ SYSTEM_PROMPT = """Bạn là trợ lý AI của Propack VP - hệ thống quản
+ - POST /api/codes/create - Tạo mã bản vẽ mới
+ - GET /api/codes/search-parent?code=xxx - Tìm mã mẹ
+ 
++### 5b. AI CHAT APIS
++- GET /api/ai/chat/sessions - Lấy danh sách cuộc trò chuyện
++- GET /api/ai/chat/sessions/count - Đếm số cuộc trò chuyện (trả về JSON: {success: true, count: n})
++- GET /api/ai/chat/search?q=xxx - Tìm kiếm trong lịch sử chat
++- GET /api/ai/chat/system-state - Lấy trạng thái hệ thống hiện tại
++- PUT /api/ai/chat/system-state - Cập nhật trạng thái hệ thống
++
++**QUAN TRỌNG - Khi user hỏi về số cuộc hội thoại:**
++- Nếu user hỏi "Có bao nhiêu cuộc hội thoại", "bao nhiêu conversation rồi", "session count", v.v.
++- AI có thể trả lời ngay bằng cách gọi hàm getAISessionCount() từ frontend
++- Hoặc thông tin này đã được inject vào context trong phần "## THÔNG TIN CUỘC TRÒ CHUYỆN"
++
+ ### 6. USER ROLES
+ - Sales: Tạo project, xem lịch sử
+ - Engineer: Nhận job, xem job đã nhận
+ - Admin: Tất cả quyền
+ 
++### 7. QUAN TRỌNG - NGÔN NGỮ
++- Nếu user nói tiếng Việt → trả lời tiếng Việt có dấu
++- Nếu user nói tiếng Trung → trả lời tiếng Trung (简体中文)
++- Nếu user nói tiếng Anh → trả lời tiếng Việt (mặc định)
++- KHÔNG trả lời bằng cả hai ngôn ngữ cùng lúc trong 1 câu
++- Khi hiển thị thông tin user, dùng ngôn ngữ mà user đang sử dụng
++
+ Khi trả lời, hãy:
+ 1. Hiểu context của hệ thống này
+-2. Trả lời bằng tiếng Việt
++2. Xác định ngôn ngữ của user và trả lời bằng ngôn ngữ đó
+ 3. Nếu user hỏi về workflow, mã bản vẽ, hoặc dự án, hãy dựa vào kiến thức trên
+ 4. Nếu cần thông tin về database, có thể truy vấn qua API
+ 
+@@ -2417,10 +2560,17 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+     
+     try:
+         # Build messages for Gemini API
+-        # Add system prompt as first message
++        # Add system prompt as first message (with AI context if available)
++        system_instruction_text = SYSTEM_PROMPT + user_info_str
++        if ai_context_str:
++            system_instruction_text = system_instruction_text + "\n\n" + ai_context_str
++        # Add cross-session search context if found
++        if cross_session_context:
++            system_instruction_text = system_instruction_text + "\n\n" + cross_session_context
++        
+         system_instruction = {
+             "role": "user",
+-            "parts": [{"text": SYSTEM_PROMPT + user_info_str}]
++            "parts": [{"text": system_instruction_text}]
+         }
+         contents = [system_instruction]
+         
+@@ -2527,16 +2677,19 @@ def gemini_chat_stream():
+     message = data.get('message', '')
+     model = data.get('model', GEMINI_MODEL)
+     history = data.get('history', [])
++    session_id = data.get('session_id', '')  # NEW: Session ID for long-term memory
+     
+     # Get user info from token (Authorization header)
+     auth_header = request.headers.get('Authorization', '')
+     user_info_str = ''
++    user_id = None
+     if auth_header.startswith('Bearer '):
+         token = auth_header[7:]
+         with sessions_lock:
+             session_data = sessions.get(token)
+             if session_data:
+                 user = session_data.get('user', {})
++                user_id = user.get('user_id')
+                 user_info_str = f"""
+ ## THÔNG TIN USER HIỆN TẠI
+ - Username: {user.get('username', 'unknown')}
+@@ -2549,6 +2702,31 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+ - Nếu là Engineer: Xem projects với accepted_by = '{user.get('username', '')}'"
+ """
+     
++    # NEW: Get AI context from database if session_id provided
++    ai_context_str = ''
++    if session_id and user_id:
++        try:
++            from src.chat_service import get_context_for_ai
++            ai_context_str = get_context_for_ai(session_id, user_id)
++            if ai_context_str:
++                safe_print(f"[Gemini Stream] Loaded context for session: {session_id}")
++        except Exception as e:
++            safe_print(f"[Gemini Stream] Error loading context: {e}")
++    
++    # NEW: Detect search intent and auto-search cross-session context
++    cross_session_context = ''
++    if user_id and message:
++        try:
++            # Import already done at top of file (line 111)
++            should_search, keywords = detect_search_intent(message)
++            if should_search and keywords:
++                safe_print(f"[Gemini Stream] Detected search intent in message, searching for: {keywords[:50]}...")
++                cross_session_context = search_for_ai_context(user_id, keywords, limit=5)
++                if cross_session_context:
++                    safe_print(f"[Gemini Stream] Found cross-session context, length: {len(cross_session_context)}")
++        except Exception as e:
++            safe_print(f"[Gemini Stream] Error in cross-session search: {e}")
++    
+     if not message:
+         return Response(
+             f"data: {json.dumps({'error': 'Tin nhắn không được để trống'})}\n\n",
+@@ -2689,16 +2867,19 @@ def ollama_chat_stream():
+     model = data.get('model', 'llama3.2:latest')
+     history = data.get('history', [])
+     stream_option = data.get('stream', True)
++    session_id = data.get('session_id', '')  # NEW: Session ID for long-term memory
+     
+     # Get user info from token (Authorization header)
+     auth_header = request.headers.get('Authorization', '')
+     user_info_str = ''
++    user_id = None
+     if auth_header.startswith('Bearer '):
+         token = auth_header[7:]
+         with sessions_lock:
+             session_data = sessions.get(token)
+             if session_data:
+                 user = session_data.get('user', {})
++                user_id = user.get('user_id')
+                 user_info_str = f"""
+ ## THÔNG TIN USER HIỆN TẠI
+ - Username: {user.get('username', 'unknown')}
+@@ -2711,6 +2892,31 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+ - Nếu là Engineer: Xem projects với accepted_by = '{user.get('username', '')}'"
+ """
+     
++    # NEW: Get AI context from database if session_id provided
++    ai_context_str = ''
++    if session_id and user_id:
++        try:
++            from src.chat_service import get_context_for_ai
++            ai_context_str = get_context_for_ai(session_id, user_id)
++            if ai_context_str:
++                safe_print(f"[Ollama Stream] Loaded context for session: {session_id}")
++        except Exception as e:
++            safe_print(f"[Ollama Stream] Error loading context: {e}")
++    
++    # NEW: Detect search intent and auto-search cross-session context
++    cross_session_context = ''
++    if user_id and message:
++        try:
++            # Import already done at top of file (line 111)
++            should_search, keywords = detect_search_intent(message)
++            if should_search and keywords:
++                safe_print(f"[Ollama Stream] Detected search intent in message, searching for: {keywords[:50]}...")
++                cross_session_context = search_for_ai_context(user_id, keywords, limit=5)
++                if cross_session_context:
++                    safe_print(f"[Ollama Stream] Found cross-session context, length: {len(cross_session_context)}")
++        except Exception as e:
++            safe_print(f"[Ollama Stream] Error in cross-session search: {e}")
++    
+     if not message:
+         return Response(
+             f"data: {json.dumps({'error': 'Tin nhắn không được để trống'})}\n\n",
+@@ -2724,8 +2930,15 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+     def generate_stream():
+         try:
+             # Build prompt from history + current message
+-            # Add system prompt first
+-            prompt_parts = [f"System: {SYSTEM_PROMPT + user_info_str}"]
++            # Add system prompt first (with AI context if available)
++            base_system = SYSTEM_PROMPT + user_info_str
++            if ai_context_str:
++                base_system = base_system + "\n\n" + ai_context_str
++            # Add cross-session search context if found
++            if cross_session_context:
++                base_system = base_system + "\n\n" + cross_session_context
++            
++            prompt_parts = [f"System: {base_system}"]
+             for msg in history:
+                 role = msg.get('role', 'user')
+                 content = msg.get('content', '')
+@@ -2867,16 +3080,19 @@ def openrouter_chat_stream():
+     message = data.get('message', '')
+     model = data.get('model', 'google/gemini-2.0-flash-exp:free')
+     history = data.get('history', [])
++    session_id = data.get('session_id', '')  # NEW: Session ID for long-term memory
+     
+     # Get user info from token (Authorization header)
+     auth_header = request.headers.get('Authorization', '')
+     user_info_str = ''
++    user_id = None
+     if auth_header.startswith('Bearer '):
+         token = auth_header[7:]
+         with sessions_lock:
+             session_data = sessions.get(token)
+             if session_data:
+                 user = session_data.get('user', {})
++                user_id = user.get('user_id')
+                 user_info_str = f"""
+ ## THÔNG TIN USER HIỆN TẠI
+ - Username: {user.get('username', 'unknown')}
+@@ -2889,6 +3105,31 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+ - Nếu là Engineer: Xem projects với accepted_by = '{user.get('username', '')}'"
+ """
+     
++    # NEW: Get AI context from database if session_id provided
++    ai_context_str = ''
++    if session_id and user_id:
++        try:
++            from src.chat_service import get_context_for_ai
++            ai_context_str = get_context_for_ai(session_id, user_id)
++            if ai_context_str:
++                safe_print(f"[OpenRouter Stream] Loaded context for session: {session_id}")
++        except Exception as e:
++            safe_print(f"[OpenRouter Stream] Error loading context: {e}")
++    
++    # NEW: Detect search intent and auto-search cross-session context
++    cross_session_context = ''
++    if user_id and message:
++        try:
++            # Import already done at top of file (line 111)
++            should_search, keywords = detect_search_intent(message)
++            if should_search and keywords:
++                safe_print(f"[OpenRouter Stream] Detected search intent in message, searching for: {keywords[:50]}...")
++                cross_session_context = search_for_ai_context(user_id, keywords, limit=5)
++                if cross_session_context:
++                    safe_print(f"[OpenRouter Stream] Found cross-session context, length: {len(cross_session_context)}")
++        except Exception as e:
++            safe_print(f"[OpenRouter Stream] Error in cross-session search: {e}")
++    
+     if not message:
+         return Response(
+             f"data: {json.dumps({'error': 'Tin nhắn không được để trống'})}\n\n",
+@@ -2912,8 +3153,15 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c
+         current_model = model
+         
+         # Build messages for OpenRouter API
+-        # Add system prompt as first message
+-        messages = [{"role": "system", "content": SYSTEM_PROMPT + user_info_str}]
++        # Add system prompt as first message (with AI context if available)
++        system_content = SYSTEM_PROMPT + user_info_str
++        if ai_context_str:
++            system_content = system_content + "\n\n" + ai_context_str
++        # Add cross-session search context if found
++        if cross_session_context:
++            system_content = system_content + "\n\n" + cross_session_context
++        
++        messages = [{"role": "system", "content": system_content}]
+         for msg in history:
+             role = msg.get('role', 'user')
+             if role == 'user':
