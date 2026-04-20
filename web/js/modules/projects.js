@@ -1114,6 +1114,10 @@ function showProjectModal() {
     $('#tracking-id').val('');
     $('#modal-title-project').text(t('add_project_title'));
     
+    // Clear previous validation states
+    $('.is-valid, .is-invalid').removeClass('is-valid is-invalid');
+    $('.invalid-feedback').remove();
+    
     // Set default date
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -1137,6 +1141,9 @@ function showProjectModal() {
     // Populate customer dropdown
     populateCustomerDropdown();
     
+    // Setup real-time validation
+    setupRealTimeValidation();
+    
     // Refresh selectpicker after modal is shown
     const modalElement = document.getElementById('project-modal');
     const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
@@ -1155,6 +1162,82 @@ function showProjectModal() {
     updateProjectFormLabels();
     
     modal.show();
+}
+
+/**
+ * Setup real-time validation for form fields
+ * UX Improvement: Validate fields as user types
+ */
+function setupRealTimeValidation() {
+    // Required fields to validate on blur
+    const requiredFields = [
+        { id: '#field-khachhang', name: 'Khách hàng' },
+        { id: '#field-tensanpham', name: 'Tên sản phẩm' },
+        { id: '#field-lienhe', name: 'Người liên hệ' }
+    ];
+    
+    requiredFields.forEach(field => {
+        const $input = $(field.id);
+        if ($input.length) {
+            $input.off('blur.realvalidation').on('blur.realvalidation', function() {
+                validateFieldOnBlur($(this), field.name);
+            });
+            
+            // Also validate on keyup for better UX
+            $input.off('keyup.realvalidation').on('keyup.realvalidation', function() {
+                if ($(this).val().trim()) {
+                    $(this).removeClass('is-invalid').addClass('is-valid');
+                    $(this).next('.invalid-feedback').remove();
+                }
+            });
+        }
+    });
+    
+    // Number field validation
+    const $quantity = $('#field-soluong');
+    if ($quantity.length) {
+        $quantity.off('blur.realvalidation').on('blur.realvalidation', function() {
+            const value = $(this).val().trim();
+            if (value && isNaN(value)) {
+                showFieldError($(this), 'Số lượng phải là số');
+            } else {
+                clearFieldError($(this));
+            }
+        });
+    }
+}
+
+/**
+ * Validate a single field on blur
+ */
+function validateFieldOnBlur($input, fieldName) {
+    const value = $input.val().trim();
+    
+    if (!value) {
+        showFieldError($input, `${fieldName} là trường bắt buộc`);
+        return false;
+    } else {
+        clearFieldError($input);
+        $input.addClass('is-valid');
+        return true;
+    }
+}
+
+/**
+ * Show field error
+ */
+function showFieldError($input, message) {
+    clearFieldError($input);
+    $input.removeClass('is-valid').addClass('is-invalid');
+    $input.after(`<div class="invalid-feedback" style="display: block; color: #BA1A1A; font-size: 12px;">${message}</div>`);
+}
+
+/**
+ * Clear field error
+ */
+function clearFieldError($input) {
+    $input.removeClass('is-invalid is-valid');
+    $input.next('.invalid-feedback').remove();
 }
 
 /**
@@ -1403,26 +1486,45 @@ async function saveProject() {
     const trackingId = $('#tracking-id').val();
     const isEditMode = !!trackingId;
     
+    // Clear previous validation
+    $('.is-invalid').removeClass('is-invalid');
+    $('.invalid-feedback').remove();
+    
     // Validation - Kiểm tra các trường bắt buộc
     const khachhang = $('#field-khachhang').val().trim();
     const tensanpham = $('#field-tensanpham').val().trim();
     const lienhe = $('#field-lienhe').val().trim();
+    let hasError = false;
     
     if (!khachhang) {
-        showToast(t('warning'), t('validation_khachhang_required'), 'warning');
-        $('#field-khachhang').focus();
-        return;
+        showFieldError($('#field-khachhang'), 'Khách hàng là trường bắt buộc');
+        hasError = true;
     }
     
     if (!tensanpham) {
-        showToast(t('warning'), t('validation_tensanpham_required'), 'warning');
-        $('#field-tensanpham').focus();
-        return;
+        showFieldError($('#field-tensanpham'), 'Tên sản phẩm là trường bắt buộc');
+        hasError = true;
     }
     
     if (!lienhe) {
-        showToast(t('warning'), t('validation_lienhe_required'), 'warning');
-        $('#field-lienhe').focus();
+        showFieldError($('#field-lienhe'), 'Người liên hệ là trường bắt buộc');
+        hasError = true;
+    }
+    
+    // Validate quantity if provided
+    const quantity = $('#field-soluong').val().trim();
+    if (quantity && isNaN(quantity)) {
+        showFieldError($('#field-soluong'), 'Số lượng phải là số');
+        hasError = true;
+    }
+    
+    if (hasError) {
+        // Scroll to first error
+        const firstError = $('.is-invalid').first();
+        if (firstError.length) {
+            firstError[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            firstError.focus();
+        }
         return;
     }
     

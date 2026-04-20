@@ -1,16 +1,53 @@
 /**
  * CSS Styles cho Project Tracking Web
- * Thiết kế theo phong cách desktop app gốc
+ * Thiết kế theo Material Design 3
+ * Updated: UX Audit improvements
  */
 
-/* Base styles */
+/* Material Design 3 Color Tokens */
 :root {
+    /* Primary - Professional Blue */
     --primary-color: #1976D2;
     --primary-dark: #1565C0;
     --primary-light: #42A5F5;
-    --success-color: #28a745;
-    --warning-color: #ffc107;
-    --danger-color: #dc3545;
+    --primary-container: #D1E4FF;
+    --on-primary: #FFFFFF;
+    --on-primary-container: #001D36;
+    
+    /* Secondary - Trust Teal */
+    --secondary-color: #006B59;
+    --secondary-container: #6FF7E5;
+    
+    /* Success - Material Green */
+    --success-color: #2E7D32;
+    --success-light: #C8E6C9;
+    
+    /* Error - Material Red */
+    --error-color: #BA1A1A;
+    --error-light: #FFDAD6;
+    --error-container: #FFDAD6;
+    
+    /* Warning - Material Orange */
+    --warning-color: #ED6C02;
+    --warning-light: #FFF4E5;
+    
+    /* Surface colors */
+    --surface: #FFFEFE;
+    --surface-variant: #E7E0EC;
+    --surface-container: #F3EDF7;
+    
+    /* On surface */
+    --on-surface: #1C1B1F;
+    --on-surface-variant: #49454F;
+    
+    /* Outline */
+    --outline: #79747E;
+    --outline-variant: #CAC4D0;
+    
+    /* Legacy compatibility */
+    --success-color-legacy: #28a745;
+    --warning-color-legacy: #ffc107;
+    --danger-color-legacy: #dc3545;
     --info-color: #17a2b8;
     --light-gray: #f8f9fa;
     --border-color: #dee2e6;
@@ -1977,4 +2014,183 @@ body.resizing .table * {
     background: linear-gradient(135deg, rgba(40, 167, 69, 0.08) 0%, rgba(72, 199, 100, 0.08) 100%);
     border-color: rgba(40, 167, 69, 0.15);
     color: var(--success-color);
+}
+
+/* =========================================
+ * UX AUDIT IMPROVEMENTS - Material Design 3
+ * Validation States & Form Feedback
+ * ========================================= */
+
+/* Valid field state */
+.is-valid {
+    border-color: var(--success-color) !important;
+    background-color: var(--success-light) !important;
+}
+
+.is-valid:focus {
+    border-color: var(--success-color) !important;
+    box-shadow: 0 0 0 3px rgba(46, 125, 50, 0.15) !important;
+}
+
+/* Invalid field state */
+.is-invalid {
+    border-color: var(--error-color) !important;
+    background-color: var(--error-container) !important;
+}
+
+.is-invalid:focus {
+    border-color: var(--error-color) !important;
+    box-shadow: 0 0 0 3px rgba(186, 26, 26, 0.15) !important;
+}
+
+/* Validation feedback text */
+.invalid-feedback {
+    display: block;
+    width: 100%;
+    margin-top: 0.25rem;
+    font-size: 12px;
+    color: var(--error-color);
+    font-weight: 500;
+}
+
+/* Form controls with validation feedback */
+.form-control.is-invalid,
+.form-select.is-invalid {
+    border-width: 2px;
+}
+
+.form-control.is-valid,
+.form-select.is-valid {
+    border-width: 2px;
+}
+
+/* Multi-step form wizard */
+.step-wizard {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 0;
+    margin-bottom: 1.5rem;
+}
+
+.step-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.step-indicator.completed {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.step-indicator.current {
+    background-color: var(--primary-color);
+    color: white;
+    box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.2);
+}
+
+.step-indicator.pending {
+    background-color: var(--surface-variant);
+    color: var(--outline);
+}
+
+.step-line {
+    flex: 1;
+    height: 3px;
+    background-color: var(--surface-variant);
+    margin: 0 8px;
+}
+
+.step-line.completed {
+    background-color: var(--success-color);
+}
+
+/* Toast improvements */
+.toast {
+    min-width: 300px;
+    max-width: 400px;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Loading state for save buttons */
+.btn.saving {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.btn.saving::after {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-left: 8px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* UX: Empty state improvements */
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--on-surface-variant);
+}
+
+.empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state .empty-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state .empty-description {
+    font-size: 14px;
+    margin-bottom: 1.5rem;
+}
+
+.empty-state .empty-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 576px) {
+    .step-indicator {
+        width: 28px;
+        height: 28px;
+        font-size: 12px;
+    }
+    
+    .step-wizard {
+        padding: 0.5rem 0;
+    }
 }

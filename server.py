@@ -36,11 +36,6 @@ def safe_print(*args, **kwargs):
     except (ValueError, OSError):
         pass
 
-# Flask Session Configuration
-app.secret_key = 'propack-vp-secret-key-2024'
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-
 # ========================================================================
 # Flask App Setup
 # ========================================================================
@@ -48,9 +43,14 @@ from flask import Flask, request, jsonify, send_from_directory, make_response, s
 from flask_cors import CORS
 import tempfile
 
-app = Flask(__name__, 
+app = Flask(__name__,
             template_folder='web/templates',
             static_folder='web/static')
+
+# Flask Session Configuration
+app.secret_key = 'propack-vp-secret-key-2024'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # CORS configuration - cho phép request từ localhost, duckdns và WAN
 # Also allow HTTPS origins
 CORS(app, resources={

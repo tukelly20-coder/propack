@@ -73,6 +73,15 @@ try:
 except ImportError:
     from New_Sales import NewSalesDialog
 
+# Import New_Sales_Wizard - Multi-step wizard cho Sales (UX improvement)
+try:
+    from src.New_Sales_Wizard import NewSalesWizard
+except ImportError:
+    try:
+        from New_Sales_Wizard import NewSalesWizard
+    except ImportError:
+        NewSalesWizard = None  # Fallback to old dialog
+
 # Import NoticeTab module - Tab hiển thị thông báo
 try:
     from src.NoticeTab import NoticeTab
@@ -1497,18 +1506,31 @@ class MainWindow(QMainWindow):
         """Thêm bản ghi mới - Hiển thị dialog phù hợp với role"""
         # Kiểm tra role của user
         if session_manager.is_sales():
-            # Sales: Sử dụng NewSalesDialog
-            print("[LOG] User is sales, opening NewSalesDialog")
-            dialog = NewSalesDialog(self, self.db_client.host)
-            if dialog.exec() == QDialog.Accepted:
-                # NewSalesDialog đã tự lưu vào DB qua ADD_SALES_RECORD
-                # Và đã hiển thị thông báo thành công trong NewSalesDialog
-                # Chỉ cần reload data để cập nhật bảng
-                self.load_data()
-                # Hiển thị trang cuối cùng
-                total_pages = (len(self.filtered_data) + self.items_per_page - 1) // self.items_per_page
-                self.current_page = total_pages
-                self.display_data()
+            # Sales: Sử dụng NewSalesWizard (UX improvement - multi-step)
+            if NewSalesWizard is not None:
+                print("[LOG] User is sales, opening NewSalesWizard (Multi-step)")
+                dialog = NewSalesWizard(self, self.db_client.host)
+                if dialog.exec() == QDialog.Accepted:
+                    # Wizard đã tự lưu vào DB
+                    # reload data để cập nhật bảng
+                    self.load_data()
+                    # Hiển thị trang cuối cùng
+                    total_pages = (len(self.filtered_data) + self.items_per_page - 1) // self.items_per_page
+                    self.current_page = total_pages
+                    self.display_data()
+            else:
+                # Fallback to old dialog
+                print("[LOG] User is sales, opening NewSalesDialog")
+                dialog = NewSalesDialog(self, self.db_client.host)
+                if dialog.exec() == QDialog.Accepted:
+                    # NewSalesDialog đã tự lưu vào DB qua ADD_SALES_RECORD
+                    # Và đã hiển thị thông báo thành công trong NewSalesDialog
+                    # Chỉ cần reload data để cập nhật bảng
+                    self.load_data()
+                    # Hiển thị trang cuối cùng
+                    total_pages = (len(self.filtered_data) + self.items_per_page - 1) // self.items_per_page
+                    self.current_page = total_pages
+                    self.display_data()
         else:
             # Non-sales users: Sử dụng EditDialog
             print("[LOG] User is NOT sales, opening EditDialog")
