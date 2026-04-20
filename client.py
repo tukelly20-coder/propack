@@ -539,7 +539,7 @@ class MainWindow(QWidget):
             self.page_label.setText(CLIENT_TEXT[self.current_language]['page'].format(page=self.history_page + 1))
 
     def prev_page(self):
-        print("Pressed Trước (Prev) button")
+        print("Pressed Previous button")
         self.prev_button.setEnabled(False)
         QTimer.singleShot(1000, lambda: self.prev_button.setEnabled(True))
         if self.history_page > 0:
@@ -866,9 +866,9 @@ class MainWindow(QWidget):
 
     def on_logout(self):
         """Xử lý đăng xuất - đóng cửa sổ hiện tại và hiện dialog đăng nhập lại"""
-        logger.info("Người dùng yêu cầu đăng xuất")
+        logger.info("User requested logout")
         
-        print("[MainWindow] Đang đăng xuất...")
+        print("[MainWindow] Logging out...")
         
         # QUAN TRỌNG: Ngắt kết nối signals và ch?threads kết thúc trước khi đóng window
         # đ?tránh thread c?gắng access window đã b?hủy gây crash
@@ -897,18 +897,18 @@ class MainWindow(QWidget):
         except:
             pass
         
-        # Hiển th?dialog đăng nhập lại
-        print("[MainWindow] Hiển th?dialog đăng nhập")
+        # Show login dialog again
+        print("[MainWindow] Showing login dialog")
         login_dialog = LoginDialog()
         if login_dialog.exec() == QDialog.DialogCode.Accepted:
             self.close()
-            # S?dụng biến toàn cục đ?gi?tham chiếu đến MainWindow mới
+            # Use global variable to reference new MainWindow
             global _main_window_instance
             _main_window_instance = MainWindow()
             _main_window_instance.show()
         else:
-            # Hủy đăng nhập, thoát app
-            print("[MainWindow] Đã hủy đăng nhập, thoát app")
+            # Login cancelled, exit app
+            print("[MainWindow] Login cancelled, exiting app")
             self.close()
             import sys
             sys.exit(0)
@@ -971,51 +971,51 @@ if __name__ == "__main__":
     auto_login_success = False
     auto_login_error = None
     
-    # Bước 1: Kiểm tra session cục b?
+    # Step 1: Check local session
     if session_manager.is_logged_in():
-        print(f"[AutoLogin] Session cục b?tồn tại cho user: {session_manager.get_current_user()}")
+        print(f"[AutoLogin] Local session exists for user: {session_manager.get_current_user()}")
         
-        # Bước 2: Lấy server IP t?session hoặc file
+        # Step 2: Get server IP from session or file
         server_ip = session_manager.get_server_ip() or session_manager.load_server_ip_from_file()
         
         if server_ip:
-            print(f"[AutoLogin] Đang xác thực với server {server_ip}...")
+            print(f"[AutoLogin] Authenticating with server {server_ip}...")
             
-            # Bước 3: Th?xác thực với server bằng credentials đã lưu
+            # Step 3: Try authenticate with saved credentials
             result = session_manager.validate_session_with_server(server_ip)
             
             if result['success']:
-                print(f"[AutoLogin] Xác thực server thành công cho user: {result['user_info'].get('username', 'unknown')}")
+                print(f"[AutoLogin] Server auth successful for user: {result['user_info'].get('username', 'unknown')}")
                 auto_login_success = True
             else:
-                auto_login_error = result.get('error', 'Xác thực thất bại')
-                print(f"[AutoLogin] Xác thực server thất bại: {auto_login_error}")
-                print("[AutoLogin] S?hiển th?dialog đăng nhập...")
+                auto_login_error = result.get('error', 'Authentication failed')
+                print(f"[AutoLogin] Server auth failed: {auto_login_error}")
+                print("[AutoLogin] Showing login dialog...")
         else:
-            print("[AutoLogin] Không tìm thấy server IP")
+            print("[AutoLogin] No server IP found")
     else:
-        print("[AutoLogin] Không có session cục bộ")
+        print("[AutoLogin] No local session")
     
-    # Nếu auto login thành công, hiển th?cửa s?Project Tracking trực tiếp
+    # If auto login success, show Project Tracking window directly
     if auto_login_success:
         server_ip = session_manager.get_server_ip() or ""
         pt_window = ProjectTrackingMainWindow(server_ip=server_ip)
         pt_window.show()
         sys.exit(app.exec())
     
-    # Nếu auto login thất bại, hiện dialog đăng nhập
+    # If auto login failed, show login dialog
     if auto_login_error:
-        print(f"[AutoLogin] Lỗi: {auto_login_error}")
+        print(f"[AutoLogin] Error: {auto_login_error}")
     
-    # Hiện dialog đăng nhập
+    # Show login dialog
     login_dialog = LoginDialog()
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
-        # Đăng nhập thành công, m?cửa s?Project Tracking trực tiếp
+        # Login success, open Project Tracking window
         server_ip = session_manager.get_server_ip() or ""
         pt_window = ProjectTrackingMainWindow(server_ip=server_ip)
         pt_window.show()
         sys.exit(app.exec())
     else:
-        # Hủy đăng nhập, thoát app
-        print("Đã hủy đăng nhập")
+        # Login cancelled, exit app
+        print("Login cancelled")
         sys.exit(0)

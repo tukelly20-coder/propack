@@ -491,7 +491,7 @@ class NoticeTab(QWidget):
             self.refresh_timer.stop()
     
     def apply_filters(self):
-        """Áp dụng tất cảfilters và hiển thị""
+        """Áp dụng tất cả filters và hiển thị"""
         filtered_notices = self.notices.copy()
         
         # Get filter values from language_manager
@@ -694,7 +694,7 @@ class NoticeTab(QWidget):
         accepted_at = notice.get('accepted_at', '-')
         
         # Get desired time - check both new and old keys for compatibility
-        desired_time = data.get('Thời gian mong muốn có bản vẼ, 
+        desired_time = data.get('Thời gian mong muốn có bản vẽ',
                     data.get('Desired Solution Time', '-'))
         
         # Get urgency level and display in current language

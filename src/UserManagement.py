@@ -1,6 +1,6 @@
 """
 UserManagement.py - Module quản lý users cho Admin
-Module này cung cấp giao diện đ�?admin quản lý tài khoản người dùng
+Module này cung cấp giao diện đ�?admin quản lý tài khoản người dùng
 """
 
 import json
@@ -25,7 +25,7 @@ except ImportError:
 
 
 class UsersLoader(QThread):
-    """Thread đ�?load users t�?server"""
+    """Thread đ�?load users t�?server"""
     users_loaded = Signal(list)
     error_occurred = Signal(str)
     
@@ -93,8 +93,8 @@ class AddUserDialog(QDialog):
         
         # Full Name
         self.fullname_input = QLineEdit()
-        self.fullname_input.setPlaceholderText("H�?và tên")
-        layout.addRow("H�?tên / 姓名:", self.fullname_input)
+        self.fullname_input.setPlaceholderText("H�?và tên")
+        layout.addRow("H�?tên / 姓名:", self.fullname_input)
         
         # Role
         self.role_combo = QComboBox()
@@ -121,9 +121,9 @@ class AddUserDialog(QDialog):
         
         # Status
         self.status_combo = QComboBox()
-        self.status_combo.addItem("Hoạt động / 激�?, "active")
+        self.status_combo.addItem("Hoạt động / 激活", "active")
         self.status_combo.addItem("Khóa / 锁定", "locked")
-        layout.addRow("Trạng thái / 状�?", self.status_combo)
+        layout.addRow("Trạng thái / 状态:", self.status_combo)
         
         # Permissions Group
         permissions_group = QGroupBox("Quyền hạn / 权限")
@@ -139,32 +139,32 @@ class AddUserDialog(QDialog):
         permissions_layout.addWidget(self.create_code_cb)
         
         # view_history
-        self.view_history_cb = QCheckBox("Xem lịch s�?/ 查看历史")
-        self.view_history_cb.setToolTip("Quyền xem lịch s�?tạo code")
+        self.view_history_cb = QCheckBox("Xem lịch sử / 查看历史")
+        self.view_history_cb.setToolTip("Quyền xem lịch sử tạo code")
         self.permission_checkboxes['view_history'] = self.view_history_cb
         permissions_layout.addWidget(self.view_history_cb)
         
         # delete_history
-        self.delete_history_cb = QCheckBox("Xóa lịch s�?/ 删除历史")
-        self.delete_history_cb.setToolTip("Quyền xóa lịch s�?tạo code")
+        self.delete_history_cb = QCheckBox("Xóa lịch sử / 删除历史")
+        self.delete_history_cb.setToolTip("Quyền xóa lịch sử tạo code")
         self.permission_checkboxes['delete_history'] = self.delete_history_cb
         permissions_layout.addWidget(self.delete_history_cb)
         
         # export
-        self.export_cb = QCheckBox("Xuất d�?liệu / 导出数据")
-        self.export_cb.setToolTip("Quyền xuất d�?liệu")
+        self.export_cb = QCheckBox("Xuất dữ liệu / 导出数据")
+        self.export_cb.setToolTip("Quyền xuất dữ liệu")
         self.permission_checkboxes['export'] = self.export_cb
         permissions_layout.addWidget(self.export_cb)
         
         # admin
-        self.admin_cb = QCheckBox("Quản tr�?/ 管理�?)
-        self.admin_cb.setToolTip("Quyền quản tr�?h�?thống")
+        self.admin_cb = QCheckBox("Quản trị / 管理")
+        self.admin_cb.setToolTip("Quyền quản trị hệ thống")
         self.permission_checkboxes['admin'] = self.admin_cb
         permissions_layout.addWidget(self.admin_cb)
         
         # job_accept
         self.job_accept_cb = QCheckBox("Nhận Job / 接收工作")
-        self.job_accept_cb.setToolTip("Quyền nhận job t�?danh sách ch�?)
+        self.job_accept_cb.setToolTip("Quyền nhận job từ danh sách chờ")
         self.permission_checkboxes['job_accept'] = self.job_accept_cb
         permissions_layout.addWidget(self.job_accept_cb)
         
@@ -193,7 +193,7 @@ class AddUserDialog(QDialog):
         """)
         self.save_btn.clicked.connect(self.save)
         
-        self.cancel_btn = QPushButton("�?Hủy / 取消")
+        self.cancel_btn = QPushButton("�?Hủy / 取消")
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
@@ -215,7 +215,7 @@ class AddUserDialog(QDialog):
         self.setLayout(layout)
     
     def load_data(self):
-        """Load d�?liệu user cần sửa"""
+        """Load d�?liệu user cần sửa"""
         if self.edit_user:
             self.username_input.setText(self.edit_user.get('username', ''))
             self.username_input.setEnabled(False)  # Can't change username
@@ -247,7 +247,7 @@ class AddUserDialog(QDialog):
             self.set_permissions(permissions)
     
     def on_role_changed(self):
-        """Cập nhật permissions khi role thay đổi (ch�?khi thêm mới)"""
+        """Cập nhật permissions khi role thay đổi (ch�?khi thêm mới)"""
         if self.edit_user is None:  # Only for new users
             role = self.role_combo.currentData()
             default_perms = self.get_default_permissions(role)
@@ -274,7 +274,7 @@ class AddUserDialog(QDialog):
         return [perm for perm, cb in self.permission_checkboxes.items() if cb.isChecked()]
     
     def validate(self) -> tuple:
-        """Validate d�?liệu"""
+        """Validate d�?liệu"""
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
         fullname = self.fullname_input.text().strip()
@@ -287,11 +287,11 @@ class AddUserDialog(QDialog):
             return False, "Vui lòng nhập mật khẩu"
         
         if not fullname:
-            return False, "Vui lòng nhập h�?tên"
+            return False, "Vui lòng nhập h�?tên"
         
         # Kiểm tra nếu tạo mới user có status = 'locked'
         if self.edit_user is None and status == 'locked':
-            return False, "Không th�?tạo user mới với trạng thái b�?khóa. Vui lòng chọn 'Hoạt động'."
+            return False, "Không th�?tạo user mới với trạng thái b�?khóa. Vui lòng chọn 'Hoạt động'."
         
         return True, ""
     
@@ -347,7 +347,7 @@ class UserManagement(QWidget):
         layout.addWidget(title_label)
         
         # Info
-        self.info_label = QLabel("Ch�?Admin và IT mới có quyền quản lý người dùng.")
+        self.info_label = QLabel("Ch�?Admin và IT mới có quyền quản lý người dùng.")
         self.info_label.setStyleSheet("color: #666; font-size: 12px;")
         layout.addWidget(self.info_label)
         
@@ -356,12 +356,12 @@ class UserManagement(QWidget):
         self.table.setColumnCount(14)
         self.table.setHorizontalHeaderLabels([
             "Username",
-            "H�?tên / 姓名",
+            "Họ tên / 姓名",
             "Vai trò / 角色",
             "Mã NV / 工号",
             "Phòng ban / 部门",
-            "Trạng thái / 状�?,
-            "Đăng nhập cuối / 最后登�?,
+            "Trạng thái / 状态",
+            "Đăng nhập cuối / 最后登录",
             "Ngày tạo / 创建日期",
             "Tạo Code",
             "Xem History",
@@ -422,7 +422,7 @@ class UserManagement(QWidget):
         self.refresh_btn.clicked.connect(self.load_users)
         buttons_layout.addWidget(self.refresh_btn)
         
-        self.add_btn = QPushButton("�?Thêm / 添加")
+        self.add_btn = QPushButton("�?Thêm / 添加")
         self.add_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
@@ -452,11 +452,11 @@ class UserManagement(QWidget):
         self.edit_btn.clicked.connect(self.edit_user)
         buttons_layout.addWidget(self.edit_btn)
         
-        self.lock_btn = QPushButton("🔒 Khóa/M�?/ 锁定/解锁")
+        self.lock_btn = QPushButton("🔒 Khóa/M�?/ 锁定/解锁")
         self.lock_btn.clicked.connect(self.toggle_lock)
         buttons_layout.addWidget(self.lock_btn)
         
-        self.delete_btn = QPushButton("🗑�?Xóa / 删除")
+        self.delete_btn = QPushButton("🗑�?Xóa / 删除")
         self.delete_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f44336;
@@ -478,27 +478,27 @@ class UserManagement(QWidget):
         self.setLayout(layout)
     
     def load_users(self):
-        """Load users t�?server"""
+        """Load users t�?server"""
         self.users_loader = UsersLoader(self.server_ip)
         self.users_loader.users_loaded.connect(self.on_users_loaded)
         self.users_loader.error_occurred.connect(self.on_users_error)
         self.users_loader.start()
         
-        self.info_label.setText("�?Đang tải... / 加载�?..")
+        self.info_label.setText("�?Đang tải... / 加载�?..")
     
     def on_users_loaded(self, users: List[Dict]):
-        """X�?lý khi load users thành công"""
+        """X�?lý khi load users thành công"""
         self.users = users
         self.populate_table()
-        self.info_label.setText(f"📊 Tổng s�?người dùng: {len(users)}")
+        self.info_label.setText(f"📊 Tổng s�?người dùng: {len(users)}")
     
     def on_users_error(self, error: str):
-        """X�?lý khi load users lỗi"""
-        QMessageBox.warning(self, "Lỗi", f"Không th�?tải danh sách users: {error}")
-        self.info_label.setText("�?Lỗi khi tải d�?liệu")
+        """X�?lý khi load users lỗi"""
+        QMessageBox.warning(self, "Lỗi", f"Không th�?tải danh sách users: {error}")
+        self.info_label.setText("�?Lỗi khi tải d�?liệu")
     
     def populate_table(self):
-        """Hiển th�?users lên table"""
+        """Hiển th�?users lên table"""
         self.table.setRowCount(0)
         
         for user in self.users:
@@ -563,32 +563,32 @@ class UserManagement(QWidget):
             permissions = user.get('permissions', [])
             
             # create_code
-            item_code = QTableWidgetItem("�? if 'create_code' in permissions else "�?)
+            item_code = QTableWidgetItem("Có" if 'create_code' in permissions else "Không")
             item_code.setBackground(QColor(200, 255, 200) if 'create_code' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 8, item_code)
             
             # view_history
-            item_history = QTableWidgetItem("�? if 'view_history' in permissions else "�?)
+            item_history = QTableWidgetItem("Có" if 'view_history' in permissions else "Không")
             item_history.setBackground(QColor(200, 255, 200) if 'view_history' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 9, item_history)
             
             # delete_history
-            item_delete = QTableWidgetItem("�? if 'delete_history' in permissions else "�?)
+            item_delete = QTableWidgetItem("Có" if 'delete_history' in permissions else "Không")
             item_delete.setBackground(QColor(200, 255, 200) if 'delete_history' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 10, item_delete)
             
             # export
-            item_export = QTableWidgetItem("�? if 'export' in permissions else "�?)
+            item_export = QTableWidgetItem("Có" if 'export' in permissions else "Không")
             item_export.setBackground(QColor(200, 255, 200) if 'export' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 11, item_export)
             
             # admin
-            item_admin = QTableWidgetItem("�? if 'admin' in permissions else "�?)
+            item_admin = QTableWidgetItem("Có" if 'admin' in permissions else "Không")
             item_admin.setBackground(QColor(200, 255, 200) if 'admin' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 12, item_admin)
             
             # job_accept
-            item_job_accept = QTableWidgetItem("�? if 'job_accept' in permissions else "�?)
+            item_job_accept = QTableWidgetItem("Có" if 'job_accept' in permissions else "Không")
             item_job_accept.setBackground(QColor(200, 255, 200) if 'job_accept' in permissions else QColor(255, 200, 200))
             self.table.setItem(row, 13, item_job_accept)
         
@@ -604,7 +604,7 @@ class UserManagement(QWidget):
         """Sửa user được chọn"""
         selected = self.table.selectedIndexes()
         if not selected:
-            QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một người dùng đ�?sửa.")
+            QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một người dùng đ�?sửa.")
             return
         
         row = selected[0].row()
@@ -618,7 +618,7 @@ class UserManagement(QWidget):
         dialog.exec()
     
     def on_user_saved(self, user_data: Dict, edit_user: Optional[Dict] = None):
-        """X�?lý khi user được lưu (thêm/sửa)"""
+        """X�?lý khi user được lưu (thêm/sửa)"""
         # Gửi request lên server
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -658,13 +658,13 @@ class UserManagement(QWidget):
                 self.load_users()
             else:
                 error = response.get("error", "Unknown error")
-                QMessageBox.critical(self, "Lỗi", f"Không th�?lưu: {error}")
+                QMessageBox.critical(self, "Lỗi", f"Không th�?lưu: {error}")
                 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Lỗi kết nối: {e}")
     
     def toggle_lock(self):
-        """Khóa/M�?khóa user"""
+        """Khóa/M�?khóa user"""
         selected = self.table.selectedIndexes()
         if not selected:
             QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một người dùng.")
@@ -679,7 +679,7 @@ class UserManagement(QWidget):
         current_status = user.get('status', 'active')
         
         new_status = 'active' if current_status == 'locked' else 'locked'
-        action_text = "m�?khóa" if new_status == 'active' else "khóa"
+        action_text = "m�?khóa" if new_status == 'active' else "khóa"
         
         reply = QMessageBox.question(
             self, "Xác nhận",
@@ -720,7 +720,7 @@ class UserManagement(QWidget):
                 QMessageBox.information(self, "Thành công", f"Đã {action_text} user!")
                 self.load_users()
             else:
-                QMessageBox.critical(self, "Lỗi", "Không th�?cập nhật trạng thái.")
+                QMessageBox.critical(self, "Lỗi", "Không th�?cập nhật trạng thái.")
                 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Lỗi kết nối: {e}")
@@ -729,7 +729,7 @@ class UserManagement(QWidget):
         """Xóa user"""
         selected = self.table.selectedIndexes()
         if not selected:
-            QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một người dùng đ�?xóa.")
+            QMessageBox.warning(self, "Cảnh báo", "Vui lòng chọn một người dùng đ�?xóa.")
             return
         
         row = selected[0].row()
@@ -742,7 +742,7 @@ class UserManagement(QWidget):
         
         reply = QMessageBox.question(
             self, "Xác nhận xóa",
-            f"Bạn có chắc muốn xóa user '{username}' không?\n\nHành động này không th�?hoàn tác!",
+            f"Bạn có chắc muốn xóa user '{username}' không?\n\nHành động này không th�?hoàn tác!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -778,7 +778,7 @@ class UserManagement(QWidget):
                 QMessageBox.information(self, "Thành công", "Đã xóa user!")
                 self.load_users()
             else:
-                QMessageBox.critical(self, "Lỗi", "Không th�?xóa user.")
+                QMessageBox.critical(self, "Lỗi", "Không th�?xóa user.")
                 
         except Exception as e:
             QMessageBox.critical(self, "Lỗi", f"Lỗi kết nối: {e}")

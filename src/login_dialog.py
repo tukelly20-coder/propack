@@ -32,7 +32,7 @@ from src.session_manager import session_manager, get_session_manager
 
 # Login Requester - xác thực với server
 class LoginRequester(QThread):
-    """Thread đ�?gửi login request lên server"""
+    """Thread để gửi login request lên server"""
     login_result = Signal(dict)  # {"success": bool, "user_info": dict, "error": str}
     
     def __init__(self, server_ip, username, password):
@@ -42,7 +42,7 @@ class LoginRequester(QThread):
         self.password = password
     
     def run(self):
-        """Gửi login request lên server với x�?lý lỗi chi tiết"""
+        """Gửi login request lên server với xử lý lỗi chi tiết"""
         logger.info(f"Bắt đầu login request đến {self.server_ip}")
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -78,22 +78,22 @@ class LoginRequester(QThread):
                 "error": "Server không phản hồi sau 10 giây. Vui lòng kiểm tra server đang chạy."
             })
         except ConnectionRefusedError:
-            logger.error(f"Server t�?chối kết nối t�?{self.server_ip}")
+            logger.error(f"Server từ chối kết nối tới {self.server_ip}")
             self.login_result.emit({
-                "success": False, 
-                "error": "Server t�?chối kết nối. Vui lòng kiểm tra server đang chạy."
+                "success": False,
+                "error": "Server từ chối kết nối. Vui lòng kiểm tra server đang chạy."
             })
         except ConnectionResetError:
-            logger.error(f"Kết nối b�?reset bởi {self.server_ip}")
+            logger.error(f"Kết nối bị reset bởi {self.server_ip}")
             self.login_result.emit({
-                "success": False, 
-                "error": "Kết nối b�?reset. Vui lòng th�?lại."
+                "success": False,
+                "error": "Kết nối bị reset. Vui lòng thử lại."
             })
         except json.JSONDecodeError as e:
-            logger.error(f"Phản hồi t�?server không hợp l�? {e}")
+            logger.error(f"Phản hồi từ server không hợp lệ {e}")
             self.login_result.emit({
-                "success": False, 
-                "error": "Phản hồi t�?server không hợp l�? Vui lòng kiểm tra server."
+                "success": False,
+                "error": "Phản hồi từ server không hợp lệ. Vui lòng kiểm tra server."
             })
         except OSError as e:
             logger.error(f"Lỗi socket: {e}")
@@ -113,7 +113,7 @@ class LoginRequester(QThread):
 
 # Connection Checker - kiểm tra kết nối server
 class ConnectionChecker(QThread):
-    """Thread đ�?kiểm tra kết nối server"""
+    """Thread đ�?kiểm tra kết nối server"""
     connection_status = Signal(str)  # 'connected' hoặc 'disconnected'
     
     def __init__(self, server_ip):
@@ -121,7 +121,7 @@ class ConnectionChecker(QThread):
         self.server_ip = server_ip
     
     def run(self):
-        """Kiểm tra kết nối server với x�?lý lỗi chi tiết"""
+        """Kiểm tra kết nối server với xử lý lỗi chi tiết"""
         logger.info(f"Kiểm tra kết nối đến {self.server_ip}")
         
         # Kiểm tra DNS/IP trước
@@ -133,7 +133,7 @@ class ConnectionChecker(QThread):
             self.connection_status.emit('disconnected')
             return
         
-        # Th�?kết nối socket
+        # Thử kết nối socket
         try:
             client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             client_socket.settimeout(5)  # Timeout 5 giây
@@ -157,19 +157,19 @@ class ConnectionChecker(QThread):
                 logger.info(f"Kết nối thành công đến {self.server_ip}")
                 self.connection_status.emit('connected')
             else:
-                logger.warning(f"Phản hồi không mong đợi t�?{self.server_ip}: {response}")
+                logger.warning(f"Phản hồi không mong đợi từ {self.server_ip}: {response}")
                 self.connection_status.emit('disconnected')
-                
+        
         except socket.timeout:
             logger.error(f"Timeout khi kiểm tra kết nối đến {self.server_ip}")
             self.connection_status.emit('disconnected')
-            
+        
         except ConnectionRefusedError:
-            logger.error(f"Server t�?chối kết nối t�?{self.server_ip}")
+            logger.error(f"Server từ chối kết nối tới {self.server_ip}")
             self.connection_status.emit('disconnected')
-            
+        
         except ConnectionResetError:
-            logger.error(f"Kết nối b�?reset bởi {self.server_ip}")
+            logger.error(f"Kết nối bị reset bởi {self.server_ip}")
             self.connection_status.emit('disconnected')
             
         except OSError as e:
@@ -203,11 +203,11 @@ class LoginDialog(QDialog):
         
         Args:
             parent: Widget cha
-            language: Ngôn ng�?('vi' hoặc 'zh'), nếu None s�?t�?động load
+            language: Ngôn ng�?('vi' hoặc 'zh'), nếu None s�?t�?động load
         """
         super().__init__(parent)
         
-        # Load ngôn ng�?
+        # Load ngôn ng�?
         self.current_language = language or load_language()
         
         # Thiết lập dialog
@@ -419,13 +419,13 @@ class LoginDialog(QDialog):
         buttons_layout.addWidget(self.cancel_button)
         layout.addLayout(buttons_layout)
 
-        # Thay đổi ngôn ng�?
+        # Thay đổi ngôn ng�?
         lang_layout = QHBoxLayout()
         lang_layout.addWidget(self.language_label)
         lang_layout.addWidget(self.language_combo)
         layout.addLayout(lang_layout)
 
-        # # Thêm spacer �?dưới
+        # # Thêm spacer �?dưới
         layout.addStretch()
         
         self.setLayout(layout)
@@ -449,7 +449,7 @@ class LoginDialog(QDialog):
         self.toggle_password_button.setText("🙈" if checked else "👁")
     
     def change_language(self, index):
-        """Thay đổi ngôn ng�?""
+        """Thay đổi ngôn ngữ"""
         self.current_language = self.language_combo.currentData()
         
         # Cập nhật text
@@ -466,7 +466,7 @@ class LoginDialog(QDialog):
         self.login_button.setText(CLIENT_TEXT[self.current_language]['login_button'])
         self.cancel_button.setText(CLIENT_TEXT[self.current_language]['login_cancel'])
         
-        # Lưu ngôn ng�?
+        # Lưu ngôn ngữ
         try:
             with open('language.txt', 'w', encoding='utf-8') as f:
                 f.write(self.current_language)
@@ -480,20 +480,20 @@ class LoginDialog(QDialog):
         if credentials:
             self.username_input.setText(credentials.get('username', ''))
             self.password_input.setText(credentials.get('password', ''))
-            # S�?dụng remember flag đã lưu, mặc định False nếu không có
+            # Sử dụng remember flag đã lưu, mặc định False nếu không có
             remember_value = credentials.get('remember', False)
-            # Đảm bảo giá tr�?là boolean
+            # Đảm bảo giá trị là boolean
             self.remember_checkbox.setChecked(bool(remember_value))
         else:
-            # Không có credentials, đ�?checkbox unchecked theo mặc định
+            # Không có credentials, để checkbox unchecked theo mặc định
             self.remember_checkbox.setChecked(False)
         
-        # Load saved IP - ƯU TIÊN T�?FILE RIÊNG, sau đó mới t�?session
+        # Load saved IP - ƯU TIÊN TỪ FILE RIÊNG, sau đó mới từ session
         saved_ip = get_session_manager().load_server_ip_from_file()
         if saved_ip:
             self.server_ip_input.setText(saved_ip)
         else:
-            # Fallback: th�?t�?session
+            # Fallback: thử từ session
             saved_ip = get_session_manager().get_server_ip()
             if saved_ip:
                 self.server_ip_input.setText(saved_ip)
@@ -536,7 +536,7 @@ class LoginDialog(QDialog):
         is_valid, username, password, server_ip = self.validate_inputs()
         
         if not is_valid:
-            # Kiểm tra thiếu gì đ�?hiển th�?lỗi chính xác
+            # Kiểm tra thiếu gì để hiển thị lỗi chính xác
             username_val = self.username_input.text().strip()
             password_val = self.password_input.text()
             server_ip_val = self.server_ip_input.text().strip()
@@ -549,14 +549,11 @@ class LoginDialog(QDialog):
                 self.show_error(CLIENT_TEXT[self.current_language]['login_failed_empty_ip'])
             return
         
-        # # Ẩn lỗi cũ
-        # self.status_label.hide()
-        
         # Disable login button during request
         self.login_button.setEnabled(False)
         self.login_button.setText(CLIENT_TEXT[self.current_language]['login_checking_connection'])
         
-        # LƯU THÔNG TIN Đ�?S�?DỤNG SAU KHI CONNECTION CHECK XONG
+        # LƯU THÔNG TIN ĐỂ SỬ DỤNG SAU KHI CONNECTION CHECK XONG
         self._pending_login = {
             'username': username,
             'password': password,
@@ -569,7 +566,7 @@ class LoginDialog(QDialog):
         self.connection_checker.start()
     
     def on_connection_check_result(self, status: str):
-        """X�?lý kết qu�?kiểm tra kết nối"""
+        """Xử lý kết quả kiểm tra kết nối"""
         if status == 'connected':
             # Kết nối được, tiếp tục đăng nhập
             pending = self._pending_login
@@ -590,13 +587,13 @@ class LoginDialog(QDialog):
             self.show_error(CLIENT_TEXT[self.current_language]['login_connection_failed'])
     
     def on_login_result(self, result: dict):
-        """X�?lý kết qu�?đăng nhập t�?server"""
+        """Xử lý kết quả đăng nhập từ server"""
         # Re-enable button
         self.login_button.setEnabled(True)
         self.login_button.setText(CLIENT_TEXT[self.current_language]['login_button'])
         
         if result.get('success'):
-            # Đăng nhập thành công t�?server
+            # Đăng nhập thành công từ server
             user_info = result.get('user_info', {})
             username = user_info.get('username', '')
             server_ip = self.server_ip_input.text().strip()
@@ -626,7 +623,7 @@ class LoginDialog(QDialog):
             self.login_failed.emit(error_msg)
     
     def show_error(self, message: str):
-        """Hiển th�?lỗi"""
+        """Hiển thị lỗi"""
         self.status_label.setText(message)
         self.status_label.show()
         
@@ -660,11 +657,11 @@ class LoginDialog(QDialog):
         self.status_label.hide()
     
     def on_forgot_password(self, link):
-        """X�?lý khi click forgot password"""
+        """Xử lý khi click quên mật khẩu"""
         QMessageBox.information(
             self,
             CLIENT_TEXT[self.current_language]['login_title'],
-            "Vui lòng liên h�?quản tr�?viên đ�?lấy lại mật khẩu.\n请联系管理员重置密码�?
+            "Vui lòng liên hệ quản trị viên để lấy lại mật khẩu.\n请联系管理员重置密码。"
         )
     
     def get_username(self) -> str:
@@ -680,7 +677,7 @@ class LoginDialog(QDialog):
         return self.server_ip_input.text().strip()
     
     def is_remembered(self) -> bool:
-        """Kiểm tra có ghi nh�?đăng nhập không"""
+        """Kiểm tra có ghi nh�?đăng nhập không"""
         return self.remember_checkbox.isChecked()
     
     def reject(self):
@@ -695,17 +692,17 @@ class LoginDialog(QDialog):
 
 def show_login_dialog(parent=None, language: Optional[str] = None) -> tuple:
     """
-    Hiện dialog đăng nhập và tr�?v�?kết qu�?
+    Hiện dialog đăng nhập và tr�?v�?kết qu�?
     
     Args:
         parent: Widget cha
-        language: Ngôn ng�?('vi' hoặc 'zh')
+        language: Ngôn ng�?('vi' hoặc 'zh')
         
     Returns:
         (result, username, server_ip)
         - result: True nếu đăng nhập thành công, False nếu hủy
         - username: Tên đăng nhập
-        - server_ip: IP máy ch�?
+        - server_ip: IP máy ch�?
     """
     dialog = LoginDialog(parent, language)
     
