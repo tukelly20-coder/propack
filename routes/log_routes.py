@@ -8,7 +8,7 @@ import datetime
 import os
 
 # Import file handler utilities
-from utils.file_handler import (
+from src.utils.file_handler import (
     save_multiple_files,
     ensure_upload_folder,
     format_file_size,
@@ -83,7 +83,7 @@ def register_routes(app, session_state):
         if files:
             for file in files:
                 if file and file.filename:
-                    from utils.file_handler import save_uploaded_file
+                    from src.utils.file_handler import save_uploaded_file
                     result = save_uploaded_file(file, log_folder)
                     if result.get('success'):
                         saved_files.append(result)
@@ -203,7 +203,7 @@ Client IP: {client_ip}
         """
         Lấy danh sách các logs đã lưu (cho admin/debug)
         """
-        from utils.file_handler import get_all_upload_subfolders, get_files_in_subfolder
+        from src.utils.file_handler import get_all_upload_subfolders, get_files_in_subfolder
         
         subfolders = get_all_upload_subfolders()
         

@@ -2,6 +2,19 @@
 // Notice Tab JavaScript
 // ============================================
 
+// Import debounce from components (if available) or define locally
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
 // State management
 const NoticeState = {
     notices: [],
@@ -23,27 +36,27 @@ $(document).ready(function() {
 // Setup event listeners
 function setupEventListeners() {
     console.log('[Notices] Setting up event listeners...');
-    
+
     // Filter by status
     $('input[name="status-filter"]').change(function() {
         applyFilters();
     });
-    
+
     // Filter by urgency
     $('#urgency-filter').change(function() {
         applyFilters();
     });
-    
-    // Search input
-    $('#search-input').on('input', function() {
+
+    // Search input with debounce
+    $('#search-input').on('input', debounce(function() {
         applyFilters();
-    });
-    
+    }, 300));
+
     // Refresh button
     $('#btn-refresh').click(function() {
         loadNotices();
     });
-    
+
     // Logout button
     $('#btn-logout').click(async function() {
         try {
@@ -52,6 +65,25 @@ function setupEventListeners() {
         } catch (error) {
             console.error('Logout failed:', error);
         }
+    });
+
+    // Event delegation for table buttons (handles re-renders)
+    $('#notices-table-body').on('click', '.btn-view', function(e) {
+        e.stopPropagation();
+        const trackingId = $(this).data('id');
+        viewNoticeDetails(trackingId);
+    });
+
+    $('#notices-table-body').on('click', '.btn-accept', function(e) {
+        e.stopPropagation();
+        const trackingId = $(this).data('id');
+        acceptJob(trackingId);
+    });
+
+    // Row double-click to view details (event delegation)
+    $('#notices-table-body').on('dblclick', '.notice-row', function() {
+        const trackingId = $(this).data('trackingId');
+        viewNoticeDetails(trackingId);
     });
 }
 
@@ -148,18 +180,18 @@ function applyFilters() {
 function renderNoticesTable() {
     const tbody = $('#notices-table-body');
     const notices = NoticeState.filteredNotices;
-    
+
     if (notices.length === 0) {
         tbody.html('<tr class="empty-row"><td colspan="11"><i class="bi bi-inbox d-block mb-2" style="font-size: 2rem;"></i>Không có thông báo nào</td></tr>');
         return;
     }
-    
+
     const fragment = document.createDocumentFragment();
-    
+
     notices.forEach((notice, index) => {
         const tr = document.createElement('tr');
         tr.className = 'notice-row';
-        
+
         // Determine urgency class
         let urgencyClass = 'urgency-normal';
         let urgencyText = 'Bình thường';
@@ -169,23 +201,23 @@ function renderNoticesTable() {
             urgencyText = 'Khẩn cấp';
             urgencyBadgeClass = 'warning text-dark';
         } else if (notice.urgency_level === 'very_urgent') {
-            urgencyClass = 'urgency-very_urgent';
+            urgencyClass = 'urgency-very-urgent';
             urgencyText = 'Rất khẩn';
             urgencyBadgeClass = 'danger';
         }
-        
+
         // Determine status
         const isPending = notice.is_pending === 'yes';
         const statusClass = isPending ? 'status-pending' : 'status-accepted';
         const statusText = isPending ? 'Chờ duyệt' : 'Đã nhận';
-        
+
         // Engineer can accept job if pending
-        const canAccept = isPending && NoticeState.currentUser && 
+        const canAccept = isPending && NoticeState.currentUser &&
                          NoticeState.currentUser.role === 'engineer';
-        
+
         tr.className += ' ' + urgencyClass;
         tr.dataset.trackingId = notice['Tracking ID'];
-        
+
         tr.innerHTML =
             '<td>' + (index + 1) + '</td>' +
             '<td><strong>' + escapeHtml(notice['Tracking ID'] || '') + '</strong></td>' +
@@ -205,32 +237,15 @@ function renderNoticesTable() {
                     '<i class="bi bi-check-lg"></i>' +
                 '</button>' : '') +
             '</td>';
-        
+
         fragment.appendChild(tr);
     });
-    
+
     tbody.empty();
     tbody[0].appendChild(fragment);
-    
-    // Add click handlers
-    $('.btn-view').click(function(e) {
-        e.stopPropagation();
-        const trackingId = $(this).data('id');
-        viewNoticeDetails(trackingId);
-    });
-    
-    $('.btn-accept').click(function(e) {
-        e.stopPropagation();
-        const trackingId = $(this).data('id');
-        // Use window.acceptJob to call the API function
-        window.acceptJob(trackingId);
-    });
-    
-    // Row click to view details
-    $('.notice-row').dblclick(function() {
-        const trackingId = $(this).data('trackingId');
-        viewNoticeDetails(trackingId);
-    });
+
+    // Row click to view details (event delegation)
+    // Handled in setupEventListeners
 }
 
 // Update statistics

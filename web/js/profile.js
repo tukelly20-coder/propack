@@ -88,7 +88,7 @@ async function saveProfile() {
     
     try {
         btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Đang lưu...');
-        
+
         const userData = {
             full_name: $('#field-fullname').val().trim(),
             employee_id: $('#field-employee-id').val().trim(),
@@ -96,8 +96,8 @@ async function saveProfile() {
             email: $('#field-email').val().trim(),
             phone: $('#field-phone').val().trim()
         };
-        
-        const token = localStorage.getItem('auth_token');
+
+        const token = getAuthToken();
         if (!token) {
             throw new Error('Phiên đăng nhập hết hạn');
         }
@@ -172,7 +172,7 @@ async function changePassword() {
     try {
         btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Đang xử lý...');
         
-        const token = localStorage.getItem('auth_token');
+        const token = getAuthToken();
         if (!token) {
             throw new Error('Phiên đăng nhập hết hạn');
         }

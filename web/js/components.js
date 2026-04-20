@@ -293,7 +293,7 @@ function debounce(func, wait) {
  * @returns {boolean}
  */
 function isEmptyObject(obj) {
-    return obj && Object.keys(obj).length === 0 && obj.constructor === Object;
+    return obj && Object.keys(obj).length === 0 && obj !== null && typeof obj === 'object';
 }
 
 // ============================================

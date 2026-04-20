@@ -10,6 +10,13 @@
 const API_BASE_URL = '/api';
 const REQUEST_TIMEOUT = 30000; // 30 seconds timeout
 
+// Helper: Create abort signal with timeout (compatible with older browsers)
+function createTimeoutSignal(ms) {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+}
+
 // ============== STORAGE UTILITIES (Fallback for Tracking Prevention) ==============
 // Memory fallback cho Tracking Prevention block localStorage
 let _authTokenMemory = null;
@@ -391,7 +398,7 @@ class APIClient {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${token}`
                     },
-                    signal: AbortSignal.timeout(5000)
+                    signal: createTimeoutSignal(5000)
                 });
             }
         } catch (error) {
@@ -749,7 +756,7 @@ class APIClient {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+                signal: createTimeoutSignal(REQUEST_TIMEOUT),
                 body: JSON.stringify({
                     name: name,
                     category: category,
@@ -827,7 +834,7 @@ class APIClient {
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                signal: AbortSignal.timeout(REQUEST_TIMEOUT),
+                signal: createTimeoutSignal(REQUEST_TIMEOUT),
                 body: JSON.stringify({ password })
             });
 
@@ -910,7 +917,6 @@ class APIClient {
 const api = new APIClient();
 
 // Export storage helper functions for other modules
-// Export storage helper functions for other modules
 window.getAuthToken = getAuthToken;
 window.getCurrentUserData = getCurrentUserData;
 window.getTokenExpiration = getTokenExpiration;
@@ -935,27 +941,29 @@ window.getUserId = getUserId;
 // ============== OVERRIDE localStorage.setItem FOR EDGE TRACKING PREVENTION ==============
 // Override localStorage.setItem to ALWAYS cache auth_token to memory
 // This ensures token is available even when localStorage is blocked by Edge
-const originalSetItem = localStorage.setItem.bind(localStorage);
-localStorage.setItem = function (key, value) {
-    try {
-        originalSetItem(key, value);
-    } catch (e) {
-        console.warn('[Auth] localStorage.setItem blocked:', e.message);
-    }
-    // ALWAYS cache auth_token to memory (this is the key fix for Edge)
-    if (key === 'auth_token') {
-        _authTokenMemory = value;
-        console.log('[Auth] Token cached to memory (Edge protection fallback)');
-    }
-    if (key === 'current_user') {
+if (typeof localStorage !== 'undefined' && localStorage.setItem) {
+    const originalSetItem = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = function(key, value) {
         try {
-            _currentUserMemory = JSON.parse(value);
-        } catch (e) { }
-    }
-    if (key === 'token_expiration') {
-        _tokenExpirationMemory = parseInt(value);
-    }
-};
+            originalSetItem(key, value);
+        } catch (e) {
+            console.warn('[Auth] localStorage.setItem blocked:', e.message);
+        }
+        // ALWAYS cache auth_token to memory (this is the key fix for Edge)
+        if (key === 'auth_token') {
+            _authTokenMemory = value;
+            console.log('[Auth] Token cached to memory (Edge protection fallback)');
+        }
+        if (key === 'current_user') {
+            try {
+                _currentUserMemory = JSON.parse(value);
+            } catch (e) { }
+        }
+        if (key === 'token_expiration') {
+            _tokenExpirationMemory = parseInt(value);
+        }
+    };
+}
 
 // Export standalone functions for easy access
 async function login(username, password) {

@@ -289,18 +289,26 @@ async function loadAIModule() {
 function loadScript(src) {
     return new Promise((resolve, reject) => {
         // Check if script already exists
-        const scriptId = src.replace('.js', '-script').split('/').pop() + '-script';
+        const filename = src.split('/').pop(); // e.g., 'projects.js'
+        const scriptId = filename.replace('.js', '') + '-script'; // e.g., 'projects-script'
+
         if (document.getElementById(scriptId)) {
             console.log('[App] Script already loaded:', src);
             resolve();
             return;
         }
-        
+
         const script = document.createElement('script');
         script.id = scriptId;
         script.src = src;
-        script.onload = resolve;
-        script.onerror = reject;
+        script.onload = () => {
+            console.log('[App] Script loaded successfully:', src);
+            resolve();
+        };
+        script.onerror = (err) => {
+            console.error('[App] Script failed to load:', src, err);
+            reject(new Error(`Failed to load script: ${src}`));
+        };
         document.head.appendChild(script);
     });
 }

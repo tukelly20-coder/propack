@@ -1082,13 +1082,15 @@ const translations = {
  */
 function t(key, params = {}) {
     const lang = currentLanguage;
-    let text = translations[lang]?.[key] || translations['vi'][key] || key;
-    
+    let text = (translations[lang] && translations[lang][key])
+               || (translations['vi'] && translations['vi'][key])
+               || key;
+
     // Interpolate parameters
     Object.keys(params).forEach(param => {
         text = text.replace(new RegExp(`\\{${param}\\}`, 'g'), params[param]);
     });
-    
+
     return text;
 }
 
@@ -1132,24 +1134,25 @@ function translatePage() {
             element.textContent = translated;
         }
     });
-    
+
     // Translate placeholders
     document.querySelectorAll('[data-i18n-placeholder]').forEach(element => {
         const key = element.getAttribute('data-i18n-placeholder');
         element.placeholder = t(key);
     });
-    
+
     // Translate title attributes
     document.querySelectorAll('[data-i18n-title]').forEach(element => {
         const key = element.getAttribute('data-i18n-title');
         element.title = t(key);
     });
-    
-    // Translate select options with nested spans
-    document.querySelectorAll('select option span[data-i18n]').forEach(span => {
-        const key = span.getAttribute('data-i18n');
-        const translated = t(key);
-        span.textContent = translated;
+
+    // Translate select options with data-i18n attribute
+    document.querySelectorAll('select option[data-i18n]').forEach(option => {
+        const key = option.getAttribute('data-i18n');
+        if (key) {
+            option.textContent = t(key);
+        }
     });
 }
 
