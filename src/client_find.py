@@ -1,17 +1,17 @@
 """
-Module SearchDialog - Dialog tìm kiếm trong lịch s�?
-Tham khảo t�?FilterbyValue.py và Project_Tracking.py
+Module SearchDialog - Dialog tìm kiếm trong lịch s�?
+Tham khảo t�?FilterbyValue.py và Project_Tracking.py
 
 Features:
 - Tìm kiếm real-time khi gõ (local)
 - Tìm kiếm với server khi nhấn OK
-- Checkbox đ�?chọn cột tìm kiếm
-- Hiển th�?s�?kết qu�?real-time
+- Checkbox đ�?chọn cột tìm kiếm
+- Hiển th�?s�?kết qu�?real-time
 - Case-insensitive, substring match
-- Sau khi server tr�?v�?kết qu�? clear danh sách lịch s�?và hiển th�?kết qu�?
+- Sau khi server tr�?v�?kết qu�? clear danh sách lịch s�?và hiển th�?kết qu�?
 
 Logging:
-- S�?dụng logging module đ�?theo dõi các hoạt động
+- S�?dụng logging module đ�?theo dõi các hoạt động
 - Format: [TIMESTAMP] [LEVEL] [MODULE] Message
 """
 
@@ -44,12 +44,12 @@ except ImportError:
 
 class DialogSearchRequester(QThread):
     """
-    Thread đ�?tìm kiếm lịch s�?t�?server - cho SearchDialog
+    Thread đ�?tìm kiếm lịch s�?t�?server - cho SearchDialog
     
     Args:
-        server_ip: Địa ch�?IP của server
-        search_text: T�?khóa tìm kiếm
-        columns: Danh sách các cột đ�?tìm kiếm
+        server_ip: Địa ch�?IP của server
+        search_text: T�?khóa tìm kiếm
+        columns: Danh sách các cột đ�?tìm kiếm
         search_type: Loại tìm kiếm - "DB_DATA" hoặc "HISTORY"
     
     Logging:
@@ -160,15 +160,15 @@ class DialogSearchRequester(QThread):
 
 class SearchDialog(QDialog):
     """
-    Dialog tìm kiếm trong lịch s�?- tham khảo FilterByValueDialog
+    Dialog tìm kiếm trong lịch s�?- tham khảo FilterByValueDialog
     
     Features:
     - Tìm kiếm real-time khi gõ (local)
     - Tìm kiếm với server khi nhấn OK
-    - Checkbox đ�?chọn cột tìm kiếm
-    - Hiển th�?s�?kết qu�?real-time
+    - Checkbox đ�?chọn cột tìm kiếm
+    - Hiển th�?s�?kết qu�?real-time
     - Case-insensitive, substring match
-    - Sau khi server tr�?v�?kết qu�? clear danh sách lịch s�?và hiển th�?kết qu�?
+    - Sau khi server tr�?v�?kết qu�? clear danh sách lịch s�?và hiển th�?kết qu�?
     
     Logging:
         - Dialog initialization, search operations, result handling
@@ -181,8 +181,8 @@ class SearchDialog(QDialog):
         
         Args:
             parent: Parent widget (MainWindow)
-            server_ip: Địa ch�?IP của server
-            history_data: Danh sách d�?liệu lịch s�?đ�?tìm kiếm (local)
+            server_ip: Địa ch�?IP của server
+            history_data: Danh sách d�?liệu lịch s�?đ�?tìm kiếm (local)
             headers: Dictionary mapping display headers to data keys
                     Format: {"Tên": "name", "Mã NV": "employee", ...}
             search_type: Loại tìm kiếm - "DB_DATA" hoặc "HISTORY"
@@ -203,7 +203,7 @@ class SearchDialog(QDialog):
         logger.info(f"[SearchDialog] Initialized - Records: {len(self.all_history_data)}, "
                    f"Headers: {list(self.headers.keys())}, Server IP: {server_ip}, SearchType: {search_type}")
         
-        # Lấy texts t�?language_manager
+        # Lấy texts t�?language_manager
         self.texts = language_manager.get_all_ui_texts()
         
         self.setup_ui()
@@ -230,9 +230,9 @@ class SearchDialog(QDialog):
         search_label.setFixedWidth(50)
         
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText(self.texts.get("search_placeholder", "Nhập t�?khóa tìm kiếm..."))
+        self.search_input.setPlaceholderText(self.texts.get("search_placeholder", "Nhập t�?khóa tìm kiếm..."))
         self.search_input.textChanged.connect(self.filter_list)
-        # Focus vào search input khi m�?dialog
+        # Focus vào search input khi m�?dialog
         self.search_input.setFocus()
         
         search_layout.addWidget(search_label)
@@ -272,19 +272,19 @@ class SearchDialog(QDialog):
         
         column_select_layout.addWidget(self.column_list)
         
-        # Add All/None quick buttons in vertical layout
+# Add All/None quick buttons in vertical layout
         button_layout = QVBoxLayout()
         button_layout.setSpacing(2)
         
         select_all_btn = QPushButton(self.texts.get("select_all", "All"))
         select_all_btn.setFixedWidth(40)
-        select_all_btn.setToolTip(self.texts.get("select_all_tooltip", "Chọn tất c�?cột"))
+        select_all_btn.setToolTip(self.texts.get("select_all_tooltip", "Chọn tất c�?cột"))
         select_all_btn.clicked.connect(self.select_all_columns)
         button_layout.addWidget(select_all_btn)
         
         clear_all_btn = QPushButton(self.texts.get("clear_all", "None"))
         clear_all_btn.setFixedWidth(40)
-        clear_all_btn.setToolTip(self.texts.get("clear_all_tooltip", "B�?chọn tất c�?))
+        clear_all_btn.setToolTip(self.texts.get("clear_all_tooltip", "B�?chọn tất c�?"))
         clear_all_btn.clicked.connect(self.clear_all_columns)
         button_layout.addWidget(clear_all_btn)
         
@@ -316,8 +316,8 @@ class SearchDialog(QDialog):
         Thực hiện tìm kiếm local - tham khảo Project_Tracking.search_data() (lines 624-643)
         
         Logic:
-        - Case-insensitive: s�?dụng .lower()
-        - Substring match: s�?dụng 'in' operator
+        - Case-insensitive: s�?dụng .lower()
+        - Substring match: s�?dụng 'in' operator
         - Real-time: được gọi khi text thay đổi
         
         Logging:
@@ -330,7 +330,7 @@ class SearchDialog(QDialog):
                     f"Columns: {selected_columns}, Results: {len(self.filtered_data)}")
         
         if not search_text:
-            # Không có text tìm kiếm, hiển th�?tất c�?d�?liệu
+            # Không có text tìm kiếm, hiển th�?tất c�?d�?liệu
             self.filtered_data = list(self.all_history_data)
             logger.debug(f"[SearchDialog] No search text, showing all {len(self.filtered_data)} records")
         else:
@@ -353,7 +353,7 @@ class SearchDialog(QDialog):
     
     def get_selected_columns(self):
         """
-        Tr�?v�?danh sách các cột được chọn đ�?search
+        Tr�?v�?danh sách các cột được chọn đ�?search
         
         Returns:
             list: Danh sách data keys của các cột được checked
@@ -372,7 +372,7 @@ class SearchDialog(QDialog):
     
     def on_column_changed(self, item):
         """
-        X�?lý khi checkbox của một cột thay đổi
+        X�?lý khi checkbox của một cột thay đổi
         
         Args:
             item: QListWidgetItem đã thay đổi
@@ -381,7 +381,7 @@ class SearchDialog(QDialog):
     
     def select_all_columns(self):
         """
-        Chọn tất c�?các cột
+        Chọn tất c�?các cột
         """
         for i in range(self.column_list.count()):
             item = self.column_list.item(i)
@@ -391,7 +391,7 @@ class SearchDialog(QDialog):
     
     def clear_all_columns(self):
         """
-        B�?chọn tất c�?các cột
+        B�?chọn tất c�?các cột
         """
         for i in range(self.column_list.count()):
             item = self.column_list.item(i)
@@ -400,7 +400,7 @@ class SearchDialog(QDialog):
         self.filter_list()
     
     def update_result_count(self):
-        """Cập nhật s�?kết qu�?tìm kiếm - tham khảo FilterbyValue.py
+        """Cập nhật s�?kết qu�?tìm kiếm - tham khảo FilterbyValue.py
         
         Logging:
             - Total records and filtered count
@@ -415,13 +415,13 @@ class SearchDialog(QDialog):
             logger.debug(f"[SearchDialog] Result count update - Filtered: {filtered}, Total: {total}")
         else:
             # Không có tìm kiếm
-            total_records_text = self.texts.get("total_records", "Tổng s�? {}")
+            total_records_text = self.texts.get("total_records", "Tổng s�? {}")
             self.result_label.setText(total_records_text.format(total))
             logger.debug(f"[SearchDialog] Total records: {total}")
     
     def get_search_results(self):
         """
-        Tr�?v�?danh sách kết qu�?tìm kiếm (local)
+        Tr�?v�?danh sách kết qu�?tìm kiếm (local)
         
         Returns:
             list: Danh sách các bản ghi phù hợp với điều kiện tìm kiếm
@@ -430,16 +430,16 @@ class SearchDialog(QDialog):
     
     def get_search_text(self):
         """
-        Tr�?v�?text tìm kiếm hiện tại
+        Tr�?v�?text tìm kiếm hiện tại
         
         Returns:
-            str: T�?khóa tìm kiếm
+            str: T�?khóa tìm kiếm
         """
         return self.search_input.text().strip()
     
     def accept(self):
         """
-        Override accept - gửi request tìm kiếm lên server, sau đó clear history và hiển th�?kết qu�?
+        Override accept - gửi request tìm kiếm lên server, sau đó clear history và hiển th�?kết qu�?
         
         Logging:
             - Accept called, search parameters
@@ -475,10 +475,10 @@ class SearchDialog(QDialog):
     
     def on_search_completed(self, results):
         """
-        X�?lý kết qu�?tìm kiếm t�?server
+        X�?lý kết qu�?tìm kiếm t�?server
         
         Args:
-            results: Danh sách kết qu�?tìm kiếm t�?server
+            results: Danh sách kết qu�?tìm kiếm t�?server
         
         Logging:
             - Search completion (result count)
@@ -488,17 +488,17 @@ class SearchDialog(QDialog):
         logger.info(f"[SearchDialog] Search completed - {len(results)} results received")
         
         if results:
-            # Có kết qu�?t�?server
-            # Clear danh sách lịch s�?
+            # Có kết qu�?t�?server
+            # Clear danh sách lịch s�?
             self.clear_history_list()
             
-            # Hiển th�?kết qu�?
+            # Hiển th�?kết qu�?
             self.display_search_results(results)
             
             logger.info(f"[SearchDialog] Cleared history and displaying {len(results)} results")
         else:
-            # Không có kết qu�? hiển th�?thôngbáo
-            no_results_text = self.texts.get("search_no_results", "Không có kết qu�?nào phù hợp")
+            # Không có kết qu�? hiển th�?thôngbáo
+            no_results_text = self.texts.get("search_no_results", "Không có kết qu�?nào phù hợp")
             logger.warning(f"[SearchDialog] No results found for search")
             QMessageBox.information(self, "Tìm kiếm", no_results_text)
             # Quay lại view ban đầu
@@ -510,12 +510,12 @@ class SearchDialog(QDialog):
     @staticmethod
     def open_search_dialog(parent, server_ip, history_data, history_headers, search_type="DB_DATA"):
         """
-        M�?dialog tìm kiếm - static method đ�?d�?gọi t�?Ctrl+F handler
+        M�?dialog tìm kiếm - static method đ�?d�?gọi t�?Ctrl+F handler
         
         Args:
             parent: Parent widget (MainWindow)
-            server_ip: Địa ch�?IP của server
-            history_data: Danh sách d�?liệu lịch s�?
+            server_ip: Địa ch�?IP của server
+            history_data: Danh sách d�?liệu lịch s�?
             history_headers: Dictionary mapping display headers to data keys
             search_type: Loại tìm kiếm - "DB_DATA" hoặc "HISTORY"
         
@@ -531,7 +531,7 @@ class SearchDialog(QDialog):
         logger.info(f"[SearchDialog] open_search_dialog called - "
                    f"Server: {server_ip}, Records: {len(history_data)}, Headers: {list(history_headers.keys())}, SearchType: {search_type}")
         
-        # Check nếu đang �?Tab Lịch s�?
+        # Check nếu đang �?Tab Lịch s�?
         if hasattr(parent, 'tabs') and parent.tabs.currentIndex() != 1:
             logger.warning(f"[SearchDialog] Not on History tab (current: {parent.tabs.currentIndex()}), ignoring request")
             return QDialog.Rejected
@@ -547,16 +547,16 @@ class SearchDialog(QDialog):
         
         logger.debug(f"[SearchDialog] Connected to server, opening search dialog")
         
-        # M�?dialog
+        # M�?dialog
         dialog = SearchDialog(parent, server_ip, history_data, history_headers, search_type)
         return dialog.exec()
     
     def display_search_results(self, search_results):
         """
-        Hiển th�?kết qu�?tìm kiếm trong parent window
+        Hiển th�?kết qu�?tìm kiếm trong parent window
         
         Args:
-            search_results: Danh sách kết qu�?tìm kiếm t�?server
+            search_results: Danh sách kết qu�?tìm kiếm t�?server
         
         Logging:
             - Results displayed count
@@ -579,7 +579,7 @@ class SearchDialog(QDialog):
         if hasattr(parent, 'history_table'):
             parent.history_table.setRowCount(0)
         
-        # Hiển th�?kết qu�?
+        # Hiển th�?kết qu�?
         if hasattr(parent, 'history_table'):
             parent.history_table.setRowCount(len(search_results))
             
@@ -606,7 +606,7 @@ class SearchDialog(QDialog):
         # Cập nhật page label
         total_results = len(search_results)
         if hasattr(parent, 'page_label'):
-            parent.page_label.setText(f"Tìm thấy: {total_results} kết qu�?)
+            parent.page_label.setText(f"Tìm thấy: {total_results} kết quả)")
         
         # Set search mode
         if hasattr(parent, 'search_mode'):
@@ -616,7 +616,7 @@ class SearchDialog(QDialog):
     
     def clear_history_list(self):
         """
-        Clear danh sách lịch s�?trong parent window
+        Clear danh sách lịch s�?trong parent window
         
         Logging:
             - History cleared
@@ -636,7 +636,7 @@ class SearchDialog(QDialog):
     
     def cancel_search(self):
         """
-        Hủy b�?ch�?đ�?tìm kiếm và quay lại view ban đầu
+        Hủy b�?ch�?đ�?tìm kiếm và quay lại view ban đầu
         
         Logging:
             - Search cancelled
@@ -664,7 +664,7 @@ class SearchDialog(QDialog):
         logger.debug(f"[SearchDialog] View restored")
     
     def reject(self):
-        """Override reject - hủy b�?tìm kiếm
+        """Override reject - hủy b�?tìm kiếm
         
         Logging:
             - Dialog rejected
@@ -672,7 +672,7 @@ class SearchDialog(QDialog):
         """
         logger.debug(f"[SearchDialog] Dialog rejected by user")
         
-        # Hủy b�?search request nếu đang chạy
+        # Hủy b�?search request nếu đang chạy
         if self.search_requester and self.search_requester.isRunning():
             self.search_requester.terminate()
             self.search_requester.wait(1000)

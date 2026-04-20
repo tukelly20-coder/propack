@@ -2,8 +2,9 @@ import sys
 import os
 import json
 import importlib.util
-from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                               QHBoxLayout, QLineEdit, QPushButton, QTextEdit, 
+import requests
+from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                               QHBoxLayout, QLineEdit, QPushButton, QTextEdit,
                                QLabel, QListWidget, QAbstractItemView, QSplitter,
                                QStatusBar, QProgressBar, QComboBox, QCompleter, QMenuBar, QMenu, QMessageBox)
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QStringListModel, QPoint
@@ -130,37 +131,89 @@ class ProcessMultipleWorker(QThread):
         self.is_all = is_all
         
     def run(self):
-        total = len(self.cinv_codes)
-        core.safe_print(f"\n[INFO] Đang xử lý {total} mã được chọn...")
+         total = len(self.cinv_codes)
+         core.safe_print(f"\n[INFO] Đang xử lý {total} mã được chọn...")
+         
+         MAX_OPEN_LIMIT = 10
+         codes_to_open = self.cinv_codes
+         if len(codes_to_open) > MAX_OPEN_LIMIT:
+             core.safe_print(f"[INFO] Giới hạn xử lý {MAX_OPEN_LIMIT} mã đầu tiên để tránh đầy màn hình.")
+             codes_to_open = codes_to_open[:MAX_OPEN_LIMIT]
+         
+         processed = 0
+         all_urls = []
+         
+         for i, cinv_code in enumerate(codes_to_open):
+             self.progress.emit(int((i / len(codes_to_open)) * 80), f"Đang xử lý {i+1}/{len(codes_to_open)}...")
+             urls = core.query_material(cinv_code)
+             if urls:
+                 all_urls.extend(urls)
+             processed += 1
+         
+         if all_urls:
+             self.progress.emit(90, "Đang mở thư mục...")
+             urls_text = "\n".join(all_urls)
+             core.copy_to_clipboard(urls_text)
+             folder_count = core.open_all_folders(all_urls)
+             core.safe_print(f"\n[OK] Đã mở {folder_count} thư mục tổng cộng {len(all_urls)} file(s).")
+             self.progress.emit(100, f"Hoàn tất: {len(all_urls)} files, {folder_count} folders")
+         else:
+             core.safe_print("[ERROR] Không tìm thấy file cho các mã đã chọn.")
+             self.progress.emit(100, "Không tìm thấy file")
+             
+         self.finished.emit()
+
+# ========================================================================
+# 4. API SEARCH WORKER
+# ========================================================================
+class ApiSearchWorker(QThread):
+    """Worker để tra cứu API (POST /tuhaozhaoliaohao)"""
+    finished = Signal(dict)
+    progress = Signal(int, str)
+    
+    def __init__(self, code):
+        super().__init__()
+        self.code = code
         
-        MAX_OPEN_LIMIT = 10
-        codes_to_open = self.cinv_codes
-        if len(codes_to_open) > MAX_OPEN_LIMIT:
-            core.safe_print(f"[INFO] Giới hạn xử lý {MAX_OPEN_LIMIT} mã đầu tiên để tránh đầy màn hình.")
-            codes_to_open = codes_to_open[:MAX_OPEN_LIMIT]
+    def run(self):
+        code = self.code
+        self.progress.emit(10, "Đang gọi API tra cứu...")
+        core.safe_print(f"\n" + "="*40 + f"\n>>> TRA CỨU API MÃ: {code} <<<\n" + "="*40)
         
-        processed = 0
-        all_urls = []
+        API_URL = "http://192.168.2.164:8080/tuhaozhaoliaohao"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "text/plain"
+        }
         
-        for i, cinv_code in enumerate(codes_to_open):
-            self.progress.emit(int((i / len(codes_to_open)) * 80), f"Đang xử lý {i+1}/{len(codes_to_open)}...")
-            urls = core.query_material(cinv_code)
-            if urls:
-                all_urls.extend(urls)
-            processed += 1
-        
-        if all_urls:
-            self.progress.emit(90, "Đang mở thư mục...")
-            urls_text = "\n".join(all_urls)
-            core.copy_to_clipboard(urls_text)
-            folder_count = core.open_all_folders(all_urls)
-            core.safe_print(f"\n[OK] Đã mở {folder_count} thư mục tổng cộng {len(all_urls)} file(s).")
-            self.progress.emit(100, f"Hoàn tất: {len(all_urls)} files, {folder_count} folders")
-        else:
-            core.safe_print("[ERROR] Không tìm thấy file cho các mã đã chọn.")
-            self.progress.emit(100, "Không tìm thấy file")
+        try:
+            self.progress.emit(30, "Đang kết nối server...")
+            response = requests.post(API_URL, data=code, headers=headers, timeout=30)
+            core.safe_print(f"[API] Status: {response.status_code}")
             
-        self.finished.emit()
+            self.progress.emit(60, "Đang xử lý kết quả...")
+            
+            try:
+                data = response.json()
+                core.safe_print(f"[API] Response type: {type(data).__name__}")
+                
+                # Trả về data để xử lý ở main thread
+                self.progress.emit(100, "Hoàn tất")
+                self.finished.emit({"type": "api_success", "data": data})
+                
+            except ValueError as e:
+                core.safe_print(f"[ERROR] Invalid JSON: {e}")
+                self.finished.emit({"type": "api_error", "error": "Invalid JSON response", "raw": response.text})
+                
+        except requests.exceptions.Timeout:
+            core.safe_print(f"[ERROR] API timeout sau 30s")
+            self.finished.emit({"type": "api_error", "error": "Timeout"})
+        except requests.exceptions.RequestException as e:
+            core.safe_print(f"[ERROR] Connection error: {e}")
+            self.finished.emit({"type": "api_error", "error": str(e)})
+        except Exception as e:
+            core.safe_print(f"[ERROR] Unexpected error: {e}")
+            self.finished.emit({"type": "api_error", "error": str(e)})
 
 # ========================================================================
 # 4. GIAO DIỆN CHÍNH
@@ -306,6 +359,10 @@ class MaterialQueryUI(QMainWindow):
         self.settings_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_settings.json")
         self.load_settings()
         
+        # Search mode: "material" or "api"
+        self.search_mode = "api"
+        self.api_cached_matches = []
+        
         # Setup central widget
         central = QWidget()
         self.setCentralWidget(central)
@@ -326,6 +383,17 @@ class MaterialQueryUI(QMainWindow):
         lbl_title = QLabel("CÔNG CỤ TRA CỨU MÃ LIỆU")
         lbl_title.setStyleSheet("font-size: 18px; color: #bb9af7;")
         left_layout.addWidget(lbl_title)
+        
+        # Search mode toggle
+        mode_layout = QHBoxLayout()
+        self.mode_toggle = QComboBox()
+        self.mode_toggle.addItems(["Tìm mã liệu", "Tra cứu API"])
+        self.mode_toggle.setCurrentIndex(1)  # Default: API mode
+        self.mode_toggle.currentIndexChanged.connect(self.on_mode_changed)
+        mode_layout.addWidget(QLabel("Chế độ:"))
+        mode_layout.addWidget(self.mode_toggle)
+        mode_layout.addStretch()
+        left_layout.addLayout(mode_layout)
         
         # Search input with history dropdown
         search_layout = QVBoxLayout()
@@ -374,7 +442,7 @@ class MaterialQueryUI(QMainWindow):
         left_layout.addLayout(btn_row)
         
         # Keyboard shortcuts hint
-        hint_label = QLabel("Phím tắt: Enter = Tìm kiếm | ↑↓ = Lịch sử | Ctrl+H = Ẩn/Hiện lịch sử | Ctrl+C = Copy mã")
+        hint_label = QLabel("Phím tắt: Enter = Tìm kiếm | ↑↓ = Lịch sử | Ctrl+H = Ẩn/Hiện lịch sử | Ctrl+Shift+A/M = Chuyển mode")
         hint_label.setStyleSheet("font-size: 11px; color: #737aa2;")
         left_layout.addWidget(hint_label)
         
@@ -459,6 +527,15 @@ class MaterialQueryUI(QMainWindow):
         self.completer = QCompleter()
         self.txt_code.setCompleter(self.completer)
         
+        # Restore search mode from settings
+        if hasattr(self, 'mode_toggle'):
+            if self.search_mode == "api":
+                self.mode_toggle.setCurrentIndex(1)
+                # Update placeholder
+                self.txt_code.setPlaceholderText("Nhập mã bản vẽ (VD: PLSX104-0000-00-A0)")
+            else:
+                self.mode_toggle.setCurrentIndex(0)
+        
         # Check post-update status
         self.check_post_update_status()
         
@@ -475,13 +552,21 @@ class MaterialQueryUI(QMainWindow):
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     self.search_history = data.get('search_history', [])[:self.max_history]
+                    # Đọc search mode
+                     saved_mode = data.get('last_mode', 'api')
+                    if saved_mode in ('material', 'api'):
+                        self.search_mode = saved_mode
         except Exception:
             self.search_history = []
+             self.search_mode = 'api'
 
     def save_settings(self):
-        """Lưu lịch sử tìm kiếm vào file JSON"""
+        """Lưu lịch sử tìm kiếm và mode vào file JSON"""
         try:
-            data = {'search_history': self.search_history}
+            data = {
+                'search_history': self.search_history,
+                'last_mode': self.search_mode
+            }
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -508,6 +593,45 @@ class MaterialQueryUI(QMainWindow):
         # Escape to close history dropdown
         self.shortcut_escape = QShortcut(QKeySequence("Escape"), self)
         self.shortcut_escape.activated.connect(self.hide_history)
+        
+        # Ctrl+Shift+A: Switch to API mode
+        self.shortcut_api = QShortcut(QKeySequence("Ctrl+Shift+A"), self)
+        self.shortcut_api.activated.connect(lambda: self.mode_toggle.setCurrentIndex(1))
+        
+        # Ctrl+Shift+M: Switch to Material mode
+        self.shortcut_material = QShortcut(QKeySequence("Ctrl+Shift+M"), self)
+        self.shortcut_material.activated.connect(lambda: self.mode_toggle.setCurrentIndex(0))
+    
+    def on_mode_changed(self, index):
+        """Xử lý khi chuyển đổi chế độ tìm kiếm"""
+        if index == 0:
+            self.search_mode = "material"
+            self.txt_code.setPlaceholderText("Nhập Mã / Code (VD: PABC123-...)")
+        else:
+            self.search_mode = "api"
+            self.txt_code.setPlaceholderText("Nhập mã bản vẽ (VD: PLSX104-0000-00-A0)")
+        
+        # Reset selection UI
+        self.reset_selection_ui()
+        
+        # Lưu settings
+        self.save_settings()
+        
+        self.append_log(f"[SYSTEM] Chuyển sang chế độ: {self.mode_toggle.currentText()}")
+    
+    def reset_selection_ui(self):
+        """Reset UI selection về trạng thái ẩn"""
+        self.list_matches.clear()
+        self.lbl_results_info.clear()
+        self.lbl_list.setVisible(False)
+        self.list_matches.setVisible(False)
+        self.btn_open_selected.setVisible(False)
+        self.btn_open_all.setVisible(False)
+        # Reconnect buttons về material mode
+        self.btn_open_selected.clicked.disconnect()
+        self.btn_open_selected.clicked.connect(self.on_open_selected)
+        self.btn_open_all.clicked.disconnect()
+        self.btn_open_all.clicked.connect(self.on_open_all)
 
     def toggle_history(self):
         if self.history_combo.isVisible():
@@ -566,6 +690,18 @@ class MaterialQueryUI(QMainWindow):
         
         copy_all_action = QAction("📄 Copy toàn bộ log", self)
         copy_all_action.triggered.connect(lambda: QApplication.clipboard().setText(self.txt_log.toPlainText()))
+        
+        # API mode specific actions
+        if self.search_mode == "api":
+            copy_full_result_action = QAction("📋 Copy kết quả đầy đủ", self)
+            copy_full_result_action.triggered.connect(self.copy_api_full_result)
+            
+            copy_summary_action = QAction("📋 Copy tóm tắt", self)
+            copy_summary_action.triggered.connect(self.copy_api_summary)
+            
+            menu.addAction(copy_full_result_action)
+            menu.addAction(copy_summary_action)
+            menu.addSeparator()
         
         clear_log_action = QAction("🗑 Xóa log", self)
         clear_log_action.triggered.connect(self.txt_log.clear)
@@ -643,6 +779,28 @@ class MaterialQueryUI(QMainWindow):
         QApplication.clipboard().setText(rows_text)
         self.append_log(f"[SYSTEM] Đã copy {len(selected_items)} dòng")
 
+    def copy_api_full_result(self):
+        """Copy toàn bộ kết quả API (từ đầu log hiện tại)"""
+        text = self.txt_log.toPlainText()
+        if text.strip():
+            QApplication.clipboard().setText(text)
+            self.append_log("[SYSTEM] Đã copy toàn bộ kết quả vào clipboard!")
+        else:
+            self.append_log("[WARN] Không có nội dung để copy!")
+    
+    def copy_api_summary(self):
+        """Copy phần tóm tắt (từ dòng chứa '【 TÓM TẮT 】')"""
+        text = self.txt_log.toPlainText()
+        marker = "【 TÓM TẮT KẾT QUẢ 】"
+        if marker in text:
+            # Lấy từ marker đến cuối
+            idx = text.find(marker)
+            summary = text[idx:].strip()
+            QApplication.clipboard().setText(summary)
+            self.append_log("[SYSTEM] Đã copy phần tóm tắt!")
+        else:
+            self.append_log("[WARN] Không tìm thấy phần tóm tắt!")
+
     def append_log(self, text):
         self.txt_log.append(text)
         cursor = self.txt_log.textCursor()
@@ -664,6 +822,9 @@ class MaterialQueryUI(QMainWindow):
         self.list_matches.setEnabled(enabled)
         self.btn_open_selected.setEnabled(enabled)
         self.btn_open_all.setEnabled(enabled)
+        self.mode_toggle.setEnabled(enabled)
+        self.btn_history.setEnabled(enabled)
+        self.btn_clear_history.setEnabled(enabled)
 
     def check_post_update_status(self):
         """Kiểm tra xem app vừa được update xong hay là bị lỗi rollback để thông báo"""
@@ -765,12 +926,22 @@ class MaterialQueryUI(QMainWindow):
         # Add to history
         self.add_to_history(code)
         self.hide_history()
+        
+        # Reset UI trước khi tìm kiếm mới
+        self.reset_selection_ui()
              
         self.set_gui_enabled(False)
         
-        self.search_worker = SearchWorker(code)
-        self.search_worker.progress.connect(self.update_progress)
-        self.search_worker.finished.connect(self.on_search_finished)
+        # Chọn worker dựa trên mode
+        if self.search_mode == "material":
+            self.search_worker = SearchWorker(code)
+            self.search_worker.progress.connect(self.update_progress)
+            self.search_worker.finished.connect(self.on_search_finished)
+        else:  # api mode
+            self.search_worker = ApiSearchWorker(code)
+            self.search_worker.progress.connect(self.update_progress)
+            self.search_worker.finished.connect(self.on_api_search_finished)
+        
         self.search_worker.start()
 
     def on_search_finished(self, result):
@@ -810,6 +981,66 @@ class MaterialQueryUI(QMainWindow):
             self.lbl_results_info.setStyleSheet("font-size: 12px; color: #f7768e; padding: 5px; background-color: #1f2335; border-radius: 4px;")
             self.lbl_results_info.setVisible(True)
 
+    def on_api_search_finished(self, result):
+        """Xử lý kết quả tra cứu API"""
+        self.set_gui_enabled(True)
+        self.txt_code.selectAll()
+        self.txt_code.setFocus()
+        
+        if result.get("type") == "api_error":
+            error_msg = result.get("error", "Unknown error")
+            self.append_log(f"[API ERROR] {error_msg}")
+            # Hiển thị error UI
+            self.lbl_list.setVisible(True)
+            self.list_matches.setVisible(True)
+            self.btn_open_selected.setVisible(True)
+            self.btn_open_all.setVisible(True)
+            self.list_matches.clear()
+            self.lbl_results_info.setText(f"❌ Lỗi: {error_msg}")
+            self.lbl_results_info.setStyleSheet("font-size: 12px; color: #f7768e; padding: 5px; background-color: #1f2335; border-radius: 4px;")
+            self.lbl_results_info.setVisible(True)
+            return
+        
+        data = result.get("data")
+        if data is None:
+            self.append_log("[API] Không có dữ liệu trả về")
+            self.lbl_results_info.setText("❌ Không có dữ liệu")
+            self.lbl_results_info.setVisible(True)
+            return
+        
+        # Xử lý theo kiểu dữ liệu
+        if isinstance(data, list):
+            if len(data) == 0:
+                self.append_log("[API] Danh sách kết quả rỗng")
+                self.lbl_results_info.setText("❌ Không tìm thấy dữ liệu")
+                self.lbl_results_info.setStyleSheet("font-size: 12px; color: #f7768e; padding: 5px; background-color: #1f2335; border-radius: 4px;")
+                self.lbl_results_info.setVisible(True)
+            else:
+                # Có nhiều kết quả -> hiển thị selection
+                self.show_api_multiple_selection(data)
+        elif isinstance(data, dict):
+            # Single result -> lấy cInvCode và gọi GET
+            cinv_code = data.get('cInvCode')
+            if cinv_code:
+                self.append_log(f"\n[API] Mã vật liệu: {cinv_code}")
+                self.append_log(f"[API] Số bản vẽ: {data.get('cEngineerFigNo', 'N/A')}")
+                self.append_log(f"[API] Tên vật liệu: {data.get('cInvName', 'N/A')}")
+                self.append_log(f"[API] Đang lấy URLs...")
+                # Use worker to fetch URLs and open folders (non-blocking)
+                self.set_gui_enabled(False)
+                self.api_single_worker = ProcessMultipleWorker([cinv_code], False)
+                self.api_single_worker.progress.connect(self.update_progress)
+                self.api_single_worker.finished.connect(self.on_api_single_finished)
+                self.api_single_worker.start()
+            else:
+                self.append_log("[ERROR] Response không chứa cInvCode.")
+                self.lbl_results_info.setText("❌ Dữ liệu không hợp lệ")
+                self.lbl_results_info.setVisible(True)
+        else:
+            self.append_log(f"[API] Unexpected data type: {type(data)}")
+            self.lbl_results_info.setText("❌ Kiểu dữ liệu không hỗ trợ")
+            self.lbl_results_info.setVisible(True)
+
     def on_open_selected(self):
         selected_items = self.list_matches.selectedItems()
         if not selected_items:
@@ -834,6 +1065,66 @@ class MaterialQueryUI(QMainWindow):
         self.multi_worker.start()
 
     def on_multi_finished(self):
+        self.set_gui_enabled(True)
+
+    def show_api_multiple_selection(self, matches):
+        """Hiển thị danh sách kết quả API để chọn"""
+        self.api_cached_matches = matches
+        self.list_matches.clear()
+        
+        for i, m in enumerate(matches, 1):
+            eng_fig = m.get('cEngineerFigNo', 'N/A')
+            cinv = m.get('cInvCode', 'N/A')
+            self.list_matches.addItem(f"{i}. {eng_fig}  →  {cinv}")
+        
+        # Cập nhật thông tin
+        info_text = f"📁 Tổng: {len(matches)} kết quả"
+        self.lbl_results_info.setText(info_text)
+        self.lbl_results_info.setStyleSheet("font-size: 12px; color: #9ece6a; padding: 5px; background-color: #1f2335; border-radius: 4px;")
+        self.lbl_results_info.setVisible(True)
+        
+        # Hiển thị UI selection
+        self.lbl_list.setVisible(True)
+        self.list_matches.setVisible(True)
+        self.btn_open_selected.setVisible(True)
+        self.btn_open_all.setVisible(True)
+        
+        # Reconnect buttons cho API mode
+        self.btn_open_selected.clicked.disconnect()
+        self.btn_open_selected.clicked.connect(self.on_api_open_selected)
+        self.btn_open_all.clicked.disconnect()
+        self.btn_open_all.clicked.connect(self.on_api_open_all)
+        
+        self.append_log(f"\n[API] Có {len(matches)} kết quả, vui lòng chọn để mở file.")
+    
+    def on_api_open_selected(self):
+        """Mở file cho các kết quả API được chọn"""
+        selected_items = self.list_matches.selectedItems()
+        if not selected_items:
+            self.append_log("[WARN] Vui lòng chọn ít nhất một mã!")
+            return
+        
+        selected_indices = [self.list_matches.row(item) for item in selected_items]
+        cinv_codes = [self.api_cached_matches[i]['cInvCode'] for i in selected_indices]
+        
+        self.set_gui_enabled(False)
+        self.multi_worker = ProcessMultipleWorker(cinv_codes, False)
+        self.multi_worker.progress.connect(self.update_progress)
+        self.multi_worker.finished.connect(self.on_multi_finished)
+        self.multi_worker.start()
+    
+    def on_api_open_all(self):
+        """Mở file cho tất cả kết quả API"""
+        cinv_codes = [m['cInvCode'] for m in self.api_cached_matches]
+        
+        self.set_gui_enabled(False)
+        self.multi_worker = ProcessMultipleWorker(cinv_codes, True)
+        self.multi_worker.progress.connect(self.update_progress)
+        self.multi_worker.finished.connect(self.on_multi_finished)
+        self.multi_worker.start()
+
+    def on_api_single_finished(self):
+        """Callback sau khi mở file cho single API result"""
         self.set_gui_enabled(True)
 
     # ========================================================================

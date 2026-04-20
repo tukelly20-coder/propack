@@ -38,7 +38,7 @@ CATEGORIES = [
     "ZHT展会图-ZHT展会图-展会图",
     "LHX老化线-LHX老化线-老化线"
 ]
-#hàm yêu cầu tạo mã bản v�?mới
+#hàm yêu cầu tạo mã bản v?mới
 class CodeRequester(QThread):
     code_received = Signal(str)
 
@@ -73,7 +73,7 @@ class CodeRequester(QThread):
             print(f"Lỗi kết nối trong CodeRequester: {e}")
             self.code_received.emit("Lỗi kết nối")
 
-#Yêu cầu lịch s�?t�?server
+#Yêu cầu lịch s?t?server
 class HistoryRequester(QThread):
     history_received = Signal(list)
 
@@ -117,7 +117,7 @@ class HistoryRequester(QThread):
             print(f"[DEBUG] Exception in HistoryRequester: {e}")
             self.history_received.emit([])
 
-#Yêu cầu lịch s�?toàn b�?cho export
+#Yêu cầu lịch s?toàn b?cho export
 class ExportHistoryRequester(QThread):
     history_received = Signal(list)
 
@@ -158,7 +158,7 @@ class ExportHistoryRequester(QThread):
             print(f"[DEBUG] Exception in ExportHistoryRequester: {e}")
             self.history_received.emit([])
 
-# Tìm kiếm lịch s�?t�?server
+# Tìm kiếm lịch s?t?server
 class SearchHistoryRequester(QThread):
     search_results = Signal(list)
 
@@ -249,13 +249,13 @@ class ConnectionChecker(QThread):
             self.connection_status.emit('disconnected')
         print("ConnectionChecker finished")
 
-# Biến toàn cục đ�?gi�?tham chiếu đến MainWindow đang chạy
+# Biến toàn cục đ?gi?tham chiếu đến MainWindow đang chạy
 _main_window_instance = None
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Tạo Mã Bản v�?)
+        self.setWindowTitle("Tạo Mã Bản Vẽ")
         self.resize(800, 600)
         self.tabs = QTabWidget()
         self.current_language = load_language()
@@ -274,7 +274,7 @@ class MainWindow(QWidget):
         # Get server IP from session
         self.server_ip = session_manager.get_server_ip() or ""
         
-        # Tab 1: Tạo Mã Bản V�?
+        # Tab 1: Tạo Mã Bản V?
         tab1 = QWidget()
         tab1_layout = QVBoxLayout()
         self.name_label = QLabel("Tên người xin mã:")
@@ -307,14 +307,14 @@ class MainWindow(QWidget):
         self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.button.clicked.connect(self.request_code)
         tab1_layout.addWidget(self.button)
-        self.result_label = QLabel("Mã s�?hiển th�?�?đây")
+        self.result_label = QLabel("Mã s?hiển th??đây")
         self.result_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.result_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         tab1_layout.addWidget(self.result_label)
         tab1.setLayout(tab1_layout)
         self.tabs.addTab(tab1, "Tạo Mã")
 
-        # Tab 2: Lịch S�?
+        # Tab 2: Lịch S?
         tab2 = QWidget()
         tab2_layout = QVBoxLayout()
         self.history_table = HorizontalScrollTableWidget()
@@ -342,18 +342,18 @@ class MainWindow(QWidget):
         pagination_layout.addWidget(self.refresh_button)
         tab2_layout.addLayout(pagination_layout)
         tab2.setLayout(tab2_layout)
-        self.tabs.addTab(tab2, "Lịch S�?)
+        self.tabs.addTab(tab2, "Lịch Sử")
         self.history_page = 0
         self.history_data = []
         self.history_headers = {"name": "Tên", "employee": "Mã nhân viên", "category": "Hạng mục", "code": "Mã", "time": "Thời gian"}
         self.last_refresh = 0
         self.search_mode = False
 
-        # Tab 3: Ngôn ng�?
+        # Tab 3: Ngôn ng?
         tab3 = QWidget()
         tab3_layout = QVBoxLayout()
         tab3_layout.setAlignment(Qt.AlignTop)
-        self.language_label = QLabel("Chọn ngôn ng�?")
+        self.language_label = QLabel("Chọn ngôn ng?")
         tab3_layout.addWidget(self.language_label)
         self.language_combo = QComboBox()
         self.language_combo.addItem("Tiếng Việt", 'vi')
@@ -366,12 +366,12 @@ class MainWindow(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         tab3_layout.addWidget(spacer)
         tab3.setLayout(tab3_layout)
-        self.tabs.addTab(tab3, "Ngôn ng�?)
+        self.tabs.addTab(tab3, "Ngôn ngữ")
 
-        # Tab 4: Tool Đồng b�?hóa
+        # Tab 4: Tool Đồng b?hóa
         tab4 = QWidget()
         tab4_layout = QVBoxLayout()
-        tab4_layout.addWidget(QLabel("Nội dung tool đồng b�?hóa"))
+        tab4_layout.addWidget(QLabel("Nội dung tool đồng b?hóa"))
         # Ô 1 điền From.txt
         from_layout = QHBoxLayout()
         self.tab4_input_from = QLineEdit()
@@ -390,34 +390,34 @@ class MainWindow(QWidget):
         to_layout.addWidget(self.tab4_input_to)
         to_layout.addWidget(self.browse_to_button)
         tab4_layout.addLayout(to_layout)
-        #hiển th�?nội dung của form.txt và to.txt
+        #hiển th?nội dung của form.txt và to.txt
         self.load_tab4_from()
         self.load_tab4_to()
-        # Nút nhấn "Đồng B�?ngay"
-        self.sync_button = QPushButton("Đồng b�?ngay")
-        self.sync_button.clicked.connect(self.perform_sync) #kết nối với hàm x�?lý
+        # Nút nhấn "Đồng B?ngay"
+        self.sync_button = QPushButton("Đồng b?ngay")
+        self.sync_button.clicked.connect(self.perform_sync) #kết nối với hàm x?lý
         tab4_layout.addWidget(self.sync_button)
-        tab4_layout.setAlignment(Qt.AlignTop) # căn l�?trên cho toàn b�?layout tab4
+        tab4_layout.setAlignment(Qt.AlignTop) # căn l?trên cho toàn b?layout tab4
         tab4.setLayout(tab4_layout) #thiết lập layout cho tab4
-        self.tabs.addTab(tab4,"Tool Đồng b�?hóa")
+        self.tabs.addTab(tab4,"Tool Đồng b?hóa")
 
         # Tab 5: Project Tracking
         tab5 = QWidget()
         tab5_layout = QVBoxLayout()
         tab5_layout.setAlignment(Qt.AlignTop)
 
-        # Thêm tiêu đ�?
-        title_label = QLabel("Theo Dõi D�?Án / 项目跟踪")
+        # Thêm tiêu đ?
+        title_label = QLabel("Theo Dõi D?Án / 项目跟踪")
         title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         tab5_layout.addWidget(title_label)
 
-        # Thêm mô t�?
-        desc_label = QLabel("Nhấn nút bên dưới đ�?m�?cửa s�?theo dõi d�?án\n点击下方按钮打开项目跟踪窗口")
+        # Thêm mô t?
+        desc_label = QLabel("Nhấn nút bên dưới đ?m?cửa s?theo dõi d?án\n点击下方按钮打开项目跟踪窗口")
         desc_label.setAlignment(Qt.AlignCenter)
         tab5_layout.addWidget(desc_label)
 
-        # Thêm nút m�?Project Tracking
-        open_project_tracking_button = QPushButton("M�?Theo Dõi D�?Án / 打开项目跟踪")
+        # Thêm nút m?Project Tracking
+        open_project_tracking_button = QPushButton("M?Theo Dõi D?Án / 打开项目跟踪")
         open_project_tracking_button.clicked.connect(self.open_project_tracking)
         open_project_tracking_button.setMinimumHeight(50)
         tab5_layout.addWidget(open_project_tracking_button)
@@ -516,7 +516,7 @@ class MainWindow(QWidget):
         self.update_history_table()
 
     def update_history_table(self):
-        # Hiển th�?toàn b�?self.history_data (100 bản ghi cho mỗi trang)
+        # Hiển th?toàn b?self.history_data (100 bản ghi cho mỗi trang)
         page_data = self.history_data
         self.history_table.setRowCount(len(page_data))
         for row, item in enumerate(page_data):
@@ -551,7 +551,7 @@ class MainWindow(QWidget):
         self.next_button.setEnabled(False)
         QTimer.singleShot(1000, lambda: self.next_button.setEnabled(True))
         page_size = 100
-        # Tăng history_page và yêu cầu d�?liệu mới t�?server
+        # Tăng history_page và yêu cầu d?liệu mới t?server
         self.history_page += 1
         self.request_history_page(self.history_page)
     
@@ -568,7 +568,7 @@ class MainWindow(QWidget):
             self.history_requester.start()
     
     def populate_history_page(self, history):
-        # Thay th�?hoàn toàn history_data với d�?liệu đã sorted t�?server
+        # Thay th?hoàn toàn history_data với d?liệu đã sorted t?server
         self.history_data = history
         self.update_history_table()
 
@@ -711,7 +711,7 @@ class MainWindow(QWidget):
         except:
             pass
     
-    # hiển th�?nội dung của From.txt và To.txt
+    # hiển th?nội dung của From.txt và To.txt
     def load_tab4_from(self):
         try:
             with open('Toolsysnc/From.txt','r',encoding='utf-8') as f:
@@ -729,7 +729,7 @@ class MainWindow(QWidget):
             pass
 
     def on_tab_changed(self, index):
-        if index == 1 and not self.history_data:  # Tab Lịch S�?and no data loaded yet
+        if index == 1 and not self.history_data:  # Tab Lịch S?and no data loaded yet
             self.request_history()
 
     def check_connection(self):
@@ -737,7 +737,7 @@ class MainWindow(QWidget):
         if self.current_state == 'DISCONNECTED':
             server_ip = self.server_ip
             if not server_ip:
-                print("[MainWindow] Không có server IP, không th�?kết nối")
+                print("[MainWindow] Không có server IP, không th?kết nối")
                 self.connection_label.setText("Chưa cấu hình IP server")
                 return
             
@@ -758,12 +758,12 @@ class MainWindow(QWidget):
             self.current_state = 'DISCONNECTED'
             self.retry_interval = min(self.retry_interval * 2, self.max_retry_interval)
             self.timer.start(self.retry_interval * 1000)
-            print(f"[MainWindow] Kết nối thất bại, th�?lại sau {self.retry_interval} giây")
+            print(f"[MainWindow] Kết nối thất bại, th?lại sau {self.retry_interval} giây")
         
         # Cập nhật UI
         status_texts = {
             'connected': 'Đã kết nối',
-            'disconnected': 'Mất kết nối - Đang th�?lại...',
+            'disconnected': 'Mất kết nối - Đang th?lại...',
             'checking': 'Đang kiểm tra kết nối...'
         }
         self.connection_label.setText(status_texts.get(status_key, status_key))
@@ -782,7 +782,7 @@ class MainWindow(QWidget):
         self.update_ui_texts()
         # Cập nhật nội dung README trong tab About
         self.tabs.widget(6).reload_readme()
-        # Cập nhật ngôn ng�?trong tab Settings
+        # Cập nhật ngôn ng?trong tab Settings
         self.tabs.widget(5).reload_language()
 
     def update_ui_texts(self):
@@ -819,7 +819,7 @@ class MainWindow(QWidget):
         self.apply_button.setText(CLIENT_TEXT[lang]['apply'])
         self.language_combo.setCurrentIndex(0 if self.current_language == 'vi' else 1)
     
-    #logic tool đồng b�?hóa
+    #logic tool đồng b?hóa
     def perform_sync(self):
         from_text = self.tab4_input_from.text().strip()
         to_text = self.tab4_input_to.text().strip()
@@ -833,7 +833,7 @@ class MainWindow(QWidget):
                 f.write(to_text)
             self.result_label.setText(CLIENT_TEXT[self.current_language]['sync_saved'])
             try:
-                subprocess.Popen(['cmd.exe', '/c', 'start', 'cmd.exe', '/k', 'Toolsysnc/T�?Tool  đồng b�?hóa.bat'], shell=True)
+                subprocess.Popen(['cmd.exe', '/c', 'start', 'cmd.exe', '/k', 'Toolsysnc/T?Tool  đồng b?hóa.bat'], shell=True)
                 self.result_label.setText(CLIENT_TEXT[self.current_language]['sync_running'])
             except FileNotFoundError:
                 self.result_label.setText(CLIENT_TEXT[self.current_language]['sync_not_found'])
@@ -853,25 +853,25 @@ class MainWindow(QWidget):
             self.tab4_input_to.setText(directory.replace('/', '\\'))
 
     def open_project_tracking(self):
-        """M�?cửa s�?Project Tracking - ch�?m�?một cửa s�?""
-        # Kiểm tra nếu cửa s�?đã m�?và đang hiển th�?
+        """Mở cửa sổ Project Tracking - chạm một cửa sổ"""
+        # Kiểm tra nếu cửa s?đã m?và đang hiển th?
         if self.project_tracking_window is not None and self.project_tracking_window.isVisible():
-            # Focus vào cửa s�?đã m�?
+            # Focus vào cửa s?đã m?
             self.project_tracking_window.activateWindow()
             self.project_tracking_window.raise_()
             return
-        # Tạo cửa s�?mới
+        # Tạo cửa s?mới
         self.project_tracking_window = ProjectTrackingMainWindow(server_ip=self.server_ip)
         self.project_tracking_window.show()
 
     def on_logout(self):
-        """X�?lý đăng xuất - đóng cửa s�?hiện tại và hiện dialog đăng nhập lại"""
+        """Xử lý đăng xuất - đóng cửa sổ hiện tại và hiện dialog đăng nhập lại"""
         logger.info("Người dùng yêu cầu đăng xuất")
         
         print("[MainWindow] Đang đăng xuất...")
         
-        # QUAN TRỌNG: Ngắt kết nối signals và ch�?threads kết thúc trước khi đóng window
-        # đ�?tránh thread c�?gắng access window đã b�?hủy gây crash
+        # QUAN TRỌNG: Ngắt kết nối signals và ch?threads kết thúc trước khi đóng window
+        # đ?tránh thread c?gắng access window đã b?hủy gây crash
         try:
             if hasattr(self, 'connection_checker') and self.connection_checker.isRunning():
                 self.connection_checker.blockSignals(True)
@@ -897,12 +897,12 @@ class MainWindow(QWidget):
         except:
             pass
         
-        # Hiển th�?dialog đăng nhập lại
-        print("[MainWindow] Hiển th�?dialog đăng nhập")
+        # Hiển th?dialog đăng nhập lại
+        print("[MainWindow] Hiển th?dialog đăng nhập")
         login_dialog = LoginDialog()
         if login_dialog.exec() == QDialog.DialogCode.Accepted:
             self.close()
-            # S�?dụng biến toàn cục đ�?gi�?tham chiếu đến MainWindow mới
+            # S?dụng biến toàn cục đ?gi?tham chiếu đến MainWindow mới
             global _main_window_instance
             _main_window_instance = MainWindow()
             _main_window_instance.show()
@@ -915,8 +915,8 @@ class MainWindow(QWidget):
 
     def open_search_dialog(self):
         """
-        M�?dialog tìm kiếm lịch s�?- Ctrl+F handler
-        S�?dụng static method t�?SearchDialog đ�?tập trung logic
+        Mở dialog tìm kiếm lịch sử - Ctrl+F handler
+        Sử dụng static method của SearchDialog để tập trung logic
         """
         SearchDialog.open_search_dialog(
             self, 
@@ -927,7 +927,7 @@ class MainWindow(QWidget):
         )
     
     def keyPressEvent(self, event):
-        if self.tabs.currentIndex() == 1:  # Tab Lịch S�?
+        if self.tabs.currentIndex() == 1:  # Tab Lịch S?
             if event.key() == Qt.Key_F5:
                 print("Pressed F5 key")
                 self.request_history()
@@ -967,21 +967,21 @@ class MainWindow(QWidget):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     
-    # Th�?auto login với xác thực server
+    # Th?auto login với xác thực server
     auto_login_success = False
     auto_login_error = None
     
-    # Bước 1: Kiểm tra session cục b�?
+    # Bước 1: Kiểm tra session cục b?
     if session_manager.is_logged_in():
-        print(f"[AutoLogin] Session cục b�?tồn tại cho user: {session_manager.get_current_user()}")
+        print(f"[AutoLogin] Session cục b?tồn tại cho user: {session_manager.get_current_user()}")
         
-        # Bước 2: Lấy server IP t�?session hoặc file
+        # Bước 2: Lấy server IP t?session hoặc file
         server_ip = session_manager.get_server_ip() or session_manager.load_server_ip_from_file()
         
         if server_ip:
             print(f"[AutoLogin] Đang xác thực với server {server_ip}...")
             
-            # Bước 3: Th�?xác thực với server bằng credentials đã lưu
+            # Bước 3: Th?xác thực với server bằng credentials đã lưu
             result = session_manager.validate_session_with_server(server_ip)
             
             if result['success']:
@@ -990,13 +990,13 @@ if __name__ == "__main__":
             else:
                 auto_login_error = result.get('error', 'Xác thực thất bại')
                 print(f"[AutoLogin] Xác thực server thất bại: {auto_login_error}")
-                print("[AutoLogin] S�?hiển th�?dialog đăng nhập...")
+                print("[AutoLogin] S?hiển th?dialog đăng nhập...")
         else:
             print("[AutoLogin] Không tìm thấy server IP")
     else:
-        print("[AutoLogin] Không có session cục b�?)
+        print("[AutoLogin] Không có session cục bộ")
     
-    # Nếu auto login thành công, hiển th�?cửa s�?Project Tracking trực tiếp
+    # Nếu auto login thành công, hiển th?cửa s?Project Tracking trực tiếp
     if auto_login_success:
         server_ip = session_manager.get_server_ip() or ""
         pt_window = ProjectTrackingMainWindow(server_ip=server_ip)
@@ -1010,7 +1010,7 @@ if __name__ == "__main__":
     # Hiện dialog đăng nhập
     login_dialog = LoginDialog()
     if login_dialog.exec() == QDialog.DialogCode.Accepted:
-        # Đăng nhập thành công, m�?cửa s�?Project Tracking trực tiếp
+        # Đăng nhập thành công, m?cửa s?Project Tracking trực tiếp
         server_ip = session_manager.get_server_ip() or ""
         pt_window = ProjectTrackingMainWindow(server_ip=server_ip)
         pt_window.show()
