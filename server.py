@@ -211,7 +211,7 @@ cached_sorted_history = None
 history_version = 0
 
 # Load data on startup
-STORAGE_PATH = 'used_codes.json'
+STORAGE_PATH = 'data/used_codes.json'
 deleted_codes = set()
 used_codes = {}
 history = []
