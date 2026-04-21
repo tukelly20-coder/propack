@@ -52,9 +52,9 @@ def update_customers_schema():
     
     # Kiem tra va them cac columns moi
     columns_to_add = [
-        ('code', 'VARCHAR(10)'),
+        ('code', 'VARCHAR(50)'),
         ('phonetic', 'VARCHAR(100)'),
-        ('english_name', 'VARCHAR(100)')
+        ('english_name', 'VARCHAR(200)')
     ]
     
     # Lay danh sach columns hien tai

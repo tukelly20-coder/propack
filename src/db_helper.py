@@ -75,7 +75,10 @@ def init_db_v2():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS customers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code VARCHAR(50),
             name VARCHAR(200) UNIQUE NOT NULL,
+            phonetic VARCHAR(100),
+            english_name VARCHAR(200),
             contact_person VARCHAR(100),
             phone VARCHAR(50),
             email VARCHAR(100),
@@ -379,13 +382,30 @@ def migrate_to_v2():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS customers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code VARCHAR(50),
             name VARCHAR(200) UNIQUE NOT NULL,
+            phonetic VARCHAR(100),
+            english_name VARCHAR(200),
             contact_person VARCHAR(100),
             phone VARCHAR(50),
             email VARCHAR(100),
             address TEXT
         )
     ''')
+    
+    # Migration: Thêm các cột mới cho customers (nếu chưa có) - CHO DB CŨ
+    try:
+        cursor.execute('ALTER TABLE customers ADD COLUMN code VARCHAR(50)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    try:
+        cursor.execute('ALTER TABLE customers ADD COLUMN phonetic VARCHAR(100)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
+    try:
+        cursor.execute('ALTER TABLE customers ADD COLUMN english_name VARCHAR(200)')
+    except sqlite3.OperationalError:
+        pass  # Column đã tồn tại
     
     # Thêm columns mới vào bảng projects (nếu chưa có)
     try:

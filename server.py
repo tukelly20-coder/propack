@@ -1922,6 +1922,7 @@ def call_openrouter_with_retry(api_key, model, messages, timeout=60):
 
 # Load AI config on startup
 load_ai_retry_config()
+load_gemini_config()
 
 # Default Ollama URLs (always include port)
 DEFAULT_OLLAMA_URLS = [
