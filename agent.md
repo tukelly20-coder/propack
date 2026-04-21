@@ -1,176 +1,176 @@
-## Purpose
+## Mục Đích
 
-This is a comprehensive **Project Tracking & Drawing Code Generation System** designed for manufacturing/engineering companies. The system manages the complete workflow from sales project creation to engineer acceptance, while also generating unique drawing codes for various product categories. It includes a web-based frontend, Flask REST API backend, and legacy desktop client for code generation.
+Đây là hệ thống **Quản Lý Dự Án & Tạo Mã Bản Vẽ** toàn diện được thiết kế cho các công ty sản xuất/kỹ thuật. Hệ thống quản lý toàn bộ quy trình từ tạo dự án kinh doanh đến kỹ thuật viên tiếp nhận, đồng thời tạo mã bản vẽ duy nhất cho nhiều hạng mục sản phẩm. Bao gồm giao diện web, REST API backend bằng Flask, và client desktop cũ để tạo mã.
 
-**Primary Goals:**
-- Track projects from sales → engineer handoff with status management (pending/accepted)
-- Generate unique, non-repeating drawing codes for 13 product categories
-- Provide real-time collaboration and project visibility
-- Support bilingual interface (Vietnamese & Chinese)
-- Enable user role-based access control with permissions system
-
----
-
-## Role
-
-**System Architecture Agent** - Full-stack Python/JavaScript engineer specializing in enterprise workflow systems, database design, and multi-client architecture.
-
-**Responsibilities:**
-- Maintain and evolve the unified Flask server with REST APIs
-- Manage the SQLite database schema and migration strategies
-- Support web frontend (Bootstrap/jQuery SPA) and legacy desktop client compatibility
-- Implement user authentication, session management, and permission systems
-- Ensure code generation logic integrity across all product categories
-- Support internationalization (i18n) for Vietnamese/Chinese locales
-
-**Expertise Level:** Senior-level system integration across Python backend, JavaScript frontend, and SQL database with Windows-specific tooling (robocopy, UNC paths).
+**Mục Tiêu Chính:**
+- Theo dõi dự án từ sales → kỹ thuật với quản lý trạng thái (chờ tiếp nhận/đã tiếp nhận)
+- Tạo mã bản vẽ duy nhất, không trùng lặp cho 13 hạng mục sản phẩm
+- Cung cấp cộng tác thời gian thực và hiển thị dự án
+- Hỗ trợ giao diện song ngữ (Tiếng Việt & Tiếng Trung)
+- Cho phép kiểm soát truy cập dựa trên vai trò với hệ thống phân quyền
 
 ---
 
-## Input
+## Vai Trò
 
-### Client-Supplied Data
+**Agent Kiến Trúc Hệ Thống** - Kỹ sư Full-stack Python/JavaScript chuyên về hệ thống workflow doanh nghiệp, thiết kế database và kiến trúc multi-client.
 
-**Web Client (Browser → HTTP/JSON)**
-- Authentication credentials: `{username, password}`
-- Project data: Form fields for tracking (customer, product, specs, dates, assignee)
-- Notice actions: Job accept/decline requests
-- Profile updates: `{full_name, email, phone, department, employee_id}`
-- System logs: Feedback submissions with log type
+**Trách Nhiệm:**
+- Duy trì và phát triển Flask server thống nhất với REST API
+- Quản lý schema SQLite và chiến lược migration
+- Hỗ trợ web frontend (Bootstrap/jQuery SPA) và tương thích desktop client cũ
+- Triển khai xác thực, quản lý session và hệ thống phân quyền
+- Đảm bảo tính toàn vẹn logic tạo mã qua tất cả hạng mục sản phẩm
+- Hỗ trợ quốc tế hóa (i18n) cho ngôn ngữ Tiếng Việt/Tiếng Trung
+
+**Mức Độ Chuyên Môn:** Senior-level tích hợp hệ thống với Python backend, JavaScript frontend và SQL database với công cụ Windows-specific (robocopy, UNC paths).
+
+---
+
+## Đầu Vào
+
+### Dữ Liệu Từ Client
+
+**Web Client (Trình duyệt → HTTP/JSON)**
+- Thông tin xác thực: `{username, password}`
+- Dữ liệu dự án: Form fields để theo dõi (khách hàng, sản phẩm, thông số, ngày, người được giao)
+- Hành động thông báo: Yêu cầu tiếp nhận/từ chối công việc
+- Cập nhật profile: `{full_name, email, phone, department, employee_id}`
+- System logs: Phản hồi với loại log
 
 **Desktop Client (socket → JSON over TCP)**
-- Code generation request: `{name, category, employee}`
-- Historical queries: `{page, limit, offset}`
-- Delete requests: `{password, code}`
+- Yêu cầu tạo mã: `{name, category, employee}`
+- Truy vấn lịch sử: `{page, limit, offset}`
+- Yêu cầu xóa: `{password, code}`
 
-### Internal Data Sources
+### Nguồn Dữ Liệu Nội Bộ
 
 **Database (SQLite: `DB.db`)**
-- Table `users`: user profiles, credentials hash, roles, permissions, status
-- Table `customers`: customer contact database
-- Table `projects`: normalized project records (19 business fields + metadata)
+- Table `users`: Hồ sơ user, mật khẩu hash, vai trò, quyền, trạng thái
+- Table `customers`: Database liên hệ khách hàng
+- Table `projects`: Bản ghi dự án chuẩn hóa (19 trường business + metadata)
 - Indexes: `user_id`, `ma_po`, `ten_san_pham`
 
 **File Storage**
-- `used_codes.json`: Legacy JSON storage for code generation tracking (categories + history)
-- `last_name.txt`, `last_employee.txt`, `last_category.txt`, `language.txt`: UI state persistence
-- `Toolsysnc/From.txt`, `Toolsysync/To.txt`: Directory sync tool configuration
-- `logs/`: Web client log submissions as timestamped `.txt` files
+- `used_codes.json`: Storage JSON cũ cho việc theo dõi tạo mã (categories + history)
+- `last_name.txt`, `last_employee.txt`, `last_category.txt`, `language.txt`: Lưu trạng thái UI
+- `Toolsysnc/From.txt`, `Toolsysync/To.txt`: Cấu hình tool đồng bộ thư mục
+- `logs/`: Log submissions từ web client dạng `.txt` có timestamp
 - Material Excel: `\\192.168.2.165\...\存货档案库.xlsx` (network UNC path)
 
-**Module: Tool Open (Material Lookup)**
-- `material_core` module: Loaded via dynamic import from `Tool open/Mở mã liệu 打开链接VP.py`
-- Excel lookup cache: In-memory DataFrame for `cEngineerFigNo` → `cInvCode` mapping
-- File system query: Search shared folders by `cInvCode` and copy matching paths to clipboard
+**Module: Tool Open (Tra cứu Vật liệu)**
+- Module `material_core`: Load động từ `Tool open/Mở mã liệu 打开链接VP.py`
+- Excel lookup cache: DataFrame in-memory cho mapping `cEngineerFigNo` → `cInvCode`
+- Query file system: Tìm kiếm thư mục chia sẻ theo `cInvCode` và copy đường dẫn matching vào clipboard
 
 ---
 
-## Output
+## Đầu Ra
 
-### API Responses (JSON or plain text)
+### API Responses (JSON hoặc plain text)
 
-**Authentication**
-- `POST /api/login` → `{success, token, user: {...}, expires_in}` or `{success: false, error}`
-- `GET /api/me` → `{authenticated, user, expires_in, expiring_soon}` or `{authenticated: false, reason}`
+**Xác Thực**
+- `POST /api/login` → `{success, token, user: {...}, expires_in}` hoặc `{success: false, error}`
+- `GET /api/me` → `{authenticated, user, expires_in, expiring_soon}` hoặc `{authenticated: false, reason}`
 - `POST /api/logout` → `{success, message}`
 
-**Project Management**
-- `GET /api/projects` → `{data: [...], total, total_pages, page}` (paginated)
+**Quản Lý Dự Án**
+- `GET /api/projects` → `{data: [...], total, total_pages, page}` (có phân trang)
 - `POST /api/projects` → `{success, record: {tracking_id, ...}}`
-- `GET /api/projects/<id>` → Full project record or `{error}`
-- `PUT /api/projects/<id>` → `{success}` or `{success: false, error}`
+- `GET /api/projects/<id>` → Full project record hoặc `{error}`
+- `PUT /api/projects/<id>` → `{success}` hoặc `{success: false, error}`
 - `DELETE /api/projects/<id>?role=admin` → `{success, deleted_count}`
 - `POST /api/projects/search` → `{data: [...], total, total_pages, page}`
 - `POST /api/projects/filter` → `{data: [...], total, total_pages, page}`
 
-**Code Generation**
-- `POST /api/codes/create` → `{success, code: "PWLJ001-0000-00-A0"}` or error
+**Tạo Mã**
+- `POST /api/codes/create` → `{success, code: "PWLJ001-0000-00-A0"}` hoặc error
 - `GET /api/codes/history` → `{data: [...], total, total_pages, page}`
 - `GET /api/codes/export` → `{success, data: [...], total}` (full history)
-- `DELETE /api/codes/history/<code>` → `{success, message}` or `{success: false, error}`
+- `DELETE /api/codes/history/<code>` → `{success, message}` hoặc `{success: false, error}`
 - Legacy socket (TCP 8001): Plain text responses: code string, `NO_MORE_CODES`, `PONG`, `INVALID_REQUEST`, `DELETED`, `ERROR`
 
-**Notices / Job Board**
-- `GET /api/notices/pending` → pending projects list
+**Thông Báo / Bảng Việc**
+- `GET /api/notices/pending` → Danh sách dự án chờ
 - `POST /api/notices/accept` → `{success}`
 
-**User Management (Admin only)**
-- `GET /api/users` → list of user summary objects
-- `POST /api/users` → `{success, user_id}` or `{success: false, error}`
+**Quản Lý User (Admin only)**
+- `GET /api/users` → Danh sách user summary objects
+- `POST /api/users` → `{success, user_id}` hoặc `{success: false, error}`
 - `PUT /api/users/<id>` → `{success}`
 - `DELETE /api/users/<id>` → `{success}`
 
 **Tool Open Lookup**
 - `GET /api/tool-status` → `{status: "ready"|"error"|"unavailable", message, excel_path, excel_exists}`
-- `POST /api/tool-search` → `{type: "success"|"multiple"|"error", urls: [...], copied_code, message}` or matches array
+- `POST /api/tool-search` → `{type: "success"|"multiple"|"error", urls: [...], copied_code, message}` hoặc matches array
 
 **Health / Static**
 - `GET /` → `web/index.html`
-- `GET /<path:filename>` → static asset
+- `GET /<path:filename>` → Static asset
 - `GET /api/health` → `{status, service, port, features}`
 
 ### Side-Effects
 
-- Database commits (`projects`, `users`) → invalidate in-memory cache
-- Code generation → append to `used_codes.json` history
-- Log submission → write `web_log_<timestamp>.txt`
-- Material lookup → copy `cInvCode` or URL list to system clipboard
-- Password change → update session user object and database
+- Database commits (`projects`, `users`) → vô hiệu hóa in-memory cache
+- Tạo mã → append vào `used_codes.json` history
+- Log submission → ghi `web_log_<timestamp>.txt`
+- Material lookup → copy `cInvCode` hoặc URL list vào system clipboard
+- Đổi mật khẩu → cập nhật session user object và database
 
 ---
 
-## Rules
+## Quy Tắc
 
-### Data Integrity Rules
+### Quy Tắc Toàn Vẹn Dữ Liệu
 
-1. **Code Uniqueness Guarantees**
-   - Non-SJT categories: Codes like `PWLJ001-0000-00-A0` must be unique within that category (001–999 range)
-   - SJT category: Codes `PSJT{emp}-{XXXX}-00-A0` unique per employee (0001–9999 range)
-   - Deleted codes become reusable (recycled in order)
+1. **Đảm Bảo Tính Duy Nhất Của Mã**
+   - Hạng mục non-SJT: Mã như `PWLJ001-0000-00-A0` phải duy nhất trong hạng mục đó (phạm vi 001–999)
+   - Hạng mục SJT: Mã `PSJT{emp}-{XXXX}-00-A0` duy nhất theo nhân viên (phạm vi 0001–9999)
+   - Mã đã xóa có thể tái sử dụng (tái chế theo thứ tự)
 
-2. **Project History**
-   - Every code generation appends a history record with ISO timestamp
-   - Timestamps used for sorting: newest first
-   - Deletion requires password `"kelly"` and removes code from `used_codes` pool
+2. **Lịch Sử Dự Án**
+   - Mỗi lần tạo mã append bản ghi lịch sử với timestamp ISO
+   - Timestamps dùng để sắp xếp: mới nhất trước
+   - Xóa cần mật khẩu `"kelly"` và remove mã khỏi `used_codes` pool
 
-3. **Project Workflow**
-   - New project records default `is_pending = 'yes'`
-   - Only one engineer may accept a pending project (first-come, first-served)
-   - Acceptance sets `accepted_by`, `accepted_at`, flips `is_pending = 'no'`
-   - Pending projects visible to all; after acceptance only to engineer who accepted (plus admin)
+3. **Workflow Dự Án**
+   - Bản ghi dự án mới mặc định `is_pending = 'yes'`
+   - Chỉ một kỹ thuật viên có thể tiếp nhận dự án chờ (first-come, first-served)
+   - Tiếp nhận set `accepted_by`, `accepted_at`, flip `is_pending = 'no'`
+   - Dự án chờ hiển thị với tất cả; sau khi tiếp nhận chỉ hiển thị với kỹ thuật viên đã tiếp nhận (và admin)
 
-4. **Normalization Contract**
-   - Database stores normalized columns (24 columns in `projects` table)
-   - API layer maps between API field names and database columns
-   - Field aliases supported from legacy UI (e.g., `'Nhân viên KD'` and `'Nhân viên kinh doanh'` both map to `nhan_vien_kinh_doanh`)
+4. **Contract Chuẩn Hóa**
+   - Database lưu normalized columns (24 columns trong `projects` table)
+   - API layer map giữa tên field API và database columns
+   - Hỗ trợ field aliases từ legacy UI (ví dụ: `'Nhân viên KD'` và `'Nhân viên kinh doanh'` đều map đến `nhan_vien_kinh_doanh`)
 
-### Security / Access Control
+### Bảo Mật / Kiểm Soát Truy Cập
 
-- **Authentication**: Bearer token sessions stored server-side; tokens expire after 24h
-- **Rate Limiting**: Max 5 failed login attempts per 5-minute window per IP
-- **Role-Based Permissions**: `create_sales_record` (sales), `job_accept` (engineer), admin = all
-- **Password Min**: 6 characters
-- **Account Lock**: `status = 'locked'` prevents login
-- **Deletion Protection**: Only `admin` role may delete projects via API
-- **CORS**: Allow-list domains (localhost, duckdns, custom domains) with support for HTTPS
+- **Xác thực**: Bearer token sessions lưu server-side; tokens hết hạn sau 24h
+- **Rate Limiting**: Tối đa 5 lần đăng nhập thất bại mỗi 5 phút mỗi IP
+- **Quyền Dựa Trên Vai Trò**: `create_sales_record` (sales), `job_accept` (engineer), admin = tất cả
+- **Mật khẩu Tối thiểu**: 6 ký tự
+- **Khóa Tài khoản**: `status = 'locked'` ngăn đăng nhập
+- **Bảo Vệ Xóa**: Chỉ role `admin` mới được xóa dự án qua API
+- **CORS**: Allow-list domains (localhost, duckdns, custom domains) với hỗ trợ HTTPS
 
-### Conventions
+### Quy Ước
 
-- **Code Format**:
+- **Format Mã**:
   - Non-SJT: `P{CATEGORY}{3-digit}-0000-00-A0` → `PWLJ001-0000-00-A0`
   - SJT: `PSJT{3-digit employee}-{4-digit serial}-00-A0` → `PSJT001-0001-00-A0`
-- **Category Codes**: WLJ, ZZC, GZT, WCP, LSX, ZWJ, GZL, SJT, BSX, WLL, GTX, ZHT, LHX
-- **Timestamps**: ISO 8601 for history, `YYYY-MM-DD HH:MM` for display
-- **JSON keys**: snake_case for internal (Python), mixed-case for UI compatibility (Vietnamese/Chinese labels)
-- **Cursor**: Use `safe_print()` for thread-safe console output
-- **Excel Path**: UNC path with guaranteed network location; cached in memory once loaded
-- **Language codes**: `vi` = Vietnamese, `zh` = Chinese
+- **Mã Hạng Mục**: WLJ, ZZC, GZT, WCP, LSX, ZWJ, GZL, SJT, BSX, WLL, GTX, ZHT, LHX
+- **Timestamps**: ISO 8601 cho history, `YYYY-MM-DD HH:MM` cho hiển thị
+- **JSON keys**: snake_case cho nội bộ (Python), mixed-case để tương thích UI (labels Tiếng Việt/Tiếng Trung)
+- **Cursor**: Dùng `safe_print()` cho thread-safe console output
+- **Excel Path**: UNC path với network location đảm bảo; cached in-memory sau khi load
+- **Language codes**: `vi` = Tiếng Việt, `zh` = Tiếng Trung
 
 ---
 
-## Workflow
+## Quy Trình
 
-### 1. System Startup
+### 1. Khởi Động Hệ Thống
 
 ```
 server.py start → Flask app initialized
@@ -180,7 +180,7 @@ server.py start → Flask app initialized
   └─ Listen on port 8001 (HTTP)
 ```
 
-### 2. User Login Flow
+### 2. Luồng Đăng Nhập User
 
 ```
 Web client: POST /api/login {username, password}
@@ -195,7 +195,7 @@ Web client: POST /api/login {username, password}
   └─ If fail: record attempt, return 401
 ```
 
-### 3. Project Creation (Sales Workflow)
+### 3. Tạo Dự Án (Sales Workflow)
 
 ```
 Client: POST /api/projects with form data
@@ -206,7 +206,7 @@ Client: POST /api/projects with form data
   └─ Returns {success, record} with tracking_id
 ```
 
-### 4. Notice / Job Acceptance (Engineer Workflow)
+### 4. Tiếp Nhận Công Việc (Engineer Workflow)
 
 ```
 Engineer clicks 'Nhận Job' (Notices tab)
@@ -218,7 +218,7 @@ Engineer clicks 'Nhận Job' (Notices tab)
   └─ Job appears in engineer's accepted projects list
 ```
 
-### 5. Drawing Code Generation (Legacy Desktop Client OR Web Tool)
+### 5. Tạo Mã Bản Vẽ (Legacy Desktop Client HOẶC Web Tool)
 
 ```
 Client → POST /api/codes/create {name, category, employee}
@@ -233,7 +233,7 @@ Client → POST /api/codes/create {name, category, employee}
   └─ On fail: return 'NO_MORE_CODES' or 'INVALID_REQUEST'
 ```
 
-### 6. Material Lookup Flow (Tool Open)
+### 6. Luồng Tra Cứu Vật Liệu (Tool Open)
 
 ```
 Client: POST /api/tool-search {code}
@@ -247,7 +247,7 @@ Client: POST /api/tool-search {code}
   └─ On error → {type: 'error', message}
 ```
 
-### 7. Search & Filter
+### 7. Tìm Kiếm & Lọc
 
 ```
 Search:
@@ -261,66 +261,66 @@ Filter:
 
 ---
 
-## Knowledge
+## Kiến Thức
 
-### Domain Knowledge (Manufacturing Engineering)
+### Kiến Thức Nghiệp Vụ (Sản Xuất Kỹ Thuật)
 
-- **Drawings (Bản vẽ)**:
-  - Main drawing (`Mã bản vẽ`): Primary drawing number
-  - Technical drawing (`Mã bản vẽ kỹ thuật`): Post-PO drawing variant
-  - Parent material code (`Mã mẹ`): Bill of Materials root identifier
-- **Product Categories**:
-  - SJT =拆件 (disassembly detailed drawing), unique per employee
-  - General categories: WLJ=material rack, ZZC=logistics cart, GZT=workstation, WCP=clean room, etc.
-- **Project Lifecycle**: Sales creates → Engineer accepts → Drawing codes assigned upon manufacture planning
+- **Bản vẽ (Drawings)**:
+  - Bản vẽ chính (`Mã bản vẽ`): Số bản vẽ chính
+  - Bản vẽ kỹ thuật (`Mã bản vẽ kỹ thuật`): Biến thể bản vẽ sau PO
+  - Mã mẹ (`Mã mẹ`): Bill of Materials root identifier
+- **Hạng Mục Sản Phẩm**:
+  - SJT = 散件 (bản vẽ tách chi tiết), duy nhất theo nhân viên
+  - Các hạng mục chung: WLJ=物料架 (giá đỡ vật liệu), ZZC=周转车 (xe trung chuyển), GZT=工作台 (bàn thao tác), WCP=无尘棚 (phòng sạch), v.v.
+- **Vòng Đời Dự Án**: Sales tạo → Kỹ thuật tiếp nhận → Mã bản vẽ được gán khi lập kế hoạch sản xuất
 
-### Technologies & Standards
+### Công Nghệ & Tiêu Chuẩn
 
 - **Backend**: Python 3.x, Flask 2.x, SQLite3
 - **Frontend**: HTML5, Bootstrap 5, jQuery 3.7, DataTables, i18n JavaScript
-- **Desktop Client**: PySide6 (Qt6), legacy socket-based communication on port 8001
-- **Serialization**: JSON over HTTP and legacy TCP
+- **Desktop Client**: PySide6 (Qt6), legacy socket-based communication trên port 8001
+- **Serialization**: JSON over HTTP và legacy TCP
 - **File Formats**: `.xlsx` (Excel via openpyxl/pandas), `.json` (state files), `.txt` (logs/configs)
-- **Concurrency**: Threading for socket server (legacy), Flask handles requests linearly (but session locking via `sessions_lock`)
-- **Internationalization**: Dynamic client-side language switching with `language.txt` persisted, i18n.js with Vietnamese/Chinese dictionaries
+- **Concurrency**: Threading cho socket server (legacy), Flask handles requests linearly (nhưng session locking qua `sessions_lock`)
+- **Internationalization**: Dynamic client-side language switching với `language.txt` persisted, i18n.js với dictionaries Tiếng Việt/Tiếng Trung
 
-### Data References
+### Tham Chiếu Dữ Liệu
 
-- **Sensitive Data**: `credentials.json` exists but should not be logged/committed
-- **Network Paths**: UNC path to shared inventory Excel on `192.168.2.165`
-- **Config Files**: `column_settings.json` controls UI column visibility, `used_codes.json` tracks state
-- **Tools**: `robocopy` for Windows directory mirroring, `PyInstaller` specs for packaging
+- **Dữ Liệu Nhạy Cảm**: `credentials.json` tồn tại nhưng không nên được log/commit
+- **Network Paths**: UNC path đến shared inventory Excel trên `192.168.2.165`
+- **Config Files**: `column_settings.json` kiểm soát visibility của UI columns, `used_codes.json` theo dõi state
+- **Tools**: `robocopy` cho Windows directory mirroring, `PyInstaller` specs cho packaging
 
 ---
 
-## Error Handling
+## Xử Lý Lỗi
 
-### Missing / Invalid Input
+### Thiếu / Đầu Vào Không Hợp Lệ
 
-- **Missing fields** (code creation): return `"INVALID_REQUEST"` string
-- **Unauthenticated**: 401 with `{success: false, error: "Chưa đăng nhập"}`
-- **Invalid credentials**: 401 with `{success: false, error: "Tên đăng nhập hoặc mật khẩu không đúng"}`
-- **Invalid employee code (not 3 digits or 000)**: 400 with `{error: "Mã nhân viên phải là 3 chữ số..."}`
-- **No available codes**: 400 with `{success: false, error: "Không còn mã available cho hạng mục này"}`
-- **Malformed JSON**: 400 `Dữ liệu không hợp lệ`
+- **Thiếu fields** (tạo mã): return `"INVALID_REQUEST"` string
+- **Chưa xác thực**: 401 với `{success: false, error: "Chưa đăng nhập"}`
+- **Thông tin không hợp lệ**: 401 với `{success: false, error: "Tên đăng nhập hoặc mật khẩu không đúng"}`
+- **Mã nhân viên không hợp lệ** (không phải 3 chữ số hoặc 000): 400 với `{error: "Mã nhân viên phải là 3 chữ số..."}`
+- **Không còn mã**: 400 với `{success: false, error: "Không còn mã available cho hạng mục này"}`
+- **JSON malformed**: 400 `Dữ liệu không hợp lệ`
 
 ### Rate Limiting
 
-- Failed logins tracked per IP → after 5 attempts within 5 minutes, 429 Too Many Requests with `code: "RATE_LIMITED"`
-- Auto-reset after `LOGIN_RATE_WINDOW` (300 seconds)
+- Đăng nhập thất bại tracked per IP → sau 5 attempts trong 5 phút, 429 Too Many Requests với `code: "RATE_LIMITED"`
+- Auto-reset sau `LOGIN_RATE_WINDOW` (300 giây)
 
-### Exhausted Resources
+### Tài Nguyên Cạn Kiệt
 
 - **Code pool exhausted**: `generate_code()` returns `None` → `NO_MORE_CODES` response
-- **Excel load failure**: Tool Open shows `"Không thể kết nối Excel"`; tool-status endpoint returns `"error"`
+- **Excel load failure**: Tool Open hiển thị `"Không thể kết nối Excel"`; tool-status endpoint returns `"error"`
 - **File I/O errors**: `used_codes.json` corrupted → fallback to empty state `{}, []`
-- **Unicode decode failures**: Try multiple encodings (`utf-8`, `utf-8-sig`, `gbk`, `gb2312`, `latin-1`)
+- **Unicode decode failures**: Thử nhiều encodings (`utf-8`, `utf-8-sig`, `gbk`, `gb2312`, `latin-1`)
 
 ### Database Errors
 
-- Connection failures → caught; return 500 with `str(e)`
-- Migration failures → logged but allow fallback operation
-- Constraint violations (e.g., duplicate tracking_id) → gracefully handled via `MAX(tracking_id)+1`
+- Connection failures → caught; return 500 với `str(e)`
+- Migration failures → logged nhưng allow fallback operation
+- Constraint violations (ví dụ: duplicate tracking_id) → gracefully handled via `MAX(tracking_id)+1`
 
 ### Unknown Request Types
 
@@ -328,48 +328,48 @@ Filter:
 
 ### Generic Catch-All
 
-All endpoints have top-level `try/except Exception as e` which returns 500 and `traceback.print_exc()` for debugging.
+Tất cả endpoints có top-level `try/except Exception as e` which returns 500 và `traceback.print_exc()` for debugging.
 
 ---
 
-## Style
+## Phong Cách
 
-### Output Style
+### Phong Cách Đầu Ra
 
-- **Default**: Compact JSON responses with field names matching database column naming (snake_case internally, user-friendly display externally)
-- **Error messages**: Vietnamese primary (`"Vui lòng nhập đầy đủ thông tin"`), with some Chinese alternative strings where applicable
-- **Boolean values**: Lowercase `true`/`false` in JSON
-- **Pagination**: All lists include `page`, `total_pages`, `total`, and `data` array fields
+- **Mặc định**: Compact JSON responses với field names matching database column naming (snake_case nội bộ, user-friendly display bên ngoài)
+- **Error messages**: Tiếng Việt chính (`"Vui lòng nhập đầy đủ thông tin"`), với một số chuỗi Tiếng Trung thay thế khi áp dụng
+- **Boolean values**: Lowercase `true`/`false` trong JSON
+- **Pagination**: Tất cả lists bao gồm `page`, `total_pages`, `total`, và `data` array fields
 
 ### Agent Response Patterns
 
-From server.py log style:
-- Prefix log lines with `[MODULE]` tags for easy filtering: `[Unified]`, `[SocketAPI]`, `[Excel]`, `[DB]`
-- Thread-safe logging via `safe_print()` with try/except around print
+Từ server.py log style:
+- Prefix log lines với `[MODULE]` tags để dễ lọc: `[Unified]`, `[SocketAPI]`, `[Excel]`, `[DB]`
+- Thread-safe logging qua `safe_print()` với try/except around print
 - Minimal user-facing messages; prefer structured data
 
-### Code Style (Python)
+### Phong Cách Code (Python)
 
-- **Encoding**: `# -*- coding: utf-8 -*-` header on all modules
+- **Encoding**: `# -*- coding: utf-8 -*-` header trên tất cả modules
 - **Imports**: Standard lib → third-party → local
-- **Type hints**: Optional but present in `db_helper.py`
-- **Docstrings**: Vietnamese/English mix, descriptive but not exhaustive
-- **Naming**: snake_case for functions/variables; UPPER_CASE for constants
+- **Type hints**: Optional nhưng present trong `db_helper.py`
+- **Docstrings**: Tiếng Việt/Tiếng Anh mix, descriptive nhưng không exhaustive
+- **Naming**: snake_case cho functions/variables; UPPER_CASE cho constants
 - **Constants defined at top of file** (CATEGORY_PREFIXES, SESSION_TIMEOUT, LOGIN_RATE_LIMIT)
 
-### Frontend Style (JavaScript/CSS)
+### Phong Cách Frontend (JavaScript/CSS)
 
-- **CSS**: `.main-tabs` navigation with custom active states; utility classes `.module-loading` for async content
-- **JS modules**: Each feature isolated (projects.js, notices.js, profile.js, ai.js, api.js)
-- **i18n**: `data-i18n` attributes; dynamic translation via `t()` function
+- **CSS**: `.main-tabs` navigation với custom active states; utility classes `.module-loading` cho async content
+- **JS modules**: Mỗi feature cô lập (projects.js, notices.js, profile.js, ai.js, api.js)
+- **i18n**: `data-i18n` attributes; dynamic translation qua `t()` function
 - **DOM events**: Delegated where possible (`$(document).on(...)`), namespaced custom events (`languageChanged`)
 - **State**: Single global `AppState` object tracks current tab + auth + module loaded flags
-- **API client**: Wrapper around `fetch` with error/response normalization in `api.js`
+- **API client**: Wrapper around `fetch` với error/response normalization trong `api.js`
 
-### UI/UX Conventions
+### Quy Ước UI/UX
 
 - **Colors** (CSS vars): primary blue, info, success green, warning, danger red
-- **Loading UX**: Spinner + message per tab; non-blocking toast for operations
-- **Responsive**: Mobile-first with media queries (`max-width: 768px`) hiding text labels
-- **Form validation**: Client-side checks before API call + server-side revalidation
+- **Loading UX**: Spinner + message per tab; non-blocking toast cho operations
+- **Responsive**: Mobile-first với media queries (`max-width: 768px`) ẩn text labels
+- **Form validation**: Client-side checks trước API call + server-side revalidation
 - **Confirmation**: Delete operations require password (not just confirm dialog)
