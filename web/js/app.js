@@ -281,16 +281,16 @@ async function loadAIModule() {
  * @param {string} src - Đường dẫn script
  * @returns {Promise}
  */
-function loadScript(src) {
-    return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.id = src.replace('.js', '-script').split('/').pop() + '-script';
-        script.src = src;
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-    });
-}
+ function loadScript(src) {
+     return new Promise((resolve, reject) => {
+         const script = document.createElement('script');
+         script.id = src.replace('.js', '').split('/').pop() + '-script';
+         script.src = src;
+         script.onload = resolve;
+         script.onerror = reject;
+         document.head.appendChild(script);
+     });
+ }
 
 /**
  * Trigger tab-specific initialization

@@ -111,7 +111,6 @@ def init_db_v2():
             is_pending VARCHAR(10) DEFAULT 'no',
             accepted_by VARCHAR(100),
             accepted_at TEXT,
-            urgency_level VARCHAR(20),
             desired_solution_time TEXT
         )
     ''')
@@ -172,11 +171,10 @@ def migrate_ngay_to_created_date():
                 thoi_gian_mong_muon_ban_ve TEXT,
                 thoi_gian_hoan_thanh_ke_hoach TEXT,
                 sales_name VARCHAR(100),
-                sales_id INTEGER,
+                user_id INTEGER,
                 is_pending VARCHAR(10) DEFAULT 'no',
                 accepted_by VARCHAR(100),
                 accepted_at TEXT,
-                urgency_level VARCHAR(20),
                 desired_solution_time TEXT
             )
         ''')
@@ -232,7 +230,7 @@ def migrate_projects_schema():
     """
     Migration: Hợp nhất id và tracking_id trong bảng projects
     - Tạo bảng mới với tracking_id làm PRIMARY KEY
-    - Copy dữ liệu từ bảng cũ
+    - Copy dữ liệu từ bảng cũ (hỗ trợ cả user_id và sales_id)
     - Xóa bảng cũ và đổi tên bảng mới
     Returns: bool
     """
@@ -240,18 +238,19 @@ def migrate_projects_schema():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # Kiểm tra nếu bảng cũ có cột 'id'
+        # Kiểm tra nếu bảng cũ có cột 'id' hoặc 'user_id' (cần migration)
         cursor.execute("PRAGMA table_info(projects)")
         columns = [col[1] for col in cursor.fetchall()]
         
-        if 'id' not in columns:
-            print("[DB] Projects table already migrated (no 'id' column)")
+        # Nếu bảng đã có sales_id và không có user_id thì đã migrate
+        if 'sales_id' in columns and 'user_id' not in columns:
+            print("[DB] Projects table already migrated (has sales_id, no user_id)")
             conn.close()
             return True
         
-        print("[DB] Starting projects schema migration...")
+        print("[DB] Starting projects schema migration (user_id -> sales_id)...")
         
-        # Bước 1: Tạo bảng tạm với schema mới
+        # Bước 1: Tạo bảng tạm với schema mới (dùng sales_id)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects_new (
                 tracking_id INTEGER PRIMARY KEY,
@@ -267,16 +266,15 @@ def migrate_projects_schema():
         ''')
         
         # Bước 2: Copy dữ liệu từ bảng cũ sang bảng mới
-        # Lấy tất cả columns từ bảng cũ
+        # Lấy tất cả columns từ bảng cũ, map user_id -> sales_id
         cursor.execute("SELECT * FROM projects")
         old_columns = [desc[0] for desc in cursor.description]
         
-        # Map columns
+        # Build mapping: column cũ -> column mới
         column_mapping = {
             'tracking_id': 'tracking_id',
             'data': 'data',
             'sales_name': 'sales_name',
-            'sales_id': 'sales_id',
             'is_pending': 'is_pending',
             'accepted_by': 'accepted_by',
             'accepted_at': 'accepted_at',
@@ -284,15 +282,26 @@ def migrate_projects_schema():
             'desired_solution_time': 'desired_solution_time'
         }
         
-        # Insert dữ liệu
-        insert_cols = ', '.join(column_mapping.keys())
-        placeholders = ', '.join(['?' for _ in column_mapping])
+        # Map user_id -> sales_id (nếu có)
+        if 'user_id' in old_columns:
+            column_mapping['user_id'] = 'sales_id'
+        elif 'sales_id' in old_columns:
+            column_mapping['sales_id'] = 'sales_id'
+        else:
+            column_mapping['user_id'] = 'sales_id'  # sẽ là NULL
         
-        cursor.execute(f"SELECT {insert_cols} FROM projects")
+        # Build select and insert
+        select_cols = list(column_mapping.keys())
+        insert_cols = list(column_mapping.values())
+        placeholders = ', '.join(['?' for _ in insert_cols])
+        
+        cursor.execute(f"SELECT {', '.join(select_cols)} FROM projects")
         for row in cursor.fetchall():
+            # row theo thứ tự select_cols
+            values = list(row)
             cursor.execute(
-                f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
-                row
+                f"INSERT INTO projects_new ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                values
             )
         
         # Bước 3: Xóa bảng cũ và đổi tên bảng mới
@@ -302,7 +311,7 @@ def migrate_projects_schema():
         conn.commit()
         conn.close()
         
-        print("[DB] Projects schema migration completed successfully")
+        print("[DB] Projects schema migration completed successfully (user_id -> sales_id)")
         return True
     
     except Exception as e:
@@ -427,6 +436,10 @@ def migrate_to_v2():
     # Migration: Hợp nhất id và tracking_id
     migrate_projects_schema()
     
+    # Migration: Chuyển từ JSON blob sang columns (nếu cần)
+    # Hàm này sẽ tạo bảng mới với đầy đủ columns nếu chưa có
+    migrate_json_to_columns()
+    
     print(f"[DB] Database migrated to V2")
 
 
@@ -467,9 +480,10 @@ PROJECT_COLUMNS = [
     "ten_san_pham", "quy_cach", "nguoi_lien_he_kh", "so_luong",
     "ma_po", "ma_ban_ve", "ma_ban_ve_ky_thuat", "ma_me",
     "loai_san_pham", "nhan_vien_thiet_ke", "tinh_trang_hoan_thanh",
+    "urgency_level",
     "thoi_gian_mong_muon_ban_ve", "thoi_gian_hoan_thanh_ke_hoach",
     "sales_name", "user_id", "is_pending", "accepted_by",
-    "accepted_at", "urgency_level", "desired_solution_time"
+    "accepted_at", "desired_solution_time"
 ]
 
 
@@ -492,17 +506,17 @@ def migrate_json_to_columns():
             return True, 0
         
         print("[DB] Bắt đầu migrate JSON → columns...")
-        
-        # Lấy tất cả dữ liệu từ bảng cũ
-        cursor.execute("SELECT tracking_id, data, sales_name, sales_id, is_pending, accepted_by, accepted_at, urgency_level, desired_solution_time FROM projects")
+
+        # Determine which user identifier column exists in old table
+        user_id_col = 'user_id' if 'user_id' in columns else 'sales_id'
+
+        # Build SELECT column list (old table schema)
+        select_cols = ['tracking_id', 'data', 'sales_name', user_id_col, 'is_pending', 'accepted_by', 'accepted_at', 'urgency_level', 'desired_solution_time']
+
+        cursor.execute(f"SELECT {', '.join(select_cols)} FROM projects")
         rows = cursor.fetchall()
-        
-        if not rows:
-            print("[DB] Không có dữ liệu để migrate")
-            conn.close()
-            return True, 0
-        
-        # Tạo bảng mới với schema normalized
+
+        # Tạo bảng mới với schema normalized (luôn thực hiện, ngay cả khi không có dữ liệu)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS projects_new (
                 tracking_id INTEGER PRIMARY KEY,
@@ -524,54 +538,56 @@ def migrate_json_to_columns():
                 thoi_gian_mong_muon_ban_ve TEXT,
                 thoi_gian_hoan_thanh_ke_hoach TEXT,
                 sales_name VARCHAR(100),
-                sales_id INTEGER,
+                user_id INTEGER,
                 is_pending VARCHAR(10) DEFAULT 'no',
                 accepted_by VARCHAR(100),
                 accepted_at TEXT,
-                urgency_level VARCHAR(20),
                 desired_solution_time TEXT
             )
         ''')
         
         migrated_count = 0
-        for row in rows:
-            tracking_id = row['tracking_id']
-            metadata = {
-                'sales_name': row['sales_name'],
-                'sales_id': row['sales_id'],
-                'is_pending': row['is_pending'],
-                'accepted_by': row['accepted_by'],
-                'accepted_at': row['accepted_at'],
-                'urgency_level': row['urgency_level'],
-                'desired_solution_time': row['desired_solution_time']
-            }
-            
-            # Parse JSON
-            try:
-                data_json = json.loads(row['data']) if row['data'] else {}
-            except:
-                data_json = {}
-            
-            # Map JSON sang columns
-            record = {'tracking_id': tracking_id}
-            for json_key, col_name in JSON_TO_COLUMN_MAP.items():
-                record[col_name] = data_json.get(json_key, '')
-            
-            # Thêm metadata
-            for key, value in metadata.items():
-                if value is not None:
-                    record[key] = value
-            
-            # Insert vào bảng mới
-            placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
-            insert_cols = ', '.join(PROJECT_COLUMNS)
-            values = [record.get(col) for col in PROJECT_COLUMNS]
-            
-            cursor.execute(
-                f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
-                values
-            )
-            migrated_count += 1
+        if rows:
+            for row in rows:
+                tracking_id = row['tracking_id']
+                metadata = {
+                    'sales_name': row['sales_name'],
+                    'user_id': row[user_id_col],  # Map from either user_id or sales_id
+                    'is_pending': row['is_pending'],
+                    'accepted_by': row['accepted_by'],
+                    'accepted_at': row['accepted_at'],
+                    'urgency_level': row['urgency_level'],
+                    'desired_solution_time': row['desired_solution_time']
+                }
+                
+                # Parse JSON
+                try:
+                    data_json = json.loads(row['data']) if row['data'] else {}
+                except:
+                    data_json = {}
+                
+                # Map JSON sang columns
+                record = {'tracking_id': tracking_id}
+                for json_key, col_name in JSON_TO_COLUMN_MAP.items():
+                    record[col_name] = data_json.get(json_key, '')
+                
+                # Thêm metadata
+                for key, value in metadata.items():
+                    if value is not None:
+                        record[key] = value
+                
+                # Insert vào bảng mới
+                placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+                insert_cols = ', '.join(PROJECT_COLUMNS)
+                values = [record.get(col) for col in PROJECT_COLUMNS]
+                
+                cursor.execute(
+                    f"INSERT INTO projects_new ({insert_cols}) VALUES ({placeholders})",
+                    values
+                )
+                migrated_count += 1
+        else:
+            print("[DB] Không có dữ liệu để migrate, nhưng vẫn tạo bảng mới")
         
         # Xóa bảng cũ và đổi tên
         cursor.execute("DROP TABLE projects")
@@ -580,7 +596,7 @@ def migrate_json_to_columns():
         # Tạo indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_created_date ON projects(Created_Date)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_khach_hang ON projects(khach_hang)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_sales_id ON projects(sales_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_pending ON projects(is_pending)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ma_po ON projects(ma_po)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_ten_san_pham ON projects(ten_san_pham)')
@@ -661,6 +677,7 @@ def load_all():
                     "Loại sản phẩm": record.get("loai_san_pham"),
                     "Hạng mục": record.get("loai_san_pham"),
                     "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Kỹ sư": record.get("nhan_vien_thiet_ke"),
                     "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
                     "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
                     "Mức độ khẩn cấp": record.get("urgency_level"),
@@ -798,6 +815,15 @@ def add_record(record):
         record với tracking_id mới, hoặc None nếu lỗi
     """
     try:
+        # Debug: log schema và dữ liệu đầu vào
+        conn_check = get_connection()
+        cursor_check = conn_check.cursor()
+        cursor_check.execute("PRAGMA table_info(projects)")
+        cols = [col[1] for col in cursor_check.fetchall()]
+        print(f"[DB DEBUG] add_record - Current columns: {cols}")
+        print(f"[DB DEBUG] add_record - Input record keys: {list(record.keys())}")
+        conn_check.close()
+        
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -814,31 +840,40 @@ def add_record(record):
         # Xử lý nhân viên KD - hỗ trợ cả 'Nhân viên KD' và 'Nhân viên kinh doanh'
         nhan_vien_kd = record.get('Nhân viên KD') or record.get('Nhân viên kinh doanh') or ''
         
+        # Xử lý Nhân viên thiết kế - hỗ trợ 'Nhân viên thiết kế', 'Kỹ sư', 'Kỹ sư thiết kế'
+        nhan_vien_thiet_ke = record.get('Nhân viên thiết kế') or record.get('Kỹ sư') or record.get('Kỹ sư thiết kế') or ''
+        
+        # Xử lý Tình trạng - hỗ trợ 'Tình trạng hoàn thành dự án', 'Tình trạng'
+        tinh_trang = record.get('Tình trạng hoàn thành dự án') or record.get('Tình trạng') or ''
+        
+        # Xử lý Mức độ khẩn cấp - hỗ trợ 'Mức độ khẩn cấp', 'Tính cấp bách', 'Độ khẩn'
+        muc_khan = record.get('Mức độ khẩn cấp') or record.get('Tính cấp bách') or record.get('Độ khẩn') or ''
+        
         values = [
-            new_tracking_id,
-            record.get('Ngày'),
-            record.get('Khách hàng'),
-            nhan_vien_kd,  # Sử dụng biến đã xử lý
-            record.get('Tên sản phẩm'),
-            record.get('Quy cách'),
-            nguoi_lien_he,
-            record.get('Số lượng'),
-            record.get('Mã PO'),
-            record.get('Mã bản vẽ'),
-            record.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
-            ma_me,
-            record.get('Loại sản phẩm'),
-            record.get('Nhân viên thiết kế'),
-            record.get('Tình trạng hoàn thành dự án'),
-            record.get('Thời gian mong muốn có bản vẽ'),
-            record.get('Thời gian hoàn thành kế hoạch'),
-            record.get('sales_name'),
-            record.get('user_id'),
-            record.get('is_pending', 'no'),
-            record.get('accepted_by'),
-            record.get('accepted_at'),
-            record.get('urgency_level'),
-            record.get('desired_solution_time')
+            new_tracking_id,                                      # tracking_id
+            record.get('Ngày'),                                    # Created_Date
+            record.get('Khách hàng'),                              # khach_hang
+            nhan_vien_kd,                                         # nhan_vien_kinh_doanh
+            record.get('Tên sản phẩm'),                            # ten_san_pham
+            record.get('Quy cách'),                                # quy_cách
+            nguoi_lien_he,                                        # nguoi_lien_he_kh
+            record.get('Số lượng'),                                # so_luong
+            record.get('Mã PO'),                                   # ma_po
+            record.get('Mã bản vẽ') or record.get('Mã bản vẽ chính'),  # ma_ban_ve
+            record.get('Mã bản vẽ kỹ thuật (sau khi đặt hàng)') or record.get('Mã bản vẽ kỹ thuật'),  # ma_ban_ve_ky_thuat
+            ma_me,                                                # ma_me
+            record.get('Loại sản phẩm'),                           # loai_san_pham
+            nhan_vien_thiet_ke,                                   # nhan_vien_thiet_ke
+            tinh_trang,                                           # tinh_trang_hoan_thanh
+            muc_khan,                                             # urgency_level
+            record.get('Thời gian mong muốn có bản vẽ') or record.get('TG mong muốn'),   # thoi_gian_mong_muon_ban_ve
+            record.get('Thời gian hoàn thành kế hoạch') or record.get('TG hoàn thành'), # thoi_gian_hoan_thanh_ke_hoach
+            record.get('sales_name'),                              # sales_name
+            record.get('user_id') or record.get('sales_id'),       # user_id
+            record.get('is_pending', 'no'),                        # is_pending
+            record.get('accepted_by'),                             # accepted_by
+            record.get('accepted_at'),                             # accepted_at
+            record.get('desired_solution_time')                   # desired_solution_time
         ]
         
         placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
@@ -862,6 +897,8 @@ def add_record(record):
     
     except Exception as e:
         print(f"[DB] Error adding record: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -901,7 +938,9 @@ def update_record(tracking_id, new_data):
                 'Số lượng': 'so_luong',
                 'Mã PO': 'ma_po',
                 'Mã bản vẽ': 'ma_ban_ve',
+                'Mã bản vẽ chính': 'ma_ban_ve',
                 'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'ma_ban_ve',
+                'Mã bản vẽ kỹ thuật': 'ma_ban_ve_ky_thuat',
                 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
                 'Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
                 'Mã mẹ ': 'ma_me',
@@ -910,14 +949,21 @@ def update_record(tracking_id, new_data):
                 'Loại sản phẩm': 'loai_san_pham',
                 'Hạng mục': 'loai_san_pham',
                 'Nhân viên thiết kế': 'nhan_vien_thiet_ke',
+                'Kỹ sư': 'nhan_vien_thiet_ke',
                 'Kỹ sư thiết kế': 'nhan_vien_thiet_ke',
                 'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
+                'Tình trạng': 'tinh_trang_hoan_thanh',
                 'Mức độ khẩn cấp': 'urgency_level',
+                'Tính cấp bách': 'urgency_level',
+                'Độ khẩn': 'urgency_level',
                 'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
+                'TG mong muốn': 'thoi_gian_mong_muon_ban_ve',
                 'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach',
+                'TG hoàn thành': 'thoi_gian_hoan_thanh_ke_hoach',
                 'sales_name': 'sales_name',
                 'user_id': 'user_id',
                 'User ID': 'user_id',
+                'sales_id': 'user_id',  # Map legacy sales_id to user_id
                 'is_pending': 'is_pending',
                 'Trạng thái chờ': 'is_pending',
                 'accepted_by': 'accepted_by',
@@ -960,6 +1006,8 @@ def update_record(tracking_id, new_data):
     
     except Exception as e:
         print(f"[DB] Error updating record: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 

@@ -103,7 +103,8 @@ from src.db_helper import (
     get_user_permissions, set_user_permissions, add_user_permission, remove_user_permission,
     delete_user_permissions, assign_default_permissions, get_default_permissions, has_user_permission,
     get_pending_notices, get_pending_count, accept_job, add_sales_record, 
-    get_projects_by_user, get_accepted_projects_by_engineer, get_all_notices_for_engineer
+    get_projects_by_user, get_accepted_projects_by_engineer, get_all_notices_for_engineer,
+    get_all_customers
 )
 
 # Import Tool Open core
