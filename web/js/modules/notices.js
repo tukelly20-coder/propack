@@ -203,32 +203,18 @@ function renderNoticesContent() {
             </div>
         </div>
 
-        <!-- Data Table -->
+        <!-- Facebook-style Notice Feed -->
         <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                    <input type="checkbox" id="select-all-notices" class="form-check-input">
+                    <span class="fw-semibold">${t('notices_title')}</span>
+                </div>
+                <small class="text-muted" id="notice-selection-info">0 đã chọn</small>
+            </div>
             <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
-                    <table id="notices-table" class="table table-striped table-hover table-bordered mb-0" 
-                           style="width: 100%; table-layout: fixed;">
-                        <thead class="table-light sticky-top">
-                            <tr>
-                                <th class="sticky-column" style="width: 40px;"><input type="checkbox" id="select-all-notices"></th>
-                                <th class="sticky-column" style="width: 50px;">${t('notice_stt')}</th>
-                                <th class="sticky-column" style="width: 130px;">${t('notice_tracking_id')}</th>
-                                <th style="width: 100px;">${t('notice_ngay')}</th>
-                                <th style="width: 120px;">${t('notice_khachhang')}</th>
-                                <th style="width: 150px;">${t('notice_sanpham')}</th>
-                                <th style="width: 70px;">${t('notice_soluong')}</th>
-                                <th style="width: 100px;">${t('notice_nhanvienkd')}</th>
-                                <th style="width: 80px;">${t('notice_kysu')}</th>
-                                <th style="width: 90px;">${t('notice_dokhan')}</th>
-                                <th style="width: 100px;">${t('notice_trangthai')}</th>
-                                <th class="sticky-column" style="width: 50px;">${t('notice_actions')}</th>
-                            </tr>
-                        </thead>
-                        <tbody id="notices-table-body">
-                            <!-- Data will be loaded here -->
-                        </tbody>
-                    </table>
+                <div class="notice-feed-list" id="notices-table-body">
+                    <!-- Feed items will be loaded here -->
                 </div>
             </div>
         </div>
@@ -373,7 +359,7 @@ function renderNoticesContent() {
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <p>${t('confirm_delete_notice_message', { count: 0 })}</p>
+                        <p>${t('confirm_delete_notice_message', { count: 0 })} <strong id="delete-count-notice">0</strong></p>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">${t('cancel')}</button>
@@ -585,7 +571,7 @@ async function loadNotices() {
     console.log('[Notices] Loading notices...');
     
     const tbody = $('#notices-table-body');
-    tbody.html(createLoadingState(12));
+    tbody.html(createNoticeFeedLoadingState());
     
     NoticesState.isLoading = true;
     updateToolbarStateNotice();
@@ -612,11 +598,11 @@ async function loadNotices() {
             NoticesState.filteredNotices = [];
             NoticesState.totalRecords = 0;
             NoticesState.totalPages = 1;
-            tbody.html(createEmptyState('Không có thông báo nào', 12));
+            tbody.html(createNoticeFeedEmptyState('Không có thông báo nào'));
         }
     } catch (error) {
         console.error('[Notices] Load error:', error);
-        tbody.html(createErrorState('Lỗi tải dữ liệu: ' + error.message, 12));
+        tbody.html(createNoticeFeedErrorState('Lỗi tải dữ liệu: ' + error.message));
     } finally {
         NoticesState.isLoading = false;
         updateToolbarStateNotice();
@@ -632,7 +618,7 @@ function renderNoticesTable(notices) {
     const data = notices || NoticesState.filteredNotices;
     
     if (data.length === 0) {
-        tbody.html(createEmptyState('Không có thông báo nào', 12));
+        tbody.html(createNoticeFeedEmptyState('Không có thông báo nào'));
         return;
     }
     
@@ -644,95 +630,60 @@ function renderNoticesTable(notices) {
     data.forEach((notice, index) => {
         const status = notice['Trạng thái'] || notice.status || 'pending';
         const urgency = notice['Độ khẩn'] || notice.urgency || 'normal';
-        const rowNum = startIndex + index + 1;
         const isSelected = NoticesState.selectedIds.includes(notice['Tracking ID']);
+        const trackingId = notice['Tracking ID'] || '-';
+        const productName = notice['Tên sản phẩm'] || notice['Sản phẩm'] || '';
+        const customer = notice['Khách hàng'] || '';
+        const engineer = notice['Kỹ sư'] || 'Chưa nhận';
+        const salesperson = notice['Nhân viên KD'] || '-';
+        const quantity = notice['Số lượng'] || '-';
+        const relativeTime = formatNoticeTime(notice['Ngày']);
         
-        html += `<tr class="${isSelected ? 'table-primary' : ''} notice-row urgency-${urgency}" data-id="${notice['Tracking ID']}">`;
-        
-        // Column: Checkbox
-        if (NoticesState.visibleColumns.checkbox) {
-            html += `<td class="sticky-column"><input type="checkbox" class="row-checkbox" ${isSelected ? 'checked' : ''}></td>`;
-        }
-        
-        // Column: STT
-        if (NoticesState.visibleColumns.stt) {
-            html += `<td class="sticky-column">${rowNum}</td>`;
-        }
-        
-        // Column: Tracking ID
-        if (NoticesState.visibleColumns.tracking_id) {
-            html += `<td class="sticky-column"><a href="#" class="view-link view-notice" data-id="${notice['Tracking ID']}">${notice['Tracking ID'] || '-'}</a></td>`;
-        }
-        
-        // Column: Ngày
-        if (NoticesState.visibleColumns.ngay) {
-            html += `<td>${formatDate(notice['Ngày'])}</td>`;
-        }
-        
-        // Column: Khách hàng
-        if (NoticesState.visibleColumns.khachhang) {
-            html += `<td>${escapeHtml(notice['Khách hàng'] || '')}</td>`;
-        }
-        
-        // Column: Sản phẩm
-        if (NoticesState.visibleColumns.sanpham) {
-            html += `<td>${escapeHtml(notice['Tên sản phẩm'] || notice['Sản phẩm'] || '')}</td>`;
-        }
-        
-        // Column: Số lượng
-        if (NoticesState.visibleColumns.soluong) {
-            html += `<td>${notice['Số lượng'] || '-'}</td>`;
-        }
-        
-        // Column: Nhân viên KD
-        if (NoticesState.visibleColumns.nhanvienkd) {
-            html += `<td>${escapeHtml(notice['Nhân viên KD'] || '')}</td>`;
-        }
-        
-        // Column: Kỹ sư
-        if (NoticesState.visibleColumns.kysu) {
-            html += `<td>${escapeHtml(notice['Kỹ sư'] || '')}</td>`;
-        }
-        
-        // Column: Độ khẩn
-        if (NoticesState.visibleColumns.dokhan) {
-            html += `<td>${getUrgencyBadge(urgency)}</td>`;
-        }
-        
-        // Column: Trạng thái
-        if (NoticesState.visibleColumns.trangthai) {
-            html += `<td>${getStatusBadge(status)}</td>`;
-        }
-        
-        // Column: Actions (Quick actions menu)
-        if (NoticesState.visibleColumns.actions) {
-            html += `<td class="sticky-column">
-                <div class="dropdown">
-                    <button class="btn btn-sm btn-light p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-three-dots-vertical"></i>
-                    </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
-                        ${status === 'pending' ? 
-                            `<li><a class="dropdown-item quick-accept-notice" href="#" data-id="${notice['Tracking ID']}">
-                                <i class="bi bi-check-circle text-success"></i> Nhận việc
-                            </a></li>` : ''
-                        }
-                        <li><a class="dropdown-item quick-view-notice" href="#" data-id="${notice['Tracking ID']}">
-                            <i class="bi bi-eye text-info"></i> Xem chi tiết
-                        </a></li>
-                        <li><a class="dropdown-item quick-edit-notice" href="#" data-id="${notice['Tracking ID']}">
-                            <i class="bi bi-pencil text-warning"></i> Sửa
-                        </a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item quick-delete-notice text-danger" href="#" data-id="${notice['Tracking ID']}">
-                            <i class="bi bi-trash"></i> Xóa
-                        </a></li>
-                    </ul>
+        html += `
+            <div class="notice-item ${isSelected ? 'selected' : ''} notice-${status}" data-id="${trackingId}">
+                <div class="notice-item-left">
+                    <input type="checkbox" class="row-checkbox form-check-input" ${isSelected ? 'checked' : ''}>
+                    <div class="notice-avatar ${status === 'pending' ? 'unread' : ''}">
+                        <i class="bi bi-bell-fill"></i>
+                    </div>
                 </div>
-            </td>`;
-        }
-        
-        html += '</tr>';
+                <div class="notice-item-main">
+                    <div class="notice-item-head">
+                        <a href="#" class="view-link view-notice" data-id="${trackingId}">#${trackingId}</a>
+                        <span class="notice-dot ${status === 'pending' ? '' : 'd-none'}"></span>
+                    </div>
+                    <div class="notice-item-message">
+                        <strong>${escapeHtml(customer)}</strong> có yêu cầu cho sản phẩm <strong>${escapeHtml(productName)}</strong>
+                    </div>
+                    <div class="notice-item-meta">
+                        <span><i class="bi bi-person-badge"></i> KD: ${escapeHtml(salesperson)}</span>
+                        <span><i class="bi bi-person-workspace"></i> KS: ${escapeHtml(engineer)}</span>
+                        <span><i class="bi bi-box-seam"></i> SL: ${quantity}</span>
+                        <span><i class="bi bi-clock"></i> ${relativeTime}</span>
+                    </div>
+                </div>
+                <div class="notice-item-right">
+                    ${getNoticeUrgencyBadge(urgency)}
+                    ${getStatusBadge(status)}
+                    <div class="notice-actions">
+                        ${status === 'pending' ? `
+                            <button class="btn btn-sm btn-primary quick-accept-notice" data-id="${trackingId}">
+                                <i class="bi bi-check2-circle"></i> Nhận
+                            </button>
+                        ` : ''}
+                        <button class="btn btn-sm btn-outline-secondary quick-view-notice" data-id="${trackingId}">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning quick-edit-notice" data-id="${trackingId}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger quick-delete-notice" data-id="${trackingId}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
     });
     
     tbody.html(html);
@@ -791,8 +742,8 @@ function setupNoticesRowHandlers() {
     });
     
     // Row click for selection
-    $('#notices-table-body tr').click(function(e) {
-        if (e.target.type !== 'checkbox' && !$(e.target).closest('.dropdown').length) {
+    $('#notices-table-body .notice-item').click(function(e) {
+        if (e.target.type !== 'checkbox' && !$(e.target).closest('.notice-actions, .view-link, button').length) {
             const checkbox = $(this).find('input[type="checkbox"]');
             checkbox.prop('checked', !checkbox.is(':checked'));
             updateSelectedIdsNotice();
@@ -806,7 +757,7 @@ function setupNoticesRowHandlers() {
 function updateSelectedIdsNotice() {
     NoticesState.selectedIds = [];
     
-    $('#notices-table-body tr').each(function() {
+    $('#notices-table-body .notice-item').each(function() {
         const checkbox = $(this).find('input[type="checkbox"]');
         if (checkbox.is(':checked')) {
             NoticesState.selectedIds.push($(this).data('id'));
@@ -814,15 +765,17 @@ function updateSelectedIdsNotice() {
     });
     
     // Update row styling
-    $('#notices-table-body tr').removeClass('table-primary');
+    $('#notices-table-body .notice-item').removeClass('selected');
     NoticesState.selectedIds.forEach(id => {
-        $(`#notices-table-body tr[data-id="${id}"]`).addClass('table-primary');
+        $(`#notices-table-body .notice-item[data-id="${id}"]`).addClass('selected');
     });
     
     updateToolbarStateNotice();
+    $('#notice-selection-info').text(`${NoticesState.selectedIds.length} đã chọn`);
     
     // Update select all checkbox
-    const allChecked = NoticesState.selectedIds.length === NoticesState.filteredNotices.length && NoticesState.filteredNotices.length > 0;
+    const renderedItems = $('#notices-table-body .notice-item').length;
+    const allChecked = NoticesState.selectedIds.length === renderedItems && renderedItems > 0;
     $('#select-all-notices').prop('checked', allChecked);
 }
 
@@ -1327,7 +1280,76 @@ function getStatusBadge(status) {
     const cls = classes[status] || 'secondary';
     const label = labels[status] || status;
     
-    return `<span class="badge bg-${cls}">${label}</span>`;
+    return `<span class="badge rounded-pill bg-${cls}">${label}</span>`;
+}
+
+/**
+ * Get urgency badge HTML
+ * @param {string} urgency - urgency level
+ * @returns {string}
+ */
+function getNoticeUrgencyBadge(urgency) {
+    const normalized = urgency || 'normal';
+    const classes = {
+        normal: 'bg-success-subtle text-success-emphasis',
+        urgent: 'bg-warning-subtle text-warning-emphasis',
+        very_urgent: 'bg-danger-subtle text-danger-emphasis'
+    };
+    const labels = {
+        normal: 'Thường',
+        urgent: 'Khẩn',
+        very_urgent: 'Rất khẩn'
+    };
+    return `<span class="badge rounded-pill ${classes[normalized] || 'bg-secondary-subtle text-secondary-emphasis'}">${labels[normalized] || normalized}</span>`;
+}
+
+/**
+ * Build "time ago" label from notice date
+ * @param {string} dateText
+ * @returns {string}
+ */
+function formatNoticeTime(dateText) {
+    if (!dateText) return 'Không rõ thời gian';
+    const date = new Date(dateText);
+    if (Number.isNaN(date.getTime())) return String(dateText);
+
+    const diffMs = Date.now() - date.getTime();
+    const diffMinutes = Math.floor(diffMs / 60000);
+    if (diffMinutes < 1) return 'Vừa xong';
+    if (diffMinutes < 60) return `${diffMinutes} phút trước`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `${diffHours} giờ trước`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays} ngày trước`;
+    return formatDate(dateText);
+}
+
+function createNoticeFeedLoadingState() {
+    return `
+        <div class="notice-feed-skeleton">
+            <div class="notice-skeleton-item"></div>
+            <div class="notice-skeleton-item"></div>
+            <div class="notice-skeleton-item"></div>
+        </div>
+    `;
+}
+
+function createNoticeFeedEmptyState(message) {
+    return `
+        <div class="empty-state">
+            <i class="bi bi-bell-slash"></i>
+            <p class="mb-0">${escapeHtml(message)}</p>
+        </div>
+    `;
+}
+
+function createNoticeFeedErrorState(message) {
+    return `
+        <div class="empty-state text-danger">
+            <i class="bi bi-exclamation-circle"></i>
+            <p class="mb-0">${escapeHtml(message)}</p>
+        </div>
+    `;
 }
 
 // ============================================
