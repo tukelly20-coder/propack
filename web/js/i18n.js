@@ -111,6 +111,7 @@ const translations = {
         delete_project: 'Xóa',
         refresh_projects: 'Làm mới dữ liệu',
         toggle_columns: 'Chọn cột hiển thị',
+        btn_toggle_columns: 'Chọn cột',
         export_excel: 'Xuất Excel',
         export_csv: 'Xuất CSV',
         
@@ -620,6 +621,7 @@ const translations = {
         delete_project: '删除',
         refresh_projects: '刷新数据',
         toggle_columns: '选择显示列',
+        btn_toggle_columns: '列',
         export_excel: '导出Excel',
         export_csv: '导出CSV',
         
@@ -634,7 +636,7 @@ const translations = {
         urgency_normal: '正常',
         urgency_urgent: '紧急',
         urgency_very_urgent: '非常紧急',
-        search_projects: '搜索...',
+        search_placeholder: '搜索...',
         clear_search: '清除搜索',
         
         // Table headers

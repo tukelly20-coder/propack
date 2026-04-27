@@ -1,19 +1,25 @@
 import sqlite3
+import os
 
-conn = sqlite3.connect('DB.db')
+db_path = r'C:\Users\Kelly\Desktop\Source code 自动生成图纸编码- V8 大日程\DB.db'
+
+conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
-# Check if projects table exists
-cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'")
+# Get table schema
+cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='projects'")
 row = cursor.fetchone()
-print('Projects table exists:', row is not None)
-
 if row:
-    cursor.execute('PRAGMA table_info(projects)')
-    cols = cursor.fetchall()
-    print(f'\nTotal columns: {len(cols)}')
-    print('Columns:')
-    for i, col in enumerate(cols):
-        print(f'  {i}: {col[1]} ({col[2]})')
+    print("=== Projects Table Schema ===")
+    print(row[0])
+    print()
+
+# Get column info
+cursor.execute("PRAGMA table_info(projects)")
+columns = cursor.fetchall()
+print("=== Current Columns ===")
+for col in columns:
+    cid, name, type_, notnull, default, pk = col
+    print(f"  {name}: {type_}{' (PK)' if pk else ''}{' NOT NULL' if notnull else ''}")
 
 conn.close()

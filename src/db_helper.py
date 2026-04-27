@@ -245,6 +245,12 @@ def migrate_projects_schema():
         cursor.execute("PRAGMA table_info(projects)")
         columns = [col[1] for col in cursor.fetchall()]
         
+        # Nếu bảng đã không có cột 'data' thì đã là V2 normalized schema
+        if 'data' not in columns:
+            print("[DB] Projects table already normalized (no 'data' column)")
+            conn.close()
+            return True
+        
         # Nếu bảng đã có sales_id và không có user_id thì đã migrate
         if 'sales_id' in columns and 'user_id' not in columns:
             print("[DB] Projects table already migrated (has sales_id, no user_id)")
@@ -569,11 +575,11 @@ def migrate_json_to_columns():
         columns = [col[1] for col in cursor.fetchall()]
         
         if "Created_Date" in columns:
-            print("[DB] Bảng projects đã được migrate (có column 'Created_Date')")
+            print("[DB] Projects table already normalized (has 'Created_Date' column)")
             conn.close()
             return True, 0
         
-        print("[DB] Bắt đầu migrate JSON → columns...")
+        print("[DB] Starting JSON to columns migration...")
 
         # Determine which user identifier column exists in old table
         user_id_col = 'user_id' if 'user_id' in columns else 'sales_id'
@@ -655,7 +661,7 @@ def migrate_json_to_columns():
                 )
                 migrated_count += 1
         else:
-            print("[DB] Không có dữ liệu để migrate, nhưng vẫn tạo bảng mới")
+            print("[DB] No data to migrate, but creating new table anyway")
         
         # Xóa bảng cũ và đổi tên
         cursor.execute("DROP TABLE projects")
