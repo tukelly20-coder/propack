@@ -286,11 +286,12 @@ async function loadAIModule() {
  * @param {string} src - Đường dẫn script
  * @returns {Promise}
  */
- function loadScript(src) {
+function loadScript(src) {
      return new Promise((resolve, reject) => {
          const script = document.createElement('script');
          script.id = src.replace('.js', '').split('/').pop() + '-script';
-         script.src = src;
+         const assetVersion = window.APP_ASSET_VERSION || '';
+         script.src = assetVersion ? `${src}?v=${encodeURIComponent(assetVersion)}` : src;
          script.onload = resolve;
          script.onerror = reject;
          document.head.appendChild(script);

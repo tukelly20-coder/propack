@@ -1513,34 +1513,6 @@ async function viewProject(id) {
         showToast(t('error'), t('load_error_projects'), 'error');
     }
 }
-                    displayData[key] = value;
-                }
-            }
-            
-            let html = '<div class="detail-section">';
-            
-            for (const [key, value] of Object.entries(displayData)) {
-                html += `
-                    <div class="detail-item">
-                        <strong>${key}:</strong>
-                        <span>${escapeHtml(String(value))}</span>
-                    </div>
-                `;
-            }
-            
-            html += '</div>';
-            
-            $('#view-content-project').html(html);
-            
-            const modal = new bootstrap.Modal('#view-modal-project');
-            modal.show();
-        }
-    } catch (error) {
-        console.error('[Projects] View error:', error);
-        showToast(t('error'), t('load_error_projects'), 'error');
-    }
-}
-
 /**
  * Save project - Create or Update
  */
