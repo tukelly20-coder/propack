@@ -872,139 +872,139 @@ function renderProjectsTable() {
         'nguoinhan': 'Người nhận'
     };
     
-    ProjectsState.projects.forEach((project, index) => {
-        const rowNum = (ProjectsState.currentPage - 1) * ProjectsState.pageSize + index + 1;
-        
-        html += `<tr data-id="${project['tracking_id']}">`;
-        
-        // Column: STT
-        if (ProjectsState.visibleColumns.stt) {
-            html += `<td>${rowNum}</td>`;
-        }
-        
-        // Column: Tracking ID
-        if (ProjectsState.visibleColumns.tracking_id) {
-            html += `<td><a href="#" class="view-link view-project" data-id="${project['tracking_id']}">${project['tracking_id'] || '-'}</a></td>`;
-        }
-        
-        // Column: Ngày
-        if (ProjectsState.visibleColumns.ngay) {
-            html += `<td>${formatDate(project['Created_Date'])}</td>`;
-        }
-        
-        // Column: Khách hàng
-        if (ProjectsState.visibleColumns.khachhang) {
-            html += `<td>${escapeHtml(project['khach_hang'] || '')}</td>`;
-        }
-        
-        // Column: Nhân viên KD
-        if (ProjectsState.visibleColumns.nhanvienkd) {
-            html += `<td>${escapeHtml(project['nhan_vien_kinh_doanh'] || '')}</td>`;
-        }
-        
-        // Column: Tên sản phẩm
-        if (ProjectsState.visibleColumns.tensanpham) {
-            html += `<td>${escapeHtml(project['ten_san_pham'] || '')}</td>`;
-        }
-        
-        // Column: Quy cách
-        if (ProjectsState.visibleColumns.quycach) {
-            html += `<td>${escapeHtml(project['quy_cach'] || '')}</td>`;
-        }
-        
-        // Column: Người liên hệ (KH)
-        if (ProjectsState.visibleColumns.lienhe) {
-            html += `<td>${escapeHtml(project['nguoi_lien_he_kh'] || '')}</td>`;
-        }
-        
-        // Column: Số lượng
-        if (ProjectsState.visibleColumns.soluong) {
-            html += `<td>${project['so_luong'] || '-'}</td>`;
-        }
-        
-        // Column: Mã PO
-        if (ProjectsState.visibleColumns.mapo) {
-            html += `<td>${escapeHtml(project['ma_po'] || '')}</td>`;
-        }
-        
-        // Column: Mã bản vẽ KT
-        if (ProjectsState.visibleColumns.mabavkythuat) {
-            html += `<td>${escapeHtml(project['ma_ban_ve_ky_thuat'] || '')}</td>`;
-        }
-        
-        // Column: Mã bản vẽ
-        if (ProjectsState.visibleColumns.mabave) {
-            html += `<td>${escapeHtml(project['ma_ban_ve'] || '')}</td>`;
-        }
-        
-        // Column: Mã mẹ
-        if (ProjectsState.visibleColumns.mame) {
-            html += `<td>${escapeHtml(project['ma_me'] || '')}</td>`;
-        }
-        
-        // Column: Loại sản phẩm
-        if (ProjectsState.visibleColumns.loaisanpham) {
-            html += `<td>${escapeHtml(project['loai_san_pham'] || '')}</td>`;
-        }
-        
-        // Column: Độ khẩn
-        if (ProjectsState.visibleColumns.dokhan) {
-            html += `<td>${getUrgencyBadge(project['urgency_level'])}</td>`;
-        }
-        
-        // Column: Tình trạng
-        if (ProjectsState.visibleColumns.tinhtrang) {
-            html += `<td>${escapeHtml(project['tinh_trang_hoan_thanh'] || '')}</td>`;
-        }
-        
-        // Column: Kỹ sư
-        if (ProjectsState.visibleColumns.kysu) {
-            html += `<td>${escapeHtml(project['nhan_vien_thiet_ke'] || '')}</td>`;
-        }
-        
-        // Column: TG mong muốn
-        if (ProjectsState.visibleColumns.tg_mongmuon) {
-            html += `<td>${formatDateTime(project['thoi_gian_mong_muon_ban_ve'])}</td>`;
-        }
-        
-        // Column: TG hoàn thành
-        if (ProjectsState.visibleColumns.tg_hoanthanh) {
-            html += `<td>${formatDateTime(project['thoi_gian_hoan_thanh_ke_hoach'])}</td>`;
-        }
-        
-        // Column: Trạng thái
-        if (ProjectsState.visibleColumns.trangthai) {
-            html += `<td>${escapeHtml(project['is_pending'] || '')}</td>`;
-        }
-        
-        // Column: Người nhận
-        if (ProjectsState.visibleColumns.nguoinhan) {
-            html += `<td>${escapeHtml(project['accepted_by'] || '')}</td>`;
-        }
-        
-        // Column: Actions (Quick actions menu)
-        html += `<td>
-            <div class="dropdown">
-                <button class="btn btn-sm btn-light p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <i class="bi bi-three-dots-vertical"></i>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end">
-                    <li><a class="dropdown-item quick-view" href="#" data-id="${project['tracking_id']}">
-                        <i class="bi bi-eye text-info"></i> ${t('quick_view')}
-                    </a></li>
-                    <li><a class="dropdown-item quick-edit" href="#" data-id="${project['tracking_id']}">
-                        <i class="bi bi-pencil text-warning"></i> ${t('quick_edit')}
-                    </a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item quick-delete text-danger" href="#" data-id="${project['tracking_id']}">
-                        <i class="bi bi-trash"></i> ${t('quick_delete')}
-                    </a></li>
-                </ul>
-            </div>
-        </td>`;
-        
-        html += '</tr>';
-    });
+     ProjectsState.projects.forEach((project, index) => {
+         const rowNum = (ProjectsState.currentPage - 1) * ProjectsState.pageSize + index + 1;
+         
+         html += `<tr data-id="${project['Tracking ID']}">`;
+         
+         // Column: STT
+         if (ProjectsState.visibleColumns.stt) {
+             html += `<td>${rowNum}</td>`;
+         }
+         
+         // Column: Tracking ID
+         if (ProjectsState.visibleColumns.tracking_id) {
+             html += `<td><a href="#" class="view-link view-project" data-id="${project['Tracking ID']}">${project['Tracking ID'] || '-'}</a></td>`;
+         }
+         
+         // Column: Ngày
+         if (ProjectsState.visibleColumns.ngay) {
+             html += `<td>${formatDate(project['Ngày'])}</td>`;
+         }
+         
+         // Column: Khách hàng
+         if (ProjectsState.visibleColumns.khachhang) {
+             html += `<td>${escapeHtml(project['Khách hàng'] || '')}</td>`;
+         }
+         
+         // Column: Nhân viên KD
+         if (ProjectsState.visibleColumns.nhanvienkd) {
+             html += `<td>${escapeHtml(project['Nhân viên KD'] || '')}</td>`;
+         }
+         
+         // Column: Tên sản phẩm
+         if (ProjectsState.visibleColumns.tensanpham) {
+             html += `<td>${escapeHtml(project['Tên sản phẩm'] || '')}</td>`;
+         }
+         
+         // Column: Quy cách
+         if (ProjectsState.visibleColumns.quycach) {
+             html += `<td>${escapeHtml(project['Quy cách'] || '')}</td>`;
+         }
+         
+         // Column: Người liên hệ (KH)
+         if (ProjectsState.visibleColumns.lienhe) {
+             html += `<td>${escapeHtml(project['Người liên hệ (KH)'] || '')}</td>`;
+         }
+         
+         // Column: Số lượng
+         if (ProjectsState.visibleColumns.soluong) {
+             html += `<td>${project['Số lượng'] || '-'}</td>`;
+         }
+         
+         // Column: Mã PO
+         if (ProjectsState.visibleColumns.mapo) {
+             html += `<td>${escapeHtml(project['Mã PO'] || '')}</td>`;
+         }
+         
+         // Column: Mã bản vẽ KT
+         if (ProjectsState.visibleColumns.mabavkythuat) {
+             html += `<td>${escapeHtml(project['Mã bản vẽ kỹ thuật (sau khi đặt hàng)'] || '')}</td>`;
+         }
+         
+         // Column: Mã bản vẽ
+         if (ProjectsState.visibleColumns.mabave) {
+             html += `<td>${escapeHtml(project['Mã bản vẽ'] || '')}</td>`;
+         }
+         
+         // Column: Mã mẹ
+         if (ProjectsState.visibleColumns.mame) {
+             html += `<td>${escapeHtml(project['Mã mẹ'] || '')}</td>`;
+         }
+         
+         // Column: Loại sản phẩm
+         if (ProjectsState.visibleColumns.loaisanpham) {
+             html += `<td>${escapeHtml(project['Loại sản phẩm'] || '')}</td>`;
+         }
+         
+         // Column: Độ khẩn
+         if (ProjectsState.visibleColumns.dokhan) {
+             html += `<td>${getUrgencyBadge(project['Tính cấp bách'])}</td>`;
+         }
+         
+         // Column: Tình trạng
+         if (ProjectsState.visibleColumns.tinhtrang) {
+             html += `<td>${escapeHtml(project['Tình trạng hoàn thành dự án'] || '')}</td>`;
+         }
+         
+         // Column: Kỹ sư
+         if (ProjectsState.visibleColumns.kysu) {
+             html += `<td>${escapeHtml(project['Nhân viên thiết kế'] || '')}</td>`;
+         }
+         
+         // Column: TG mong muốn
+         if (ProjectsState.visibleColumns.tg_mongmuon) {
+             html += `<td>${formatDateTime(project['Thời gian mong muốn có bản vẽ'])}</td>`;
+         }
+         
+         // Column: TG hoàn thành
+         if (ProjectsState.visibleColumns.tg_hoanthanh) {
+             html += `<td>${formatDateTime(project['Thời gian hoàn thành kế hoạch'])}</td>`;
+         }
+         
+         // Column: Trạng thái
+         if (ProjectsState.visibleColumns.trangthai) {
+             html += `<td>${escapeHtml(project['is_pending'] || '')}</td>`;
+         }
+         
+         // Column: Người nhận
+         if (ProjectsState.visibleColumns.nguoinhan) {
+             html += `<td>${escapeHtml(project['accepted_by'] || '')}</td>`;
+         }
+         
+         // Column: Actions (Quick actions menu)
+         html += `<td>
+             <div class="dropdown">
+                 <button class="btn btn-sm btn-light p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                     <i class="bi bi-three-dots-vertical"></i>
+                 </button>
+                 <ul class="dropdown-menu dropdown-menu-end">
+                     <li><a class="dropdown-item quick-view" href="#" data-id="${project['Tracking ID']}">
+                         <i class="bi bi-eye text-info"></i> ${t('quick_view')}
+                     </a></li>
+                     <li><a class="dropdown-item quick-edit" href="#" data-id="${project['Tracking ID']}">
+                         <i class="bi bi-pencil text-warning"></i> ${t('quick_edit')}
+                     </a></li>
+                     <li><hr class="dropdown-divider"></li>
+                     <li><a class="dropdown-item quick-delete text-danger" href="#" data-id="${project['Tracking ID']}">
+                         <i class="bi bi-trash"></i> ${t('quick_delete')}
+                     </a></li>
+                 </ul>
+             </div>
+         </td>`;
+         
+         html += '</tr>';
+     });
     
     tbody.html(html);
     
@@ -1458,12 +1458,61 @@ async function viewProject(id) {
             
             const displayData = {};
             
+            // Map technical/duplicate keys to preferred display keys
+            const preferredKeys = {
+                // Prefer Vietnamese labels over technical keys
+                'Ngày khởi tạo': 'Ngày',
+                'Nhân viên kinh doanh': 'Nhân viên KD',
+                'Người liên hệ\n(KH)': 'Người liên hệ (KH)',
+                'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'Mã bản vẽ',
+                'Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)': 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)',
+                'Mã thành phẩm (Mã mẹ)': 'Mã mẹ',
+                'Mã mẹ ': 'Mã mẹ',
+                'Hạng mục': 'Loại sản phẩm',
+                'Kỹ sư thiết kế': 'Nhân viên thiết kế',
+                // Prefer user-friendly keys for status fields
+                'Mức độ khẩn cấp': 'Tính cấp bách',
+                'urgency_level': 'Tính cấp bách',
+                'Trạng thái chờ': 'is_pending',
+                'Người nhận': 'accepted_by',
+                'Thời gian nhận': 'accepted_at',
+                'User ID': 'user_id',
+                'desired_solution_time': 'Thời gian hoàn thành kế hoạch'
+            };
+            
             for (const [key, value] of Object.entries(result)) {
                 if (value !== undefined && value !== null && value !== '') {
-                    // Nếu key là key kỹ thuật và có key người dùng cuối thì bỏ qua
+                    // Nếu key là key kỹ thuật/đồ thị và có key người dùng cuối thì bỏ qua
                     if (preferredKeys[key] && result[preferredKeys[key]] !== undefined) {
                         continue;
                     }
+                    displayData[key] = value;
+                }
+            }
+            
+            let html = '<div class="detail-section">';
+            
+            for (const [key, value] of Object.entries(displayData)) {
+                html += `
+                    <div class="detail-item">
+                        <strong>${key}:</strong>
+                        <span>${escapeHtml(String(value))}</span>
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            
+            $('#view-content-project').html(html);
+            
+            const modal = new bootstrap.Modal('#view-modal-project');
+            modal.show();
+        }
+    } catch (error) {
+        console.error('[Projects] View error:', error);
+        showToast(t('error'), t('load_error_projects'), 'error');
+    }
+}
                     displayData[key] = value;
                 }
             }
