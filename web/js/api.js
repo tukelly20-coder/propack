@@ -4,6 +4,8 @@
  * Lưu ý: Dùng relative URL để hỗ trợ cả local và remote access
  */
 
+// storage-polyfill đã wrap localStorage an toàn, dùng trực tiếp
+
 // Dùng relative URL - tự động sử dụng domain hiện tại
 // Khi chạy local: http://localhost:8001
 // Khi chạy remote: http://propackvp.duckdns.org:8001
@@ -96,8 +98,11 @@ class APIClient {
 
     /**
      * Đăng nhập
+     * @param {string} username - Tên đăng nhập
+     * @param {string} password - Mật khẩu
+     * @param {boolean} persist - Có lưu thông tin đăng nhập vào localStorage không (mặc định: true)
      */
-    async login(username, password) {
+    async login(username, password, persist = true) {
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
@@ -118,14 +123,16 @@ class APIClient {
             console.log('Result success:', result.success); // Debug log
             
             if (response.ok && result.success) {
-                // Save token and user to localStorage
-                localStorage.setItem('auth_token', result.token);
-                localStorage.setItem('current_user', JSON.stringify(result.user));
-                
-                // Store token expiration time
-                if (result.expires_in) {
-                    const expirationTime = Date.now() + (result.expires_in * 1000);
-                    localStorage.setItem('token_expiration', expirationTime.toString());
+                // Only persist to localStorage if persist is true
+                if (persist) {
+                    localStorage.setItem('auth_token', result.token);
+                    localStorage.setItem('current_user', JSON.stringify(result.user));
+                    
+                    // Store token expiration time
+                    if (result.expires_in) {
+                        const expirationTime = Date.now() + (result.expires_in * 1000);
+                        localStorage.setItem('token_expiration', expirationTime.toString());
+                    }
                 }
                 
                 return result;

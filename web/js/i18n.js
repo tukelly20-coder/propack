@@ -3,7 +3,7 @@
  * Hỗ trợ Tiếng Việt (vi) và Tiếng Trung (zh)
  */
 
-// Current language state
+// Current language state (storage-polyfill already wraps localStorage safely)
 let currentLanguage = localStorage.getItem('language') || 'vi';
 
 // Translations object

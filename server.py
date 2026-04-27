@@ -13,35 +13,24 @@ import threading
 import requests
 import socket
 import sqlite3
-
-# Fix Unicode output for Windows console
-if sys.platform == 'win32':
-    import io
-    try:
-        if not isinstance(sys.stdout, io.TextIOWrapper):
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        if not isinstance(sys.stderr, io.TextIOWrapper):
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-    except Exception:
-        pass
-
-# Thread-safe print
-_print_lock = threading.Lock()
-
-def safe_print(*args, **kwargs):
-    """Thread-safe print"""
-    try:
-        with _print_lock:
-            print(*args, **kwargs)
-    except (ValueError, OSError):
-        pass
-
-# ========================================================================
-# Flask App Setup
-# ========================================================================
+import secrets
+import time
 from flask import Flask, request, jsonify, send_from_directory, make_response, session
 from flask_cors import CORS
-import tempfile
+
+# ========================================================================
+# Utility Functions
+# ========================================================================
+def safe_print(*args, **kwargs):
+    """Thread-safe print wrapper"""
+    try:
+        print(*args, **kwargs)
+    except Exception:
+        pass  # Silently ignore print errors
+
+# ========================================================================
+# Flask App Configuration
+# ========================================================================
 
 app = Flask(__name__,
             template_folder='web/templates',
@@ -94,17 +83,18 @@ CORS(app, resources={
 # Import DB helper
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.db_helper import (
-    init_db, init_db_v2, migrate_to_v2,
+    init_db, migrate_to_v2,
     load_all, save_all, add_record, update_record, delete_records,
-    search_data as db_search_data, filter_data as db_filter_data, get_paged_data, get_paged_data_sql, reindex_tracking_id,
+    search_data as db_search_data,
+    filter_data as db_filter_data,
+    get_paged_data_sql,
     get_record_by_id,
-    add_user, get_user_by_username, get_all_users, update_user, delete_user, 
-    authenticate_user, get_user_with_permissions, ensure_default_users,
-    get_user_permissions, set_user_permissions, add_user_permission, remove_user_permission,
-    delete_user_permissions, assign_default_permissions, get_default_permissions, has_user_permission,
-    get_pending_notices, get_pending_count, accept_job, add_sales_record, 
-    get_projects_by_user, get_accepted_projects_by_engineer, get_all_notices_for_engineer,
-    get_all_customers
+    add_user, get_user_by_username, get_all_users, update_user, delete_user,
+    get_user_with_permissions, ensure_default_users,
+    assign_default_permissions, set_user_permissions,
+    get_pending_notices, get_pending_count, accept_job, add_sales_record,
+    get_projects_by_user, get_accepted_projects_by_engineer,
+    get_all_notices_for_engineer, get_all_customers
 )
 
 # Import Tool Open core
@@ -1787,7 +1777,12 @@ def load_credentials():
         cred_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'credentials.json')
         if os.path.exists(cred_path):
             with open(cred_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                creds = json.load(f)
+                # Check for OpenRouter API key from environment variable first
+                env_api_key = os.environ.get('OPENROUTER_API_KEY')
+                if env_api_key:
+                    creds['openrouter_api_key'] = env_api_key
+                return creds
     except Exception as e:
         safe_print(f"[Credentials] Error loading: {e}")
     return {}

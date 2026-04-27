@@ -126,8 +126,8 @@
                             <label for="login-username" class="form-label" data-i18n="username">Tên đăng nhập</label>
                             <div class="input-group">
                                 <span class="input-group-text"><i class="bi bi-person"></i></span>
-                                <input type="text" class="form-control" id="login-username" 
-                                       placeholder="Nhập tên đăng nhập" data-i18n-placeholder="username" required autofocus>
+                                <input type="text" class="form-control" id="login-username"
+                                       placeholder="Nhập tên đăng nhập" data-i18n-placeholder="username" autocomplete="username" required autofocus>
                             </div>
                         </div>
                         <div class="mb-3">
@@ -386,6 +386,9 @@
         </div>
     </div>
 
+    <!-- Safe localStorage polyfill (must be before i18n.js which uses localStorage) -->
+    <script src="js/storage-polyfill.js"></script>
+    
     <!-- i18n (Internationalization) -->
     <script src="js/i18n.js"></script>
     

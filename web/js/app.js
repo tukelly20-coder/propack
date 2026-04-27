@@ -69,7 +69,12 @@ function setupLanguageSelector() {
 }
 
 function initLanguage() {
-    const savedLang = localStorage.getItem('language') || 'vi';
+    let savedLang = 'vi';
+    try {
+        savedLang = localStorage.getItem('language') || 'vi';
+    } catch (e) {
+        console.warn('[App] localStorage access denied:', e.message);
+    }
     window.currentLanguage = savedLang;
     // Translate page immediately on init
     if (typeof translatePage === 'function') {
@@ -398,16 +403,14 @@ async function handleLogin(e) {
     $('#login-error').addClass('d-none');
     
     try {
-        const result = await login(username, password);
+        const result = await login(username, password, rememberMe);
         
         if (result.success) {
             AppState.isAuthenticated = true;
             AppState.currentUser = result.user;
             
-            // Save to localStorage if remember me
-            if (rememberMe) {
-                localStorage.setItem('current_user', JSON.stringify(result.user));
-            }
+            // Persistence is now handled by APIClient.login based on rememberMe parameter
+            // Remove the ad-hoc localStorage write here
             
             hideLoginModal();
             showUserSection(result.user);
@@ -492,12 +495,21 @@ function setupLogout() {
  */
 async function handleLogout() {
     try {
-        await logout();
-    } catch (error) {
-        console.error('[App] Logout error:', error);
+        try {
+            await logout();
+        } catch (e) {
+            console.error('[App] Logout API error:', e);
+        }
     } finally {
         AppState.isAuthenticated = false;
         AppState.currentUser = null;
+        
+        // Clear localStorage
+        try {
+            localStorage.removeItem('current_user');
+        } catch (e) {
+            console.warn('[App] localStorage remove failed:', e.message);
+        }
         
         // Reset modules
         AppState.modulesLoaded = {
@@ -568,6 +580,21 @@ function setupNavigation() {
 function setupSubmitLogModal() {
     // Submit log form handler
     $(document).on('click', '#btn-submit-log-confirm', handleSubmitLog);
+    
+    // Manage inert attribute to prevent focus issues
+    $('#log-modal').on('shown.bs.modal', function() {
+        // Remove inert from modal content to keep it interactive
+        $(this).find('.modal-content').removeAttr('inert');
+        // Add inert to everything outside the modal to trap focus
+        $('body > *').not('#log-modal').not('[role="dialog"]').attr('inert', '');
+    });
+    
+    $('#log-modal').on('hidden.bs.modal', function() {
+        // Remove inert from outside elements
+        $('body > [inert]').removeAttr('inert');
+        // Ensure modal content has no inert attribute
+        $(this).find('.modal-content').removeAttr('inert');
+    });
 }
 
 /**
