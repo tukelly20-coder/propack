@@ -627,6 +627,17 @@ class APIClient {
             engineer_name: engineerName
         });
     }
+
+    /**
+     * Mở stream realtime cho notices (SSE)
+     */
+    createNoticeStream(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const url = query
+            ? `${this.baseUrl}/notices/stream?${query}`
+            : `${this.baseUrl}/notices/stream`;
+        return new EventSource(url);
+    }
     
     /**
      * Lấy danh sách khách hàng cho dropdown
@@ -673,6 +684,10 @@ async function acceptJob(trackingId, engineerName) {
     return api.acceptJob(trackingId, engineerName);
 }
 
+function openNoticeStream(params = {}) {
+    return api.createNoticeStream(params);
+}
+
 // Export functions to global scope for browser usage
 // This makes them available to other JS files like notices.js
 window.login = login;
@@ -683,6 +698,7 @@ window.getPendingNotices = getPendingNotices;
 window.getPendingCount = getPendingCount;
 window.getAllNoticesForEngineer = getAllNoticesForEngineer;
 window.acceptJob = acceptJob;
+window.openNoticeStream = openNoticeStream;
 async function getCustomers() {
     return api.getCustomers();
 }
@@ -693,6 +709,6 @@ window.api = api;
 
 // Export class for use in other files
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { APIClient, api, login, logout, getCurrentUser, submitLog, getPendingNotices, getPendingCount, getAllNoticesForEngineer, acceptJob };
+    module.exports = { APIClient, api, login, logout, getCurrentUser, submitLog, getPendingNotices, getPendingCount, getAllNoticesForEngineer, acceptJob, openNoticeStream };
 }
 

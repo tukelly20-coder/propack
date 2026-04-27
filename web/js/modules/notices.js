@@ -11,10 +11,13 @@
 const NoticesState = {
     notices: [],
     filteredNotices: [],
-    statusFilter: 'all',
-    urgencyFilter: 'all',
+    statusFilter: '',
+    urgencyFilter: '',
     searchText: '',
     isLoading: false,
+    currentUserName: '',
+    currentUserRole: '',
+    currentUserId: null,
     // Selection
     selectedIds: [],
     // Pagination
@@ -29,6 +32,13 @@ const NoticesState = {
         accepted: 0,
         urgent: 0
     },
+    // Realtime stream
+    stream: null,
+    streamConnected: false,
+    reconnectTimer: null,
+    reconnectAttempts: 0,
+    refreshTimer: null,
+    initialized: false,
     // Column visibility
     visibleColumns: {
         'checkbox': true,
@@ -68,6 +78,12 @@ const NoticesState = {
  */
 function initNoticesModule() {
     console.log('[Notices] Initializing...');
+    if (NoticesState.initialized) return;
+    NoticesState.initialized = true;
+    const currentUser = AppState.currentUser || {};
+    NoticesState.currentUserName = currentUser.full_name || currentUser.username || '';
+    NoticesState.currentUserRole = currentUser.role || '';
+    NoticesState.currentUserId = currentUser.user_id || null;
     
     // Render the module content
     renderNoticesContent();
@@ -80,6 +96,7 @@ function initNoticesModule() {
     
     // Auto refresh every 30 seconds
     startAutoRefresh();
+    setupNoticeRealtimeStream();
 }
 
 /**
@@ -97,14 +114,11 @@ function renderNoticesContent() {
                     <!-- Group 1: Main Actions -->
                     <div class="col-auto">
                         <div class="btn-group" role="group">
-                            <button class="btn btn-success btn-sm" id="btn-add-notice" title="${t('add_notice')}">
-                                <i class="bi bi-plus-circle"></i> ${t('add')}
+                            <button class="btn btn-primary btn-sm" id="btn-accept-selected-notice" disabled title="Nhận các việc đang chọn">
+                                <i class="bi bi-check2-square"></i> Nhận đã chọn
                             </button>
-                            <button class="btn btn-warning btn-sm" id="btn-edit-notice" disabled title="${t('edit_notice')}">
-                                <i class="bi bi-pencil"></i> ${t('edit')}
-                            </button>
-                            <button class="btn btn-danger btn-sm" id="btn-delete-notice" disabled title="${t('delete_notice')}">
-                                <i class="bi bi-trash"></i> ${t('delete')}
+                            <button class="btn btn-outline-primary btn-sm" id="btn-view-selected-notice" disabled title="Xem chi tiết thông báo đang chọn">
+                                <i class="bi bi-eye"></i> Xem chi tiết
                             </button>
                         </div>
                     </div>
@@ -182,7 +196,7 @@ function renderNoticesContent() {
                         </div>
                     </div>
                     <div class="col-auto ms-auto">
-                        <small class="text-muted"><i class="bi bi-info-circle"></i> ${t('auto_refresh_note')}</small>
+                        <small class="text-muted"><i class="bi bi-info-circle"></i> <span id="notice-scope-label">${t('auto_refresh_note')}</span></small>
                     </div>
                 </div>
             </div>
@@ -210,7 +224,12 @@ function renderNoticesContent() {
                     <input type="checkbox" id="select-all-notices" class="form-check-input">
                     <span class="fw-semibold">${t('notices_title')}</span>
                 </div>
-                <small class="text-muted" id="notice-selection-info">0 đã chọn</small>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="notice-realtime-status" id="notice-realtime-status">
+                        <i class="bi bi-broadcast-pin"></i> Realtime: Đang kết nối...
+                    </span>
+                    <small class="text-muted" id="notice-selection-info">0 đã chọn</small>
+                </div>
             </div>
             <div class="card-body p-0">
                 <div class="notice-feed-list" id="notices-table-body">
@@ -375,22 +394,15 @@ function renderNoticesContent() {
  * Setup Notices event listeners - Synced with Projects
  */
 function setupNoticesEvents() {
-    // Add button
-    $('#btn-add-notice').click(function() {
-        showNoticeModal();
+    // Bulk accept button
+    $('#btn-accept-selected-notice').click(function() {
+        acceptSelectedNotices();
     });
-    
-    // Edit button
-    $('#btn-edit-notice').click(function() {
+
+    // View selected button
+    $('#btn-view-selected-notice').click(function() {
         if (NoticesState.selectedIds.length === 1) {
-            editNotice(NoticesState.selectedIds[0]);
-        }
-    });
-    
-    // Delete button
-    $('#btn-delete-notice').click(function() {
-        if (NoticesState.selectedIds.length > 0) {
-            showDeleteConfirmModalNotice();
+            viewNotice(NoticesState.selectedIds[0]);
         }
     });
     
@@ -493,16 +505,6 @@ function setupNoticesEvents() {
         updateSelectedIdsNotice();
     });
     
-    // Save button
-    $('#btn-save-notice').click(function() {
-        saveNotice();
-    });
-    
-    // Confirm delete button
-    $('#btn-confirm-delete-notice').click(function() {
-        deleteSelectedNotices();
-    });
-    
     // Close column selector when clicking outside
     $(document).click(function(e) {
         if (!$(e.target).closest('#column-selector-notice, #btn-toggle-columns-notice').length) {
@@ -520,26 +522,28 @@ function setupNoticesEvents() {
 function filterNotices() {
     // Apply all filters
     const filtered = NoticesState.notices.filter(notice => {
+        const normalizedStatus = getNormalizedNoticeStatus(notice);
+        const normalizedUrgency = getNormalizedNoticeUrgency(notice);
+
         // Status filter
         if (NoticesState.statusFilter) {
-            const noticeStatus = notice['Trạng thái'] || notice.status || 'pending';
-            if (NoticesState.statusFilter !== noticeStatus) return false;
+            if (NoticesState.statusFilter !== normalizedStatus) return false;
         }
         
         // Urgency filter
         if (NoticesState.urgencyFilter) {
-            const urgency = notice['Độ khẩn'] || notice.urgency || 'normal';
-            if (NoticesState.urgencyFilter !== urgency) return false;
+            if (NoticesState.urgencyFilter !== normalizedUrgency) return false;
         }
         
         // Search filter
         if (NoticesState.searchText) {
             const searchLower = NoticesState.searchText.toLowerCase();
-            const match = 
-                (notice['Tracking ID'] || '').toLowerCase().includes(searchLower) ||
-                (notice['Khách hàng'] || '').toLowerCase().includes(searchLower) ||
-                (notice['Tên sản phẩm'] || notice['Sản phẩm'] || '').toLowerCase().includes(searchLower) ||
-                (notice['Nhân viên KD'] || '').toLowerCase().includes(searchLower);
+            const match =
+                String(getNoticeValue(notice, ['Tracking ID', 'tracking_id'], '')).toLowerCase().includes(searchLower) ||
+                String(getNoticeValue(notice, ['Khách hàng', 'khach_hang'], '')).toLowerCase().includes(searchLower) ||
+                String(getNoticeValue(notice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], '')).toLowerCase().includes(searchLower) ||
+                String(getNoticeValue(notice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '')).toLowerCase().includes(searchLower) ||
+                String(getNoticeValue(notice, ['Nhân viên thiết kế', 'Kỹ sư', 'accepted_by'], '')).toLowerCase().includes(searchLower);
             if (!match) return false;
         }
         
@@ -577,20 +581,48 @@ async function loadNotices() {
     updateToolbarStateNotice();
     
     try {
-        const result = await getPendingNotices();
+        const currentUser = AppState.currentUser || {};
+        NoticesState.currentUserName = currentUser.full_name || currentUser.username || '';
+        NoticesState.currentUserRole = currentUser.role || '';
+        NoticesState.currentUserId = currentUser.user_id || null;
+
+        const normalizedRole = String(NoticesState.currentUserRole || '').toLowerCase();
+        let result = [];
+        if ((normalizedRole === 'engineer' || normalizedRole === 'eng') && NoticesState.currentUserName) {
+            result = await getAllNoticesForEngineer(NoticesState.currentUserName);
+        } else if (normalizedRole === 'admin') {
+            // Admin xem toàn bộ công việc pending, không lọc theo user_id
+            result = await getPendingNotices();
+        } else if (NoticesState.currentUserId) {
+            result = await getPendingNotices(NoticesState.currentUserId);
+        } else {
+            result = await getPendingNotices();
+        }
         
-        if (result && Array.isArray(result)) {
-            NoticesState.notices = result;
-            
+        const noticeRows = Array.isArray(result)
+            ? result
+            : (result && Array.isArray(result.data) ? result.data : []);
+
+        if (result && result.success === false) {
+            throw new Error(result.error || 'Không thể tải thông báo');
+        }
+
+        if (noticeRows.length > 0 || (result && (Array.isArray(result) || result.success))) {
+            NoticesState.notices = noticeRows.map(normalizeNotice);
+            NoticesState.selectedIds = [];
+             
             // Calculate stats
-            NoticesState.stats.total = result.length;
-            NoticesState.stats.pending = result.filter(n => (n['Trạng thái'] || n.status || 'pending') === 'pending').length;
-            NoticesState.stats.accepted = result.filter(n => (n['Trạng thái'] || n.status) === 'accepted').length;
-            NoticesState.stats.urgent = result.filter(n => (n['Độ khẩn'] || n.urgency) !== 'normal').length;
-            
+            NoticesState.stats.total = NoticesState.notices.length;
+            NoticesState.stats.pending = NoticesState.notices.filter(n => getNormalizedNoticeStatus(n) === 'pending').length;
+            NoticesState.stats.accepted = NoticesState.notices.filter(n => getNormalizedNoticeStatus(n) === 'accepted').length;
+            NoticesState.stats.urgent = NoticesState.notices.filter(n => getNormalizedNoticeUrgency(n) !== 'normal').length;
+             
             // Apply filters and pagination
             filterNotices();
-            
+
+            const scopeLabel = getNoticeScopeLabel();
+            $('#notice-scope-label').text(scopeLabel);
+             
             // Update global notice badge
             updateNoticeBadge(NoticesState.stats.pending);
         } else {
@@ -628,16 +660,16 @@ function renderNoticesTable(notices) {
     const startIndex = (NoticesState.currentPage - 1) * NoticesState.pageSize;
     
     data.forEach((notice, index) => {
-        const status = notice['Trạng thái'] || notice.status || 'pending';
-        const urgency = notice['Độ khẩn'] || notice.urgency || 'normal';
-        const isSelected = NoticesState.selectedIds.includes(notice['Tracking ID']);
-        const trackingId = notice['Tracking ID'] || '-';
-        const productName = notice['Tên sản phẩm'] || notice['Sản phẩm'] || '';
-        const customer = notice['Khách hàng'] || '';
-        const engineer = notice['Kỹ sư'] || 'Chưa nhận';
-        const salesperson = notice['Nhân viên KD'] || '-';
-        const quantity = notice['Số lượng'] || '-';
-        const relativeTime = formatNoticeTime(notice['Ngày']);
+        const status = getNormalizedNoticeStatus(notice);
+        const urgency = getNormalizedNoticeUrgency(notice);
+        const trackingId = String(getNoticeValue(notice, ['Tracking ID', 'tracking_id'], '-'));
+        const isSelected = NoticesState.selectedIds.includes(trackingId);
+        const productName = getNoticeValue(notice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], '-');
+        const customer = getNoticeValue(notice, ['Khách hàng', 'khach_hang'], '-');
+        const engineer = getNoticeValue(notice, ['Người nhận', 'accepted_by', 'Nhân viên thiết kế', 'Kỹ sư'], getPendingReceiverText());
+        const salesperson = getNoticeValue(notice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '-');
+        const quantity = getNoticeValue(notice, ['Số lượng', 'so_luong'], '-');
+        const relativeTime = formatNoticeTime(getNoticeValue(notice, ['Ngày', 'Created_Date'], ''));
         
         html += `
             <div class="notice-item ${isSelected ? 'selected' : ''} notice-${status}" data-id="${trackingId}">
@@ -656,8 +688,8 @@ function renderNoticesTable(notices) {
                         <strong>${escapeHtml(customer)}</strong> có yêu cầu cho sản phẩm <strong>${escapeHtml(productName)}</strong>
                     </div>
                     <div class="notice-item-meta">
-                        <span><i class="bi bi-person-badge"></i> KD: ${escapeHtml(salesperson)}</span>
-                        <span><i class="bi bi-person-workspace"></i> KS: ${escapeHtml(engineer)}</span>
+                        <span><i class="bi bi-person-badge"></i> KD: ${escapeHtml(String(salesperson))}</span>
+                        <span><i class="bi bi-person-workspace"></i> KS: ${escapeHtml(String(engineer))}</span>
                         <span><i class="bi bi-box-seam"></i> SL: ${quantity}</span>
                         <span><i class="bi bi-clock"></i> ${relativeTime}</span>
                     </div>
@@ -673,12 +705,6 @@ function renderNoticesTable(notices) {
                         ` : ''}
                         <button class="btn btn-sm btn-outline-secondary quick-view-notice" data-id="${trackingId}">
                             <i class="bi bi-eye"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-warning quick-edit-notice" data-id="${trackingId}">
-                            <i class="bi bi-pencil"></i>
-                        </button>
-                        <button class="btn btn-sm btn-outline-danger quick-delete-notice" data-id="${trackingId}">
-                            <i class="bi bi-trash"></i>
                         </button>
                     </div>
                 </div>
@@ -717,23 +743,6 @@ function setupNoticesRowHandlers() {
         viewNotice(id);
     });
     
-    // Edit button
-    $('.quick-edit-notice').click(function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const id = $(this).data('id');
-        editNotice(id);
-    });
-    
-    // Delete button
-    $('.quick-delete-notice').click(function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const id = $(this).data('id');
-        NoticesState.selectedIds = [id];
-        showDeleteConfirmModalNotice();
-    });
-    
     // View link
     $('.view-notice').click(function(e) {
         e.preventDefault();
@@ -760,7 +769,7 @@ function updateSelectedIdsNotice() {
     $('#notices-table-body .notice-item').each(function() {
         const checkbox = $(this).find('input[type="checkbox"]');
         if (checkbox.is(':checked')) {
-            NoticesState.selectedIds.push($(this).data('id'));
+            NoticesState.selectedIds.push(String($(this).data('id')));
         }
     });
     
@@ -784,9 +793,13 @@ function updateSelectedIdsNotice() {
  */
 function updateToolbarStateNotice() {
     const count = NoticesState.selectedIds.length;
+    const selectedPendingCount = NoticesState.selectedIds
+        .map(id => findNoticeById(id))
+        .filter(n => n && getNormalizedNoticeStatus(n) === 'pending')
+        .length;
     
-    $('#btn-edit-notice').prop('disabled', count !== 1);
-    $('#btn-delete-notice').prop('disabled', count === 0);
+    $('#btn-view-selected-notice').prop('disabled', count !== 1);
+    $('#btn-accept-selected-notice').prop('disabled', selectedPendingCount === 0);
     
     const start = (NoticesState.currentPage - 1) * NoticesState.pageSize + 1;
     const end = Math.min(NoticesState.currentPage * NoticesState.pageSize, NoticesState.totalRecords);
@@ -831,9 +844,9 @@ function updateStats(data) {
     
     const stats = {
         total: notices.length,
-        pending: notices.filter(n => (n['Trạng thái'] || n.status || 'pending') === 'pending').length,
-        accepted: notices.filter(n => (n['Trạng thái'] || n.status) === 'accepted').length,
-        urgent: notices.filter(n => (n['Độ khẩn'] || n.urgency) !== 'normal').length
+        pending: notices.filter(n => getNormalizedNoticeStatus(n) === 'pending').length,
+        accepted: notices.filter(n => getNormalizedNoticeStatus(n) === 'accepted').length,
+        urgent: notices.filter(n => getNormalizedNoticeUrgency(n) !== 'normal').length
     };
     
     $('#stat-total-notices').text(stats.total);
@@ -859,6 +872,9 @@ async function acceptNotice(id) {
     
     try {
         const engineerName = AppState.currentUser?.full_name || AppState.currentUser?.username;
+        if (!engineerName) {
+            throw new Error('Không xác định được người dùng hiện tại');
+        }
         const result = await acceptJob(id, engineerName);
         
         if (result.success) {
@@ -880,43 +896,43 @@ async function acceptNotice(id) {
  * @param {string} id - Tracking ID
  */
 async function viewNotice(id) {
-    const notice = NoticesState.notices.find(n => n['Tracking ID'] === id);
+    let notice = findNoticeById(id);
+    if (!notice) {
+        try {
+            const remote = await api.getProject(id);
+            if (remote) {
+                notice = normalizeNotice(remote);
+            }
+        } catch (e) {
+            console.warn('[Notices] Cannot fetch notice detail by id:', id, e);
+        }
+    }
     
     if (notice) {
-        // Lọc bỏ key trùng lặp: chỉ hiển thị key người dùng cuối, không hiển thị key kỹ thuật
-        const preferredKeys = {
-            'Ngày': 'Ngày khởi tạo',
-            'is_pending': 'Trạng thái chờ',
-            'accepted_by': 'Người nhận',
-            'accepted_at': 'Thời gian nhận',
-            'user_id': 'User ID',
-            'urgency_level': 'Mức độ khẩn cấp',
-            'desired_solution_time': 'Thời gian hoàn thành kế hoạch'
-        };
-        
-        const displayData = {};
-        
-        for (const [key, value] of Object.entries(notice)) {
-            if (value !== undefined && value !== null && value !== '') {
-                // Nếu key là key kỹ thuật và có key người dùng cuối thì bỏ qua
-                if (preferredKeys[key] && notice[preferredKeys[key]] !== undefined) {
-                    continue;
-                }
-                displayData[key] = value;
-            }
-        }
-        
+        const detailRows = [
+            ['Tracking ID', getNoticeValue(notice, ['Tracking ID'], '-')],
+            ['Khách hàng', getNoticeValue(notice, ['Khách hàng'], '-')],
+            ['Tên sản phẩm', getNoticeValue(notice, ['Tên sản phẩm'], '-')],
+            ['Quy cách', getNoticeValue(notice, ['Quy cách'], '-')],
+            ['Số lượng', getNoticeValue(notice, ['Số lượng'], '-')],
+            ['Mã PO', getNoticeValue(notice, ['Mã PO'], '-')],
+            ['Mã bản vẽ', getNoticeValue(notice, ['Mã bản vẽ'], '-')],
+            ['Mã bản vẽ kỹ thuật', getNoticeValue(notice, ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)'], '-')],
+            ['Mã mẹ', getNoticeValue(notice, ['Mã mẹ'], '-')],
+            ['Loại sản phẩm', getNoticeValue(notice, ['Loại sản phẩm'], '-')],
+            ['Nhân viên KD', getNoticeValue(notice, ['Nhân viên KD'], '-')],
+            ['Kỹ sư', getNoticeValue(notice, ['Nhân viên thiết kế', 'Người nhận'], getPendingReceiverText())],
+            ['Độ khẩn', getNoticeUrgencyLabel(getNormalizedNoticeUrgency(notice))],
+            ['Trạng thái', getNoticeStatusLabel(getNormalizedNoticeStatus(notice))],
+            ['Ngày', getNoticeValue(notice, ['Ngày'], '-')],
+            ['TG mong muốn', getNoticeValue(notice, ['Thời gian mong muốn có bản vẽ'], '-')],
+            ['TG hoàn thành', getNoticeValue(notice, ['Thời gian hoàn thành kế hoạch'], '-')]
+        ];
+
         let html = '<div class="detail-section">';
-        
-        for (const [key, value] of Object.entries(displayData)) {
-            html += `
-                <div class="detail-item">
-                    <strong>${key}:</strong>
-                    <span>${escapeHtml(String(value))}</span>
-                </div>
-            `;
-        }
-        
+        detailRows.forEach(([label, value]) => {
+            html += `<div class="detail-item"><strong>${label}:</strong><span>${escapeHtml(String(value || '-'))}</span></div>`;
+        });
         html += '</div>';
         
         $('#view-content-notice').html(html);
@@ -948,7 +964,7 @@ function showNoticeModal() {
  * @param {string} id - Tracking ID
  */
 async function editNotice(id) {
-    const notice = NoticesState.notices.find(n => n['Tracking ID'] === id);
+    const notice = findNoticeById(id);
     
     if (notice) {
         $('#notice-tracking-id').val(id);
@@ -960,9 +976,9 @@ async function editNotice(id) {
         $('#notice-field-nhanvienkd').val(notice['Nhân viên KD'] || '');
         $('#notice-field-sanpham').val(notice['Tên sản phẩm'] || notice['Sản phẩm'] || '');
         $('#notice-field-soluong').val(notice['Số lượng'] || '');
-        $('#notice-field-kysu').val(notice['Kỹ sư'] || '');
-        $('#notice-field-dokhan').val(notice['Độ khẩn'] || 'normal');
-        $('#notice-field-trangthai').val(notice['Trạng thái'] || 'pending');
+        $('#notice-field-kysu').val(notice['Nhân viên thiết kế'] || notice['Kỹ sư'] || notice['Người nhận'] || '');
+        $('#notice-field-dokhan').val(getNormalizedNoticeUrgency(notice));
+        $('#notice-field-trangthai').val(getNormalizedNoticeStatus(notice));
         
         const modal = new bootstrap.Modal('#notice-modal');
         modal.show();
@@ -1002,9 +1018,26 @@ async function saveNotice() {
         let result;
         
         if (trackingId) {
-            result = await api.updateNotice(trackingId, formData);
+            result = await api.updateProject(trackingId, {
+                Created_Date: formData['Ngày'],
+                khach_hang: formData['Khách hàng'],
+                nhan_vien_kinh_doanh: formData['Nhân viên KD'],
+                ten_san_pham: formData['Tên sản phẩm'],
+                so_luong: formData['Số lượng'],
+                nhan_vien_thiet_ke: formData['Kỹ sư'],
+                urgency_level: formData['Độ khẩn']
+            });
         } else {
-            result = await api.createNotice(formData);
+            result = await api.createProject({
+                Created_Date: formData['Ngày'],
+                khach_hang: formData['Khách hàng'],
+                nhan_vien_kinh_doanh: formData['Nhân viên KD'],
+                ten_san_pham: formData['Tên sản phẩm'],
+                so_luong: formData['Số lượng'],
+                nhan_vien_thiet_ke: formData['Kỹ sư'],
+                urgency_level: formData['Độ khẩn'],
+                nguoi_lien_he_kh: formData['Khách hàng'] || 'N/A'
+            });
         }
         
         if (result.success) {
@@ -1045,7 +1078,7 @@ async function deleteSelectedNotices() {
     showLoading('Đang xóa thông báo...');
     
     try {
-        const result = await api.deleteNotices(ids);
+        const result = await api.deleteProjects(ids, 'admin');
         
         if (result.success) {
             showToast('Thành công', `Đã xóa ${ids.length} thông báo`, 'success');
@@ -1251,6 +1284,145 @@ function stopAutoRefresh() {
     }
 }
 
+function isNoticeRealtimeEligibleRole(role) {
+    const normalized = String(role || '').toLowerCase().trim();
+    return normalized === 'engineer' || normalized === 'eng' || normalized === 'admin';
+}
+
+function setupNoticeRealtimeStream() {
+    if (!isNoticeRealtimeEligibleRole(NoticesState.currentUserRole)) {
+        updateNoticeRealtimeStatus('Role này dùng auto refresh 30 giây', false);
+        return;
+    }
+    connectNoticeRealtimeStream();
+
+    window.addEventListener('beforeunload', () => {
+        disconnectNoticeRealtimeStream();
+        stopAutoRefresh();
+    });
+}
+
+function connectNoticeRealtimeStream() {
+    disconnectNoticeRealtimeStream();
+
+    const params = {
+        role: NoticesState.currentUserRole || '',
+        username: NoticesState.currentUserName || '',
+        user_id: NoticesState.currentUserId || ''
+    };
+
+    try {
+        NoticesState.stream = openNoticeStream(params);
+    } catch (error) {
+        console.error('[Notices] Cannot open realtime stream:', error);
+        scheduleNoticeRealtimeReconnect();
+        return;
+    }
+
+    NoticesState.stream.onopen = function() {
+        NoticesState.streamConnected = true;
+        NoticesState.reconnectAttempts = 0;
+        updateNoticeRealtimeStatus('Realtime: Đang kết nối', true);
+    };
+
+    NoticesState.stream.onmessage = function(event) {
+        if (!event || !event.data) return;
+        try {
+            const payload = JSON.parse(event.data);
+            handleRealtimeNoticeEvent(payload);
+        } catch (error) {
+            console.warn('[Notices] Invalid realtime payload:', error);
+        }
+    };
+
+    NoticesState.stream.onerror = function() {
+        NoticesState.streamConnected = false;
+        updateNoticeRealtimeStatus('Realtime: Mất kết nối, đang thử lại...', false);
+        disconnectNoticeRealtimeStream();
+        scheduleNoticeRealtimeReconnect();
+    };
+}
+
+function disconnectNoticeRealtimeStream() {
+    NoticesState.streamConnected = false;
+    if (NoticesState.stream) {
+        try {
+            NoticesState.stream.close();
+        } catch (error) {
+            console.warn('[Notices] Stream close warning:', error);
+        }
+        NoticesState.stream = null;
+    }
+}
+
+function scheduleNoticeRealtimeReconnect() {
+    if (NoticesState.reconnectTimer) return;
+    NoticesState.reconnectAttempts += 1;
+    const delay = Math.min(3000 * NoticesState.reconnectAttempts, 20000);
+    NoticesState.reconnectTimer = setTimeout(() => {
+        NoticesState.reconnectTimer = null;
+        if (isNoticeRealtimeEligibleRole(NoticesState.currentUserRole)) {
+            connectNoticeRealtimeStream();
+        }
+    }, delay);
+}
+
+function handleRealtimeNoticeEvent(payload) {
+    if (!payload || !payload.type) return;
+
+    if (payload.type === 'connected') {
+        updateNoticeRealtimeStatus('Realtime: Đang kết nối', true);
+        return;
+    }
+
+    if (payload.type === 'new_project_pending') {
+        const trackingId = payload.tracking_id || payload.record?.tracking_id || '';
+        showToast('Thông báo mới', `Có dự án mới #${trackingId} đang chờ nhận`, 'info');
+        queueRealtimeNoticeRefresh();
+        return;
+    }
+
+    if (payload.type === 'job_accepted') {
+        const trackingId = payload.tracking_id || '';
+        const acceptedBy = payload.accepted_by || 'Kỹ sư';
+        showToast('Cập nhật job', `Job #${trackingId} đã được ${acceptedBy} nhận`, 'success');
+        queueRealtimeNoticeRefresh();
+    }
+}
+
+function queueRealtimeNoticeRefresh() {
+    if (NoticesState.refreshTimer) {
+        clearTimeout(NoticesState.refreshTimer);
+    }
+    NoticesState.refreshTimer = setTimeout(async () => {
+        NoticesState.refreshTimer = null;
+        if (!NoticesState.isLoading) {
+            await loadNotices();
+        }
+        refreshPendingNoticeBadge();
+    }, 300);
+}
+
+async function refreshPendingNoticeBadge() {
+    try {
+        const result = await getPendingCount();
+        const count = typeof result?.count === 'number' ? result.count : 0;
+        updateNoticeBadge(count);
+    } catch (error) {
+        console.warn('[Notices] Cannot refresh pending badge:', error);
+    }
+}
+
+function updateNoticeRealtimeStatus(text, connected) {
+    const statusEl = $('#notice-realtime-status');
+    if (!statusEl.length) return;
+
+    const icon = connected ? 'bi-broadcast-pin' : 'bi-wifi-off';
+    statusEl.html(`<i class="bi ${icon}"></i> ${escapeHtml(text)}`);
+    statusEl.removeClass('connected disconnected');
+    statusEl.addClass(connected ? 'connected' : 'disconnected');
+}
+
 // ============================================
 // HELPERS
 // ============================================
@@ -1278,9 +1450,132 @@ function getStatusBadge(status) {
     };
     
     const cls = classes[status] || 'secondary';
-    const label = labels[status] || status;
+    const label = labels[status] || getNoticeStatusLabel(status);
     
     return `<span class="badge rounded-pill bg-${cls}">${label}</span>`;
+}
+
+function getNoticeStatusLabel(status) {
+    const labels = {
+        pending: 'Chờ duyệt',
+        accepted: 'Đã nhận',
+        in_progress: 'Đang làm',
+        completed: 'Hoàn thành'
+    };
+    return labels[status] || status || '-';
+}
+
+function getNormalizedNoticeStatus(notice) {
+    const raw = String(
+        getNoticeValue(notice, ['Trạng thái', 'status', 'is_pending'], '')
+    ).toLowerCase().trim();
+    if (raw === 'yes' || raw === 'pending') return 'pending';
+    if (raw === 'no' || raw === 'accepted') return 'accepted';
+    if (raw === 'in_progress') return 'in_progress';
+    if (raw === 'completed') return 'completed';
+    return 'pending';
+}
+
+function getNormalizedNoticeUrgency(notice) {
+    const raw = String(
+        getNoticeValue(notice, ['Độ khẩn', 'Tính cấp bách', 'urgency_level', 'urgency'], 'normal')
+    ).toLowerCase().trim();
+    if (raw === 'very_urgent' || raw === 'rất khẩn') return 'very_urgent';
+    if (raw === 'urgent' || raw === 'khẩn') return 'urgent';
+    return 'normal';
+}
+
+function getNoticeValue(notice, keys, fallback = '') {
+    for (const key of keys) {
+        const value = notice[key];
+        if (value === undefined || value === null) continue;
+        if (typeof value === 'string' && value.trim() === '') continue;
+        return value;
+    }
+    return fallback;
+}
+
+function getPendingReceiverText() {
+    return window.currentLanguage === 'zh' ? '未接收' : 'Chưa nhận';
+}
+
+function getNoticeScopeLabel() {
+    const normalizedRole = String(NoticesState.currentUserRole || '').toLowerCase();
+    if ((normalizedRole === 'engineer' || normalizedRole === 'eng') && NoticesState.currentUserName) {
+        return `Thông báo của kỹ sư: ${NoticesState.currentUserName}`;
+    }
+    if (normalizedRole === 'admin') {
+        return 'Thông báo chờ xử lý toàn hệ thống';
+    }
+    if (NoticesState.currentUserName) {
+        return `Thông báo chờ xử lý của: ${NoticesState.currentUserName}`;
+    }
+    return 'Thông báo chờ xử lý';
+}
+
+function normalizeNotice(rawNotice) {
+    const notice = { ...rawNotice };
+    notice['Tracking ID'] = getNoticeValue(rawNotice, ['Tracking ID', 'tracking_id'], '');
+    notice['Ngày'] = getNoticeValue(rawNotice, ['Ngày', 'Created_Date'], '');
+    notice['Khách hàng'] = getNoticeValue(rawNotice, ['Khách hàng', 'khach_hang'], '');
+    notice['Nhân viên KD'] = getNoticeValue(rawNotice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '');
+    notice['Tên sản phẩm'] = getNoticeValue(rawNotice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], '');
+    notice['Quy cách'] = getNoticeValue(rawNotice, ['Quy cách', 'quy_cach'], '');
+    notice['Số lượng'] = getNoticeValue(rawNotice, ['Số lượng', 'so_luong'], '');
+    notice['Mã PO'] = getNoticeValue(rawNotice, ['Mã PO', 'ma_po'], '');
+    notice['Mã bản vẽ'] = getNoticeValue(rawNotice, ['Mã bản vẽ', 'ma_ban_ve'], '');
+    notice['Mã bản vẽ kỹ thuật (sau khi đặt hàng)'] = getNoticeValue(rawNotice, ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)', 'ma_ban_ve_ky_thuat'], '');
+    notice['Mã mẹ'] = getNoticeValue(rawNotice, ['Mã mẹ', 'Mã mẹ ', 'ma_me'], '');
+    notice['Loại sản phẩm'] = getNoticeValue(rawNotice, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '');
+    notice['Nhân viên thiết kế'] = getNoticeValue(rawNotice, ['Nhân viên thiết kế', 'Kỹ sư', 'Kỹ sư thiết kế', 'nhan_vien_thiet_ke'], '');
+    notice['Người nhận'] = getNoticeValue(rawNotice, ['Người nhận', 'accepted_by'], '');
+    notice['Tính cấp bách'] = getNormalizedNoticeUrgency(rawNotice);
+    notice['Trạng thái'] = getNormalizedNoticeStatus(rawNotice);
+    return notice;
+}
+
+function findNoticeById(id) {
+    const target = String(id);
+    return NoticesState.notices.find(n => String(n['Tracking ID']) === target);
+}
+
+async function acceptSelectedNotices() {
+    const pendingIds = NoticesState.selectedIds
+        .map(id => findNoticeById(id))
+        .filter(n => n && getNormalizedNoticeStatus(n) === 'pending')
+        .map(n => n['Tracking ID']);
+
+    if (pendingIds.length === 0) {
+        showToast('Thông báo', 'Không có công việc chờ để nhận', 'warning');
+        return;
+    }
+
+    const engineerName = AppState.currentUser?.full_name || AppState.currentUser?.username;
+    if (!engineerName) {
+        showToast('Lỗi', 'Không xác định được người dùng hiện tại', 'error');
+        return;
+    }
+
+    showLoading('Đang nhận công việc đã chọn...');
+    try {
+        let successCount = 0;
+        for (const trackingId of pendingIds) {
+            const result = await acceptJob(trackingId, engineerName);
+            if (result && result.success) successCount += 1;
+        }
+
+        if (successCount > 0) {
+            showToast('Thành công', `Đã nhận ${successCount}/${pendingIds.length} công việc`, 'success');
+        } else {
+            showToast('Thông báo', 'Không có công việc nào được nhận', 'warning');
+        }
+        loadNotices();
+    } catch (error) {
+        console.error('[Notices] Bulk accept error:', error);
+        showToast('Lỗi', error.message || 'Không thể nhận công việc đã chọn', 'error');
+    } finally {
+        hideLoading();
+    }
 }
 
 /**
@@ -1295,12 +1590,16 @@ function getNoticeUrgencyBadge(urgency) {
         urgent: 'bg-warning-subtle text-warning-emphasis',
         very_urgent: 'bg-danger-subtle text-danger-emphasis'
     };
+    return `<span class="badge rounded-pill ${classes[normalized] || 'bg-secondary-subtle text-secondary-emphasis'}">${getNoticeUrgencyLabel(normalized)}</span>`;
+}
+
+function getNoticeUrgencyLabel(urgency) {
     const labels = {
         normal: 'Thường',
         urgent: 'Khẩn',
         very_urgent: 'Rất khẩn'
     };
-    return `<span class="badge rounded-pill ${classes[normalized] || 'bg-secondary-subtle text-secondary-emphasis'}">${labels[normalized] || normalized}</span>`;
+    return labels[urgency] || urgency || '-';
 }
 
 /**
@@ -1359,6 +1658,15 @@ function createNoticeFeedErrorState(message) {
 window.initNoticesModule = initNoticesModule;
 window.onNoticesTabInit = function() {
     // Called when notices tab is shown
+    const currentUser = AppState.currentUser || {};
+    NoticesState.currentUserName = currentUser.full_name || currentUser.username || '';
+    NoticesState.currentUserRole = currentUser.role || '';
+    NoticesState.currentUserId = currentUser.user_id || null;
+
+    if (isNoticeRealtimeEligibleRole(NoticesState.currentUserRole) && !NoticesState.streamConnected && !NoticesState.stream) {
+        connectNoticeRealtimeStream();
+    }
+
     if (!NoticesState.isLoading && NoticesState.notices.length === 0) {
         loadNotices();
     }

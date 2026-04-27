@@ -15,7 +15,9 @@ import socket
 import sqlite3
 import secrets
 import time
-from flask import Flask, request, jsonify, send_from_directory, make_response, session
+import queue
+import uuid
+from flask import Flask, request, jsonify, send_from_directory, make_response, session, Response, stream_with_context
 from flask_cors import CORS
 
 # ========================================================================
@@ -120,6 +122,11 @@ except Exception as e:
 db_data = []
 cached_sorted_history = None
 history_version = 0
+
+# Realtime notice stream state (SSE)
+notice_subscribers = {}
+notice_subscribers_lock = threading.Lock()
+notice_event_seq = 0
 
 # Load data on startup
 STORAGE_PATH = 'used_codes.json'
@@ -344,6 +351,78 @@ def is_admin_user(user):
     username = str(user.get('username', '')).strip().lower()
     return role == 'admin' or username == 'administrator'
 
+
+def normalize_notice_role(role_value):
+    """Chuẩn hóa role để lọc đúng subscriber nhận realtime notice."""
+    role = str(role_value or '').strip().lower()
+    if role == 'eng':
+        return 'engineer'
+    return role
+
+
+def build_notice_record_payload(record, fallback_tracking_id=None):
+    """Build payload thống nhất cho notice realtime."""
+    record = record or {}
+    tracking_id = record.get('Tracking ID') or record.get('tracking_id') or fallback_tracking_id
+    return {
+        "tracking_id": tracking_id,
+        "customer": record.get('Khách hàng') or record.get('khach_hang') or '',
+        "product": record.get('Tên sản phẩm') or record.get('ten_san_pham') or '',
+        "salesperson": record.get('Nhân viên KD') or record.get('Nhân viên kinh doanh') or record.get('nhan_vien_kinh_doanh') or '',
+        "engineer": record.get('Người nhận') or record.get('accepted_by') or record.get('Nhân viên thiết kế') or record.get('nhan_vien_thiet_ke') or '',
+        "urgency_level": record.get('Độ khẩn') or record.get('Tính cấp bách') or record.get('urgency_level') or 'normal',
+        "is_pending": record.get('is_pending') or record.get('Trạng thái chờ') or 'yes',
+        "created_date": record.get('Ngày') or record.get('Created_Date') or '',
+    }
+
+
+def publish_notice_event(event_type, message='', target_roles=None, record=None, tracking_id=None, extra=None):
+    """Phát event realtime cho tất cả client đang subscribe tab notices."""
+    global notice_event_seq
+
+    normalized_targets = sorted({
+        normalize_notice_role(role) for role in (target_roles or []) if str(role).strip()
+    })
+
+    with notice_subscribers_lock:
+        notice_event_seq += 1
+        event_id = notice_event_seq
+        subscribers_snapshot = list(notice_subscribers.items())
+
+    payload = {
+        "event_id": event_id,
+        "type": event_type,
+        "message": message or '',
+        "tracking_id": tracking_id or (record or {}).get('Tracking ID') or (record or {}).get('tracking_id'),
+        "targets": normalized_targets,
+        "timestamp": int(time.time())
+    }
+
+    if record:
+        payload["record"] = build_notice_record_payload(record, fallback_tracking_id=payload["tracking_id"])
+    if extra and isinstance(extra, dict):
+        payload.update(extra)
+
+    stale_subscribers = []
+    for client_id, client in subscribers_snapshot:
+        subscriber_role = normalize_notice_role(client.get('role'))
+        if normalized_targets and subscriber_role not in normalized_targets:
+            continue
+        try:
+            client['queue'].put_nowait(payload)
+        except Exception:
+            stale_subscribers.append(client_id)
+
+    if stale_subscribers:
+        with notice_subscribers_lock:
+            for client_id in stale_subscribers:
+                notice_subscribers.pop(client_id, None)
+
+
+def format_sse(event_name, payload):
+    """Serialize SSE event."""
+    return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
 # ========================================================================
 # Helper Functions (copied from server.py)
 # ========================================================================
@@ -533,6 +612,14 @@ def socket_api():
             tracking_id = req_data.get('tracking_id')
             engineer_name = req_data.get('engineer_name')
             success = accept_job(tracking_id, engineer_name)
+            if success:
+                publish_notice_event(
+                    event_type='job_accepted',
+                    message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                    target_roles=['engineer', 'eng', 'admin'],
+                    tracking_id=tracking_id,
+                    extra={"accepted_by": engineer_name}
+                )
             response_data = {"success": success}
             
         elif request_type == "ADD_SALES_RECORD":
@@ -551,6 +638,13 @@ def socket_api():
                 record_data = req_data.get('record', {})
                 new_record = add_sales_record(record_data)
                 if new_record:
+                    publish_notice_event(
+                        event_type='new_project_pending',
+                        message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
+                        target_roles=['engineer', 'eng', 'admin'],
+                        record=new_record,
+                        tracking_id=new_record.get('Tracking ID')
+                    )
                     response_data = {"success": True, "record": new_record}
                 else:
                     response_data = {"success": False, "error": "Failed to add record"}
@@ -1112,6 +1206,13 @@ def api_projects():
         
         new_record = add_record(data)
         if new_record:
+            publish_notice_event(
+                event_type='new_project_pending',
+                message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
+                target_roles=['engineer', 'eng', 'admin'],
+                record=new_record,
+                tracking_id=new_record.get('Tracking ID')
+            )
             return jsonify({"success": True, "record": new_record}), 201
         else:
             return jsonify({"success": False, "error": "Lỗi khi thêm dự án"}), 400
@@ -1493,6 +1594,57 @@ def api_customers():
 # Notice/Pending Tab API Endpoints (for web client)
 # ========================================================================
 
+@app.route('/api/notices/stream', methods=['GET'])
+def api_notices_stream():
+    """
+    SSE stream cho thông báo realtime.
+    Dùng cho roles engineer/eng/admin để nhận notice ngay khi có job pending mới.
+    """
+    role = normalize_notice_role(request.args.get('role', ''))
+    username = request.args.get('username', '')
+    user_id = request.args.get('user_id', '')
+
+    client_id = uuid.uuid4().hex
+    client_queue = queue.Queue(maxsize=100)
+
+    with notice_subscribers_lock:
+        notice_subscribers[client_id] = {
+            "queue": client_queue,
+            "role": role,
+            "username": username,
+            "user_id": user_id,
+            "connected_at": time.time()
+        }
+
+    # Push connected event ngay khi đăng ký thành công
+    client_queue.put({
+        "event_id": f"connected-{int(time.time())}",
+        "type": "connected",
+        "message": "notice-stream-connected",
+        "targets": [],
+        "timestamp": int(time.time())
+    })
+
+    def event_stream():
+        try:
+            while True:
+                try:
+                    payload = client_queue.get(timeout=20)
+                    yield format_sse('notice', payload)
+                except queue.Empty:
+                    yield format_sse('ping', {"timestamp": int(time.time())})
+        except GeneratorExit:
+            pass
+        finally:
+            with notice_subscribers_lock:
+                notice_subscribers.pop(client_id, None)
+
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Connection'] = 'keep-alive'
+    return response
+
 @app.route('/api/notices/pending', methods=['GET'])
 def api_notices_pending():
     """Lấy danh sách thông báo chờ xử lý"""
@@ -1579,6 +1731,13 @@ def api_notices_accept():
     try:
         success = accept_job(tracking_id, engineer_name)
         if success:
+            publish_notice_event(
+                event_type='job_accepted',
+                message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                target_roles=['engineer', 'eng', 'admin'],
+                tracking_id=tracking_id,
+                extra={"accepted_by": engineer_name}
+            )
             return jsonify({
                 "success": True,
                 "message": f"Đã nhận job {tracking_id}"
@@ -3601,6 +3760,14 @@ def handle_tcp_client(client_socket, client_address):
             tracking_id = request.get('tracking_id')
             engineer_name = request.get('engineer_name')
             success = accept_job(tracking_id, engineer_name)
+            if success:
+                publish_notice_event(
+                    event_type='job_accepted',
+                    message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                    target_roles=['engineer', 'eng', 'admin'],
+                    tracking_id=tracking_id,
+                    extra={"accepted_by": engineer_name}
+                )
             response_data = {"success": success}
             
         elif request_type == "ADD_SALES_RECORD":
@@ -3619,6 +3786,13 @@ def handle_tcp_client(client_socket, client_address):
                 record_data = request.get('record', {})
                 new_record = add_sales_record(record_data)
                 if new_record:
+                    publish_notice_event(
+                        event_type='new_project_pending',
+                        message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
+                        target_roles=['engineer', 'eng', 'admin'],
+                        record=new_record,
+                        tracking_id=new_record.get('Tracking ID')
+                    )
                     response_data = {"success": True, "record": new_record}
                 else:
                     response_data = {"success": False, "error": "Failed to add record"}
