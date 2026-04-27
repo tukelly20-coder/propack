@@ -309,9 +309,17 @@ function renderProjectsContent() {
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">${t('form_khachhang_required')}</label>
-                                    <select class="form-select selectpicker" id="field-khachhang" data-live-search="true" data-size="10">
-                                        <option value="">${t('select_customer')}</option>
-                                    </select>
+                                    <div class="row g-2">
+                                        <div class="col-md-6">
+                                            <select class="form-select" id="field-khachhang-select">
+                                                <option value="">${t('select_customer')}</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <input type="text" class="form-control" id="field-khachhang"
+                                                   placeholder="Nhập khách hàng">
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="col-12">
                                     <label class="form-label">${t('form_nhanvienkd')}</label>
@@ -1144,19 +1152,8 @@ function showProjectModal() {
     // Setup real-time validation
     setupRealTimeValidation();
     
-    // Refresh selectpicker after modal is shown
     const modalElement = document.getElementById('project-modal');
     const modal = bootstrap.Modal.getOrCreateInstance(modalElement);
-    
-    modalElement.addEventListener('shown.bs.modal', function() {
-        // Ensure dropdown is properly initialized
-        const select = $('#field-khachhang');
-        if (select.hasClass('bootstrap-select')) {
-            select.selectpicker('refresh');
-        } else {
-            select.selectpicker('render');
-        }
-    }, { once: true }); // Use once: true to prevent duplicate listeners
     
     // Update form labels with i18n
     updateProjectFormLabels();
@@ -1192,6 +1189,30 @@ function setupRealTimeValidation() {
             });
         }
     });
+
+    const $customerSelect = $('#field-khachhang-select');
+    if ($customerSelect.length) {
+        $customerSelect.off('change.realvalidation').on('change.realvalidation', function() {
+            const selectedValue = ($(this).val() || '').trim();
+            if (selectedValue) {
+                $('#field-khachhang').val(selectedValue);
+                clearFieldError($('#field-khachhang'));
+                $('#field-khachhang').addClass('is-valid');
+            }
+        });
+    }
+
+    const $customerInput = $('#field-khachhang');
+    if ($customerInput.length) {
+        $customerInput.off('input.customerSync').on('input.customerSync', function() {
+            const typedValue = ($(this).val() || '').trim();
+            const $select = $('#field-khachhang-select');
+            const matchedOption = $select.find('option').filter(function() {
+                return ($(this).val() || '').trim() === typedValue;
+            }).first();
+            $select.val(matchedOption.length > 0 ? typedValue : '');
+        });
+    }
     
     // Number field validation
     const $quantity = $('#field-soluong');
@@ -1250,9 +1271,11 @@ async function loadCustomers() {
             ProjectsState.customers = result.data;
             return result.data;
         }
+        ProjectsState.customers = [];
         return [];
     } catch (error) {
         console.error('[Projects] Error loading customers:', error);
+        ProjectsState.customers = [];
         return [];
     }
 }
@@ -1261,76 +1284,62 @@ async function loadCustomers() {
  * Populate customer dropdown with customers data
  */
 function populateCustomerDropdown() {
-    const select = $('#field-khachhang');
-    
-    // Clear existing options except the first one
-    select.find('option:not(:first)').remove();
-    
-    // Destroy existing selectpicker if exists (to prevent duplicates)
-    if (select.hasClass('bootstrap-select')) {
-        try {
-            select.selectpicker('destroy');
-        } catch (e) {
-            console.warn('[Projects] selectpicker destroy error:', e);
-        }
-    }
-    
     // If no customers loaded yet, load them first
     if (ProjectsState.customers.length === 0) {
-        loadCustomers().then(customers => {
+        return loadCustomers().then(customers => {
             addCustomerOptions(customers);
         });
-    } else {
-        addCustomerOptions(ProjectsState.customers);
     }
+    addCustomerOptions(ProjectsState.customers);
+    return Promise.resolve();
 }
 
 /**
  * Add customer options to dropdown
  */
 function addCustomerOptions(customers) {
-    const select = $('#field-khachhang');
-    
-    // Clear existing options except the first one (tránh trùng lặp)
-    select.find('option:not(:first)').remove();
-    
-    // Destroy existing selectpicker if exists (tránh tạo nhiều instance)
-    if (select.hasClass('bootstrap-select')) {
-        try {
-            select.selectpicker('destroy');
-        } catch (e) {
-            console.warn('[Projects] selectpicker destroy error:', e);
-        }
+    const customerSelect = $('#field-khachhang-select');
+    const input = $('#field-khachhang');
+    const currentValue = (input.val() || '').trim();
+    customerSelect.empty();
+    customerSelect.append(
+        $('<option></option>')
+            .val('')
+            .text(t('select_customer'))
+    );
+
+    const normalized = Array.isArray(customers)
+        ? customers
+            .map(customer => (customer && customer.name ? String(customer.name).trim() : ''))
+            .filter(Boolean)
+        : [];
+
+    // Fallback: nếu bảng customers rỗng, lấy danh sách từ dữ liệu projects đã có.
+    if (normalized.length === 0 && Array.isArray(ProjectsState.projects)) {
+        ProjectsState.projects.forEach(project => {
+            const name = String(
+                project['Khách hàng']
+                || project['khach_hang']
+                || project['khachhang']
+                || ''
+            ).trim();
+            if (name) normalized.push(name);
+        });
     }
-    
-    // Add customer options
-    customers.forEach(customer => {
-        // Format: {code} {name} {phonetic} {english_name}
-        // Example: 0001 歌尔 Gē'ěr Goertek
-        const displayText = [customer.code, customer.name, customer.phonetic, customer.english_name]
-            .filter(val => val)
-            .join(' ');
-        
-        const option = $('<option></option>');
-        option.val(customer.name); // Use name as value
-        option.text(displayText);
-        select.append(option);
+
+    const uniqueNames = [...new Set(normalized)].sort((a, b) => a.localeCompare(b, 'vi'));
+
+    uniqueNames.forEach(name => {
+        customerSelect.append($('<option></option>').val(name).text(name));
     });
-    
-    // Initialize Bootstrap Select with search - chỉ khởi tạo một lần
-    select.selectpicker({
-        liveSearch: true,
-        liveSearchNormalize: true,
-        liveSearchPlaceholder: t('liveSearch_placeholder'),
-        showSubtext: false,
-        size: 10,
-        width: '100%',
-        noneSelectedText: t('select_customer'),
-        title: ''
-    });
-    
-    // Render the selectpicker
-    select.selectpicker('render');
+
+    if (currentValue) {
+        const matched = uniqueNames.includes(currentValue);
+        customerSelect.val(matched ? currentValue : '');
+        input.val(currentValue);
+    }
+
+    input.attr('placeholder', uniqueNames.length > 0 ? 'Hoặc nhập khách hàng mới' : 'Nhập khách hàng');
 }
 
 /**
@@ -1359,6 +1368,13 @@ function updateProjectFormLabels() {
     $('#project-form label').eq(11).html(t('form_capbach'));
     $('#project-form label').eq(12).html(t('form_tg_mongmuon'));
     $('#project-form label').eq(13).html(t('form_tg_hoanthanh'));
+
+    // Customer controls
+    const customerSelect = $('#field-khachhang-select');
+    if (customerSelect.length) {
+        customerSelect.find('option').first().text(t('select_customer'));
+    }
+    $('#field-khachhang').attr('placeholder', 'Hoặc nhập khách hàng mới');
     
     // Urgency options
     const urgencySelect = $('#field-capbach');
@@ -1390,17 +1406,14 @@ async function editProject(id) {
             $('#field-ngay').val(result['Ngày'] || result['Ngày khởi tạo'] || '');
             $('#field-nhanvienkd').val(result['Nhân viên KD'] || result['Nhân viên kinh doanh'] || '');
             
-            // Populate customer dropdown first
-            populateCustomerDropdown();
-            
-            // Set customer value after dropdown is populated - đợi DOM update
-            setTimeout(() => {
-                const select = $('#field-khachhang');
-                select.val(result['Khách hàng'] || '');
-                if (select.hasClass('bootstrap-select')) {
-                    select.selectpicker('refresh');
-                }
-            }, 200);
+            // Populate customer options first
+            await populateCustomerDropdown();
+            const customerName = (result['Khách hàng'] || '').trim();
+            $('#field-khachhang').val(customerName);
+            const hasOption = $('#field-khachhang-select option').filter(function() {
+                return ($(this).val() || '').trim() === customerName;
+            }).length > 0;
+            $('#field-khachhang-select').val(hasOption ? customerName : '');
             
             // Thông tin sản phẩm
             $('#field-tensanpham').val(result['Tên sản phẩm'] || '');
@@ -1491,7 +1504,9 @@ async function saveProject() {
     $('.invalid-feedback').remove();
     
     // Validation - Kiểm tra các trường bắt buộc
-    const khachhang = $('#field-khachhang').val().trim();
+    const selectedCustomer = ($('#field-khachhang-select').val() || '').trim();
+    const typedCustomer = ($('#field-khachhang').val() || '').trim();
+    const khachhang = typedCustomer || selectedCustomer;
     const tensanpham = $('#field-tensanpham').val().trim();
     const lienhe = $('#field-lienhe').val().trim();
     let hasError = false;

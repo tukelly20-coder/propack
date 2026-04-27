@@ -327,6 +327,33 @@ def record_login_attempt(ip, success):
             login_attempts[ip] = []
         login_attempts[ip].append((time.time(), success))
 
+def get_user_from_bearer_token():
+    """Lấy user từ Authorization Bearer token."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None, "no_token"
+
+    token = auth_header[7:]
+    with sessions_lock:
+        session_data = sessions.get(token)
+        if not session_data:
+            return None, "invalid_token"
+
+        created_at = session_data.get('created_at', 0)
+        if (time.time() - created_at) > SESSION_TIMEOUT:
+            del sessions[token]
+            return None, "expired"
+
+        return session_data.get('user', {}), None
+
+def is_admin_user(user):
+    """Kiểm tra user có quyền admin không."""
+    if not user:
+        return False
+    role = str(user.get('role', '')).strip().lower()
+    username = str(user.get('username', '')).strip().lower()
+    return role == 'admin' or username == 'administrator'
+
 # ========================================================================
 # Helper Functions (copied from server.py)
 # ========================================================================
@@ -1439,28 +1466,26 @@ def api_codes_search_parent_batch_post():
 def api_customers():
     """Lấy danh sách khách hàng cho dropdown"""
     try:
-        conn = sqlite3.connect('DB.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Lấy tất cả customers với các trường cần thiết
-        cursor.execute('''
-            SELECT code, name, phonetic, english_name 
-            FROM customers 
-            WHERE code IS NOT NULL AND code != ''
-            ORDER BY code
-        ''')
-        results = cursor.fetchall()
-        conn.close()
-        
+        # Dùng helper để tương thích schema cũ/mới của bảng customers
+        # (một số DB không có các cột code/phonetic/english_name).
+        results = get_all_customers()
+
         customers = []
         for row in results:
+            customer_code = row.get('code')
+            if not customer_code:
+                # Fallback cho schema hiện tại: dùng id để giữ định dạng hiển thị ổn định
+                customer_id = row.get('id')
+                customer_code = str(customer_id) if customer_id is not None else ''
+
             customers.append({
-                'code': row['code'] or '',
-                'name': row['name'] or '',
-                'phonetic': row['phonetic'] or '',
-                'english_name': row['english_name'] or ''
+                'code': customer_code,
+                'name': row.get('name') or '',
+                'phonetic': row.get('phonetic') or '',
+                'english_name': row.get('english_name') or row.get('contact_person') or ''
             })
+
+        customers.sort(key=lambda c: (c.get('code', ''), c.get('name', '')))
         
         return jsonify({
             "success": True,
@@ -1672,6 +1697,33 @@ Khi trả lời, hãy:
 4. Nếu cần thông tin về database, có thể truy vấn qua API
 
 CURRENT_USER_INFO: Chưa đăng nhập (guest)"""
+DEFAULT_SYSTEM_PROMPT = SYSTEM_PROMPT
+SYSTEM_PROMPT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system_prompt.json')
+SYSTEM_PROMPT_LOCK = threading.Lock()
+
+def load_system_prompt_config():
+    """Load custom system prompt from file if available."""
+    global SYSTEM_PROMPT
+    try:
+        if os.path.exists(SYSTEM_PROMPT_CONFIG_PATH):
+            with open(SYSTEM_PROMPT_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            custom_prompt = data.get('system_prompt', '')
+            if isinstance(custom_prompt, str) and custom_prompt.strip():
+                SYSTEM_PROMPT = custom_prompt.strip()
+                safe_print("[AI] Loaded custom system prompt")
+    except Exception as e:
+        safe_print(f"[AI] Error loading system prompt config: {e}")
+
+def save_system_prompt_config(prompt_text):
+    """Persist system prompt to file."""
+    try:
+        with open(SYSTEM_PROMPT_CONFIG_PATH, 'w', encoding='utf-8') as f:
+            json.dump({'system_prompt': prompt_text}, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        safe_print(f"[AI] Error saving system prompt config: {e}")
+        return False
 
 def get_user_session_info():
     """Lấy thông tin user từ session để bổ sung vào system prompt"""
@@ -1706,9 +1758,9 @@ def get_full_system_prompt():
 
 # Fallback models for rate limiting
 OPENROUTER_FALLBACK_MODELS = [
-    'google/gemini-2.0-flash-exp:free',
-    'google/gemini-1.5-flash-8b:free',
-    'meta-llama/llama-3.1-8b-instruct'
+    'openai/gpt-oss-20b:free',
+    'google/gemma-3-12b-it:free',
+    'meta-llama/llama-3.3-70b-instruct:free'
 ]
 
 def load_gemini_config():
@@ -1775,6 +1827,45 @@ def is_rate_limit_error(response):
         pass
     return False
 
+
+def extract_openrouter_error_message(response):
+    """Extract a short error message from OpenRouter response body."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            error = data.get('error')
+            if isinstance(error, dict):
+                message = error.get('message')
+                if message:
+                    return str(message)
+            message = data.get('message')
+            if message:
+                return str(message)
+    except Exception:
+        pass
+    return (response.text or '').strip()[:300]
+
+
+def get_non_retriable_openrouter_error(response):
+    """
+    Return user-friendly non-retriable error for auth/quota/access issues.
+    Returns None if error can still be retried/fallbacked.
+    """
+    status = getattr(response, 'status_code', 0)
+    detail = extract_openrouter_error_message(response)
+    detail_suffix = f": {detail}" if detail else ""
+
+    if status == 401:
+        return f"OpenRouter API key không hợp lệ hoặc đã bị thu hồi{detail_suffix}"
+    if status == 402:
+        return f"Tài khoản OpenRouter không đủ credit để gọi model{detail_suffix}"
+    if status == 403:
+        return f"OpenRouter từ chối quyền truy cập model{detail_suffix}"
+    if status == 404:
+        return f"Model OpenRouter không tồn tại hoặc đã bị ngừng hỗ trợ{detail_suffix}"
+
+    return None
+
 def exponential_backoff(attempt, initial_delay_ms, max_delay_ms):
     """Calculate delay with exponential backoff"""
     delay = min(initial_delay_ms * (2 ** attempt), max_delay_ms)
@@ -1837,6 +1928,9 @@ def call_openrouter_with_retry(api_key, model, messages, timeout=60):
             
             if response.status_code >= 400:
                 safe_print(f"[OpenRouter Retry] Error {response.status_code}: {response.text[:200]}")
+                non_retriable_error = get_non_retriable_openrouter_error(response)
+                if non_retriable_error:
+                    return None, current_model, non_retriable_error
                 # Check if it's a rate limit error in the response body
                 try:
                     error_data = response.json()
@@ -1906,6 +2000,9 @@ def call_openrouter_with_retry(api_key, model, messages, timeout=60):
             
             if response.status_code >= 400:
                 safe_print(f"[OpenRouter Retry] Fallback error: {response.status_code}")
+                non_retriable_error = get_non_retriable_openrouter_error(response)
+                if non_retriable_error:
+                    return None, fallback_model, non_retriable_error
                 continue
             
             result = response.json()
@@ -1923,6 +2020,7 @@ def call_openrouter_with_retry(api_key, model, messages, timeout=60):
 # Load AI config on startup
 load_ai_retry_config()
 load_gemini_config()
+load_system_prompt_config()
 
 # Default Ollama URLs (always include port)
 DEFAULT_OLLAMA_URLS = [
@@ -2867,7 +2965,7 @@ def openrouter_chat_stream():
     
     data = request.get_json() or {}
     message = data.get('message', '')
-    model = data.get('model', 'google/gemini-2.0-flash-exp:free')
+    model = data.get('model', 'openai/gpt-oss-20b:free')
     history = data.get('history', [])
     
     # Get user info from token (Authorization header)
@@ -2957,15 +3055,23 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c�
                     safe_print(f"[OpenRouter Stream] Rate limited (429) on attempt {attempt + 1}")
                     if attempt < max_retries - 1:
                         delay = exponential_backoff(attempt, initial_delay, max_delay)
+                        yield f"data: {json.dumps({'type': 'model_error', 'model': current_model, 'status': 429, 'attempt': attempt + 1, 'max_retries': max_retries, 'message': f'Model đang bị rate limit, sẽ thử lại sau {delay:.2f}s.'})}\n\n"
                         safe_print(f"[OpenRouter Stream] Waiting {delay:.2f}s before retry...")
                         time.sleep(delay)
                         continue
                     else:
+                        yield f"data: {json.dumps({'type': 'model_error', 'model': current_model, 'status': 429, 'attempt': attempt + 1, 'max_retries': max_retries, 'message': 'Model bị rate limit liên tục, chuyển sang fallback model.'})}\n\n"
                         # All retries exhausted, try fallback
                         break
                 
                 if response.status_code >= 400:
                     safe_print(f"[OpenRouter Stream] Error: {response.status_code} - {response.text[:500]}")
+                    detail = extract_openrouter_error_message(response)
+                    yield f"data: {json.dumps({'type': 'model_error', 'model': current_model, 'status': response.status_code, 'attempt': attempt + 1, 'max_retries': max_retries, 'message': detail or f'Lỗi HTTP {response.status_code}'})}\n\n"
+                    non_retriable_error = get_non_retriable_openrouter_error(response)
+                    if non_retriable_error:
+                        yield f"data: {json.dumps({'error': non_retriable_error, 'code': 'OPENROUTER_AUTH_OR_BILLING_ERROR'})}\n\n"
+                        return
                     # Check if it's a rate limit in response body
                     try:
                         error_data = response.json()
@@ -3051,10 +3157,17 @@ Lưu ý: Đây là user đang sử dụng AI. Nếu họ hỏi về dự án c�
                 
                 if response.status_code == 429:
                     safe_print(f"[OpenRouter Stream] Fallback model also rate limited")
+                    yield f"data: {json.dumps({'type': 'model_error', 'model': fallback_model, 'status': 429, 'message': 'Fallback model đang bị rate limit, thử model fallback tiếp theo.'})}\n\n"
                     continue
                 
                 if response.status_code >= 400:
                     safe_print(f"[OpenRouter Stream] Fallback error: {response.status_code}")
+                    detail = extract_openrouter_error_message(response)
+                    yield f"data: {json.dumps({'type': 'model_error', 'model': fallback_model, 'status': response.status_code, 'message': detail or f'Lỗi HTTP {response.status_code}'})}\n\n"
+                    non_retriable_error = get_non_retriable_openrouter_error(response)
+                    if non_retriable_error:
+                        yield f"data: {json.dumps({'error': non_retriable_error, 'code': 'OPENROUTER_AUTH_OR_BILLING_ERROR'})}\n\n"
+                        return
                     continue
                 
                 # Process streaming response
@@ -3123,9 +3236,9 @@ def openrouter_models():
     
     # Return available OpenRouter models
     models = [
-        {"name": "stepfun/step-3.5-flash:free", "display": "StepFun Step 3.5 Flash (Miễn phí)"},
-        {"name": "google/gemini-2.0-flash-exp:free", "display": "Gemini 2.0 Flash (Miễn phí)"},
-        {"name": "google/gemini-1.5-flash-8b:free", "display": "Gemini 1.5 Flash 8B (Miễn phí)"},
+        {"name": "openai/gpt-oss-20b:free", "display": "GPT OSS 20B (Miễn phí)"},
+        {"name": "google/gemma-3-12b-it:free", "display": "Gemma 3 12B IT (Miễn phí)"},
+        {"name": "meta-llama/llama-3.3-70b-instruct:free", "display": "Llama 3.3 70B (Miễn phí)"},
         {"name": "openai/gpt-4o-mini", "display": "GPT-4o Mini"},
         {"name": "anthropic/claude-3-haiku", "display": "Claude 3 Haiku"},
         {"name": "meta-llama/llama-3.1-8b-instruct", "display": "Llama 3.1 8B"}
@@ -3152,7 +3265,7 @@ def openrouter_status():
     
     has_key = bool(api_key)
     
-    # Test connection if API key exists
+    # Test key validity if API key exists
     connected = False
     error_msg = None
     
@@ -3163,13 +3276,14 @@ def openrouter_status():
                 'Content-Type': 'application/json'
             }
             resp = requests.get(
-                'https://openrouter.ai/api/v1/models',
+                'https://openrouter.ai/api/v1/key',
                 headers=headers,
                 timeout=10
             )
             connected = resp.status_code < 400
             if not connected:
-                error_msg = f"HTTP {resp.status_code}"
+                detail = extract_openrouter_error_message(resp)
+                error_msg = f"HTTP {resp.status_code}" + (f": {detail}" if detail else "")
         except Exception as e:
             error_msg = str(e)
     
@@ -3178,6 +3292,80 @@ def openrouter_status():
         "configured": has_key,
         "connected": connected,
         "error": error_msg
+    })
+
+
+@app.route('/api/ai/system-prompt', methods=['GET', 'PUT', 'OPTIONS'])
+def ai_system_prompt():
+    """Lấy/cập nhật system prompt (admin only for update)."""
+    global SYSTEM_PROMPT
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, PUT, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return response
+
+    user, auth_error = get_user_from_bearer_token()
+    if auth_error:
+        return jsonify({
+            "success": False,
+            "error": "Chưa đăng nhập hoặc phiên đã hết hạn",
+            "reason": auth_error
+        }), 401
+
+    can_edit = is_admin_user(user)
+
+    if request.method == 'GET':
+        return jsonify({
+            "success": True,
+            "system_prompt": SYSTEM_PROMPT,
+            "can_edit": can_edit
+        })
+
+    if not can_edit:
+        return jsonify({
+            "success": False,
+            "error": "Bạn không có quyền chỉnh system prompt"
+        }), 403
+
+    data = request.get_json() or {}
+    new_prompt = data.get('system_prompt', '')
+    if not isinstance(new_prompt, str):
+        return jsonify({
+            "success": False,
+            "error": "system_prompt phải là chuỗi"
+        }), 400
+
+    new_prompt = new_prompt.strip()
+    if len(new_prompt) < 20:
+        return jsonify({
+            "success": False,
+            "error": "System prompt quá ngắn (tối thiểu 20 ký tự)"
+        }), 400
+
+    if len(new_prompt) > 50000:
+        return jsonify({
+            "success": False,
+            "error": "System prompt quá dài (tối đa 50,000 ký tự)"
+        }), 400
+
+    with SYSTEM_PROMPT_LOCK:
+        SYSTEM_PROMPT = new_prompt
+        saved = save_system_prompt_config(SYSTEM_PROMPT)
+
+    if not saved:
+        return jsonify({
+            "success": False,
+            "error": "Không thể lưu system prompt vào file cấu hình"
+        }), 500
+
+    safe_print(f"[AI] System prompt updated by user: {user.get('username', 'unknown')}")
+    return jsonify({
+        "success": True,
+        "message": "Đã cập nhật system prompt",
+        "system_prompt": SYSTEM_PROMPT,
+        "can_edit": True
     })
 
 

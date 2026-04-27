@@ -507,6 +507,54 @@ PROJECT_COLUMNS = [
 ]
 
 
+def _extract_customer_name(payload: Dict[str, Any]) -> str:
+    """Lấy tên khách hàng từ payload theo các key có thể có."""
+    if not isinstance(payload, dict):
+        return ''
+
+    for key in ('Khách hàng', 'khach_hang', 'khachhang'):
+        value = payload.get(key)
+        if value is None:
+            continue
+        name = str(value).strip()
+        if name:
+            return name
+    return ''
+
+
+def _upsert_customer_name(cursor: sqlite3.Cursor, customer_name: str) -> None:
+    """
+    Thêm khách hàng vào bảng customers nếu chưa tồn tại.
+    Chỉ lưu cột name để không làm thay đổi các thông tin contact hiện có.
+    """
+    if not customer_name:
+        return
+
+    try:
+        cursor.execute(
+            'INSERT OR IGNORE INTO customers (name) VALUES (?)',
+            (customer_name,)
+        )
+    except sqlite3.OperationalError as e:
+        # Tương thích DB cũ chưa có bảng customers
+        if 'no such table' not in str(e).lower():
+            raise
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(200) UNIQUE NOT NULL,
+                contact_person VARCHAR(100),
+                phone VARCHAR(50),
+                email VARCHAR(100),
+                address TEXT
+            )
+        ''')
+        cursor.execute(
+            'INSERT OR IGNORE INTO customers (name) VALUES (?)',
+            (customer_name,)
+        )
+
+
 def migrate_json_to_columns():
     """
     Migration: Parse JSON từ cột 'data' và insert vào các columns riêng biệt
@@ -841,7 +889,9 @@ def add_record(record):
         cursor_check.execute("PRAGMA table_info(projects)")
         cols = [col[1] for col in cursor_check.fetchall()]
         print(f"[DB DEBUG] add_record - Current columns: {cols}")
-        print(f"[DB DEBUG] add_record - Input record keys: {list(record.keys())}")
+        # Encode keys safely to avoid Windows console encoding errors (e.g. cp936/gbk)
+        safe_record_keys = [str(k).encode('ascii', errors='backslashreplace').decode('ascii') for k in record.keys()]
+        print(f"[DB DEBUG] add_record - Input record keys: {safe_record_keys}")
         conn_check.close()
         
         conn = get_connection()
@@ -903,6 +953,10 @@ def add_record(record):
             f"INSERT INTO projects ({insert_cols}) VALUES ({placeholders})",
             values
         )
+
+        # Đồng bộ danh sách khách hàng từ dữ liệu project vào bảng customers
+        customer_name = _extract_customer_name(record)
+        _upsert_customer_name(cursor, customer_name)
         
         record['Tracking ID'] = new_tracking_id
         
@@ -1014,6 +1068,10 @@ def update_record(tracking_id, new_data):
                 (data_json, datetime.now().isoformat(), tracking_id)
             )
         
+        # Nếu payload có tên khách hàng thì tự thêm vào bảng customers
+        customer_name = _extract_customer_name(new_data)
+        _upsert_customer_name(cursor, customer_name)
+
         conn.commit()
         success = cursor.rowcount > 0
         conn.close()

@@ -11,12 +11,28 @@ const AIState = {
     messages: [],
     isLoading: false,
     isConnected: false,
-    currentModel: 'stepfun/step-3.5-flash:free',  // Step Fun model as default
+    currentModel: 'openai/gpt-oss-20b:free',  // Stable free OpenRouter default
     chatHistory: [],
     STORAGE_KEY: 'gemini_ai_history',
     useStreaming: true,  // Enable streaming by default
-    abortController: null  // For stopping streaming
+    abortController: null,  // For stopping streaming
+    isAdmin: false
 };
+
+function getCurrentUserForAI() {
+    try {
+        return JSON.parse(localStorage.getItem('current_user') || '{}');
+    } catch {
+        return {};
+    }
+}
+
+function isCurrentUserAdmin() {
+    const user = getCurrentUserForAI();
+    const role = String(user.role || '').toLowerCase();
+    const username = String(user.username || '').toLowerCase();
+    return role === 'admin' || username === 'administrator';
+}
 
 // ============================================
 // INITIALIZATION
@@ -33,6 +49,10 @@ function initAIModule() {
     
     // Setup event listeners
     setupAIEvents();
+
+    if (AIState.isAdmin) {
+        loadSystemPromptEditor();
+    }
     
     // Load chat history from localStorage
     loadChatHistory();
@@ -49,6 +69,7 @@ function initAIModule() {
  */
 function renderAIContent() {
     const container = document.getElementById('ai-container');
+    AIState.isAdmin = isCurrentUserAdmin();
     
     container.innerHTML = `
         <div class="ai-main-container">
@@ -64,9 +85,9 @@ function renderAIContent() {
                 <div class="d-flex align-items-center gap-3">
                     <select class="model-select" id="model-select-ai">
                         <optgroup label="OpenRouter (Miễn phí)">
-                            <option value="stepfun/step-3.5-flash:free" selected>StepFun Step 3.5 Flash (Miễn phí)</option>
-                            <option value="google/gemini-2.0-flash-exp:free">Gemini 2.0 Flash (Miễn phí)</option>
-                            <option value="google/gemini-1.5-flash-8b:free">Gemini 1.5 Flash 8B (Miễn phí)</option>
+                            <option value="openai/gpt-oss-20b:free" selected>GPT OSS 20B (Miễn phí)</option>
+                            <option value="google/gemma-3-12b-it:free">Gemma 3 12B IT (Miễn phí)</option>
+                            <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (Miễn phí)</option>
                             <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
                             <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
                             <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
@@ -91,8 +112,36 @@ function renderAIContent() {
                         <i class="bi bi-trash3"></i>
                         <span class="d-none d-sm-inline">Xóa chat</span>
                     </button>
+                    ${AIState.isAdmin ? `
+                    <button class="clear-btn" id="system-prompt-toggle-ai">
+                        <i class="bi bi-sliders"></i>
+                        <span class="d-none d-sm-inline">System Prompt</span>
+                    </button>
+                    ` : ''}
                 </div>
             </div>
+            ${AIState.isAdmin ? `
+            <div class="admin-prompt-panel" id="admin-system-prompt-panel" style="display: none;">
+                <div class="admin-prompt-header">
+                    <strong>Tùy chỉnh System Prompt (Admin)</strong>
+                    <span id="system-prompt-status-ai" class="text-muted">Đang tải...</span>
+                </div>
+                <textarea
+                    id="system-prompt-editor-ai"
+                    class="admin-prompt-editor"
+                    rows="10"
+                    placeholder="Nhập system prompt..."
+                ></textarea>
+                <div class="admin-prompt-actions">
+                    <button class="retry-btn" id="system-prompt-reload-ai" title="Tải lại từ server">
+                        <i class="bi bi-arrow-clockwise"></i> Tải lại
+                    </button>
+                    <button class="send-btn" id="system-prompt-save-ai" style="width:auto;padding:0.5rem 1rem;height:auto;">
+                        <i class="bi bi-save"></i> Lưu prompt
+                    </button>
+                </div>
+            </div>
+            ` : ''}
 
             <!-- Chat Container -->
             <div class="chat-container">
@@ -475,6 +524,42 @@ function renderAIContent() {
             .ai-main-container .retry-btn:hover {
                 color: #4285f4;
             }
+
+            .ai-main-container .admin-prompt-panel {
+                background: #fff;
+                border: 1px solid #e2e8f0;
+                border-radius: 12px;
+                padding: 0.75rem;
+                margin-bottom: 0.75rem;
+            }
+
+            .ai-main-container .admin-prompt-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 1rem;
+                margin-bottom: 0.5rem;
+                font-size: 0.875rem;
+            }
+
+            .ai-main-container .admin-prompt-editor {
+                width: 100%;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                padding: 0.625rem 0.75rem;
+                font-size: 0.875rem;
+                line-height: 1.5;
+                font-family: Consolas, 'Courier New', monospace;
+                resize: vertical;
+                min-height: 180px;
+            }
+
+            .ai-main-container .admin-prompt-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+            }
             
             @media (max-width: 768px) {
                 .ai-main-container .message {
@@ -528,6 +613,109 @@ function setupAIEvents() {
         AIState.currentModel = this.value;
         checkConnection();  // Re-check connection for the new model
     });
+
+    if (AIState.isAdmin) {
+        const toggleBtn = document.getElementById('system-prompt-toggle-ai');
+        const reloadBtn = document.getElementById('system-prompt-reload-ai');
+        const saveBtn = document.getElementById('system-prompt-save-ai');
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', toggleSystemPromptEditor);
+        }
+        if (reloadBtn) {
+            reloadBtn.addEventListener('click', loadSystemPromptEditor);
+        }
+        if (saveBtn) {
+            saveBtn.addEventListener('click', saveSystemPromptEditor);
+        }
+    }
+}
+
+function getAIAuthHeaders() {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    const authToken = localStorage.getItem('auth_token') || '';
+    if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    return headers;
+}
+
+function toggleSystemPromptEditor() {
+    const panel = document.getElementById('admin-system-prompt-panel');
+    if (!panel) return;
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function loadSystemPromptEditor() {
+    const textarea = document.getElementById('system-prompt-editor-ai');
+    const status = document.getElementById('system-prompt-status-ai');
+    if (!textarea || !status) return;
+
+    status.textContent = 'Đang tải...';
+    try {
+        const response = await fetch('/api/ai/system-prompt', {
+            method: 'GET',
+            headers: getAIAuthHeaders(),
+            signal: AbortSignal.timeout(15000)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || `Lỗi ${response.status}`);
+        }
+        if (!data.can_edit) {
+            throw new Error('Tài khoản hiện tại không có quyền chỉnh system prompt');
+        }
+        textarea.value = data.system_prompt || '';
+        status.textContent = 'Đã tải';
+    } catch (error) {
+        status.textContent = 'Tải thất bại';
+        if (typeof showToast === 'function') {
+            showToast('Lỗi', error.message || 'Không thể tải system prompt', 'error');
+        }
+    }
+}
+
+async function saveSystemPromptEditor() {
+    const textarea = document.getElementById('system-prompt-editor-ai');
+    const status = document.getElementById('system-prompt-status-ai');
+    const saveBtn = document.getElementById('system-prompt-save-ai');
+    if (!textarea || !status || !saveBtn) return;
+
+    const systemPrompt = textarea.value.trim();
+    if (!systemPrompt) {
+        if (typeof showToast === 'function') {
+            showToast('Lỗi', 'System prompt không được để trống', 'error');
+        }
+        return;
+    }
+
+    saveBtn.disabled = true;
+    status.textContent = 'Đang lưu...';
+    try {
+        const response = await fetch('/api/ai/system-prompt', {
+            method: 'PUT',
+            headers: getAIAuthHeaders(),
+            body: JSON.stringify({ system_prompt: systemPrompt }),
+            signal: AbortSignal.timeout(20000)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || `Lỗi ${response.status}`);
+        }
+        status.textContent = 'Đã lưu';
+        if (typeof showToast === 'function') {
+            showToast('Thành công', 'Đã cập nhật system prompt', 'success');
+        }
+    } catch (error) {
+        status.textContent = 'Lưu thất bại';
+        if (typeof showToast === 'function') {
+            showToast('Lỗi', error.message || 'Không thể lưu system prompt', 'error');
+        }
+    } finally {
+        saveBtn.disabled = false;
+    }
 }
 
 // ============================================
@@ -827,6 +1015,20 @@ function appendToAIMessageContent(messageDiv, newContent) {
 }
 
 /**
+ * Append status note under AI response (model switch/retry/error details)
+ */
+function appendAIStatusNote(messageDiv, noteText, iconClass = 'bi-info-circle') {
+    const wrapper = messageDiv.querySelector('.message-content-wrapper');
+    if (!wrapper || !noteText) return;
+    const note = document.createElement('div');
+    note.className = 'text-muted';
+    note.style.fontSize = '0.75rem';
+    note.style.marginTop = '0.5rem';
+    note.innerHTML = `<i class="bi ${iconClass}"></i> ${escapeHtml(noteText)}`;
+    wrapper.appendChild(note);
+}
+
+/**
  * Send to AI with streaming (SSE)
  * @param {string} prompt - User prompt
  * @param {Array} history - Chat history
@@ -879,7 +1081,7 @@ async function sendToAIStream(prompt, history, messageDiv) {
     
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let fullContent = '';
+    let sseBuffer = '';
     
     // Remove typing indicator and show streaming
     removeAITyping();
@@ -889,42 +1091,39 @@ async function sendToAIStream(prompt, history, messageDiv) {
         
         if (done) break;
         
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
+        sseBuffer = lines.pop() || '';
         
         for (const line of lines) {
             if (line.startsWith('data: ')) {
                 const data = line.slice(6);
+                let parsed;
                 try {
-                    const parsed = JSON.parse(data);
-                    
-                    if (parsed.type === 'chunk' && parsed.full) {
-                        // Update content with streaming text
-                        appendToAIMessageContent(messageDiv, parseSimpleMarkdown(parsed.full));
-                    } else if (parsed.type === 'done' && parsed.full) {
-                        appendToAIMessageContent(messageDiv, parseSimpleMarkdown(parsed.full));
-                        // If model was switched, show notification
-                        if (parsed.model_used) {
-                            const notification = document.createElement('div');
-                            notification.className = 'text-muted';
-                            notification.style.fontSize = '0.75rem';
-                            notification.style.marginTop = '0.5rem';
-                            notification.innerHTML = `<i class="bi bi-arrow-left-right"></i> Đã tự động chuyển sang model: ${parsed.model_used}`;
-                            contentDiv.parentElement.appendChild(notification);
-                        }
-                    } else if (parsed.error) {
-                        // Check for rate limit error
-                        if (parsed.code === 'ALL_MODELS_FAILED') {
-                            throw new Error('⚠️ Tất cả model AI đều bị quá tải. Vui lòng thử lại sau hoặc chọn Ollama (local).');
-                        }
-                        throw new Error(parsed.error);
-                    }
+                    parsed = JSON.parse(data);
                 } catch (e) {
-                    // Not valid JSON or aborted
-                    if (e.name === 'AbortError') {
-                        console.log('[AI] Stream aborted');
-                        return;
+                    continue;
+                }
+
+                if (parsed.type === 'chunk' && parsed.full) {
+                    appendToAIMessageContent(messageDiv, parseSimpleMarkdown(parsed.full));
+                } else if (parsed.type === 'start' && parsed.model_switched) {
+                    appendAIStatusNote(messageDiv, `Đang chuyển sang fallback model: ${parsed.model_switched}`, 'bi-arrow-left-right');
+                } else if (parsed.type === 'model_error') {
+                    const statusPart = parsed.status ? `HTTP ${parsed.status}` : 'Lỗi';
+                    const modelPart = parsed.model ? `[${parsed.model}]` : '';
+                    const retryPart = (parsed.attempt && parsed.max_retries) ? ` (lần ${parsed.attempt}/${parsed.max_retries})` : '';
+                    appendAIStatusNote(messageDiv, `${modelPart} ${statusPart}${retryPart}: ${parsed.message || 'Model lỗi'}`.trim(), 'bi-exclamation-triangle');
+                } else if (parsed.type === 'done' && parsed.full) {
+                    appendToAIMessageContent(messageDiv, parseSimpleMarkdown(parsed.full));
+                    if (parsed.model_used) {
+                        appendAIStatusNote(messageDiv, `Đã trả lời bằng fallback model: ${parsed.model_used}`, 'bi-arrow-left-right');
                     }
+                } else if (parsed.error) {
+                    if (parsed.code === 'ALL_MODELS_FAILED') {
+                        throw new Error('⚠️ Tất cả model AI đều thất bại. Vui lòng thử lại sau hoặc chọn model khác.');
+                    }
+                    throw new Error(parsed.error);
                 }
             }
         }
