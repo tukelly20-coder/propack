@@ -1602,6 +1602,104 @@ body.resizing .table * {
     word-break: break-word;
 }
 
+#view-modal .timeline-detail-section {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1rem;
+}
+#view-modal .project-timeline-wrap,
+#view-modal .project-info-wrap {
+    background: #f8fbfd;
+    border: 1px solid #e2edf3;
+    border-radius: 10px;
+    padding: 1rem;
+}
+#view-modal .project-timeline-title {
+    font-weight: 700;
+    color: #1f5f78;
+    margin-bottom: 0.75rem;
+}
+#view-modal .project-timeline {
+    position: relative;
+    padding-left: 1.75rem;
+}
+#view-modal .project-timeline::before {
+    content: "";
+    position: absolute;
+    left: 0.65rem;
+    top: 0.2rem;
+    bottom: 0.2rem;
+    width: 2px;
+    background: linear-gradient(180deg, #17a2b8 0%, #8fd7e3 100%);
+}
+#view-modal .project-timeline-item {
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+#view-modal .project-timeline-item:last-child {
+    margin-bottom: 0;
+}
+#view-modal .project-timeline-marker {
+    position: absolute;
+    left: -1.75rem;
+    top: 0.1rem;
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 50%;
+    background: #17a2b8;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(23, 162, 184, 0.35);
+}
+#view-modal .project-timeline-card {
+    background: #fff;
+    border: 1px solid #deedf1;
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+}
+#view-modal .project-timeline-label {
+    color: #4f5d69;
+    font-size: 0.85rem;
+    margin-bottom: 0.15rem;
+}
+#view-modal .project-timeline-time {
+    color: #111;
+    font-weight: 600;
+}
+#view-modal .project-info-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+}
+#view-modal .project-info-grid .detail-item {
+    margin-bottom: 0;
+    border-bottom: 1px dashed #e8eef2;
+    padding: 0.35rem 0;
+}
+#view-modal .project-info-grid .detail-item:last-child {
+    border-bottom: none;
+}
+
+@media (min-width: 992px) {
+    #view-modal .timeline-detail-section {
+        grid-template-columns: 1.05fr 1fr;
+    }
+}
+
+@media (max-width: 576px) {
+    #view-modal .detail-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    #view-modal .detail-item span {
+        text-align: left;
+    }
+}
+
 /* Toast Container */
 .toast-container {
     z-index: 9999;

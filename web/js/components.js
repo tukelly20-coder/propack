@@ -151,20 +151,67 @@ function createConfirmDeleteModal(title, message, count) {
  * @returns {string} HTML string
  */
 function createViewDetailModal(data) {
-    let content = '<div class="detail-section">';
-    
-    for (const [key, value] of Object.entries(data)) {
-        if (value) {
-            content += `
-                <div class="detail-item">
-                    <strong>${key}:</strong>
-                    <span>${escapeHtml(String(value))}</span>
+    const timelineFields = [
+        { label: 'Ngày tạo', keys: ['Ngày', 'ngay'] },
+        { label: 'Mốc nhận yêu cầu', keys: ['accepted_at'] },
+        { label: 'Deadline bản vẽ', keys: ['Thời gian mong muốn có bản vẽ', 'thoi_gian_mong_muon_co_ban_ve'] },
+        { label: 'Deadline hoàn thành', keys: ['Thời gian hoàn thành kế hoạch', 'thoi_gian_hoan_thanh_ke_hoach'] }
+    ];
+    const usedKeys = new Set();
+
+    function getValueByKeys(keys) {
+        for (const key of keys) {
+            if (data[key] !== undefined && data[key] !== null && String(data[key]).trim() !== '') {
+                usedKeys.add(key);
+                return data[key];
+            }
+        }
+        return null;
+    }
+
+    const timelineItems = timelineFields
+        .map((field, index) => {
+            const value = getValueByKeys(field.keys);
+            if (!value) return '';
+            return `
+                <div class="project-timeline-item">
+                    <div class="project-timeline-marker">${index + 1}</div>
+                    <div class="project-timeline-card">
+                        <div class="project-timeline-label">${field.label}</div>
+                        <div class="project-timeline-time">${escapeHtml(String(value))}</div>
+                    </div>
                 </div>
             `;
-        }
-    }
-    
-    content += '</div>';
+        })
+        .filter(Boolean)
+        .join('');
+
+    const detailItems = Object.entries(data)
+        .filter(([key, value]) => !usedKeys.has(key) && value !== undefined && value !== null && String(value).trim() !== '')
+        .map(([key, value]) => `
+            <div class="detail-item">
+                <strong>${escapeHtml(String(key))}:</strong>
+                <span>${escapeHtml(String(value))}</span>
+            </div>
+        `)
+        .join('');
+
+    const content = `
+        <div class="detail-section timeline-detail-section">
+            <div class="project-timeline-wrap">
+                <div class="project-timeline-title"><i class="bi bi-clock-history"></i> Timeline dự án</div>
+                <div class="project-timeline">
+                    ${timelineItems || '<div class="text-muted small">Chưa có mốc thời gian</div>'}
+                </div>
+            </div>
+            <div class="project-info-wrap">
+                <div class="project-timeline-title"><i class="bi bi-card-text"></i> Thông tin chi tiết</div>
+                <div class="project-info-grid">
+                    ${detailItems}
+                </div>
+            </div>
+        </div>
+    `;
     
     return `
         <div class="modal fade" id="view-modal" tabindex="-1">
