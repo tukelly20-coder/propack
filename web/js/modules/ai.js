@@ -17,7 +17,8 @@ const AIState = {
     MODEL_STORAGE_KEY: 'ai_current_model',
     useStreaming: true,  // Enable streaming by default
     abortController: null,  // For stopping streaming
-    isAdmin: false
+    isAdmin: false,
+    connectionCheckSeq: 0
 };
 
 function getCurrentUserForAI() {
@@ -769,6 +770,7 @@ async function initializeAIProvider() {
  * Check Gemini connection
  */
 async function checkConnection() {
+    const checkSeq = ++AIState.connectionCheckSeq;
     const statusDot = document.getElementById('status-dot-ai');
     const statusText = document.getElementById('status-text-ai');
     const modelSelect = document.getElementById('model-select-ai');
@@ -778,6 +780,17 @@ async function checkConnection() {
     }
     const model = AIState.currentModel;
     const provider = getProviderFromModel(model);
+
+    // Show transient status for the latest check only
+    if (statusText) {
+        if (provider === 'gemini') {
+            statusText.textContent = 'Đang kiểm tra Gemini...';
+        } else if (provider === 'openrouter') {
+            statusText.textContent = 'Đang kiểm tra OpenRouter...';
+        } else {
+            statusText.textContent = 'Đang kiểm tra Ollama...';
+        }
+    }
     
     try {
         // Check based on model type
@@ -791,8 +804,13 @@ async function checkConnection() {
         
         const response = await fetch(endpoint, {
             method: 'GET',
-            signal: AbortSignal.timeout(10000)
+            signal: AbortSignal.timeout(5000)
         });
+
+        // Ignore stale responses (older check that returned late)
+        if (checkSeq !== AIState.connectionCheckSeq) {
+            return;
+        }
         
         if (response.ok) {
             const data = await response.json();
@@ -849,13 +867,18 @@ async function checkConnection() {
             AIState.isConnected = false;
         }
     } catch (error) {
+        if (checkSeq !== AIState.connectionCheckSeq) {
+            return;
+        }
         console.error('[AI] Connection check failed:', error);
         statusDot.classList.remove('connected');
         statusText.textContent = 'Chưa kết nối';
         AIState.isConnected = false;
     }
 
-    updateAISendButton();
+    if (checkSeq === AIState.connectionCheckSeq) {
+        updateAISendButton();
+    }
 }
 
 /**

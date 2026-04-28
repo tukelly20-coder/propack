@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
     QStatusBar, QToolBar, QMenu, QMenuBar, QSpinBox,
     QDialog, QFormLayout, QDialogButtonBox, QComboBox,
     QDateEdit, QGridLayout, QHeaderView, QCheckBox,
-    QScrollArea, QFrame, QTabWidget, QItemDelegate, QStyleOptionViewItem, QProgressDialog
+    QScrollArea, QFrame, QTabWidget, QItemDelegate, QStyleOptionViewItem, QProgressDialog,
+    QAbstractItemView
 )
 
 # Import language_manager - hỗ trợ cả chạy từ thư mục gốc và thư mục src/
@@ -414,15 +415,15 @@ class WrappedHeaderView(QHeaderView):
         # Style cho header
         self.setStyleSheet(
             "QHeaderView::section {"
-            "    background-color: #E8E8E8;"
-            "    color: black;"
+            "    background-color: #EEF3F7;"
+            "    color: #22313F;"
             "    font-weight: bold;"
             "    font-size: 12px;"
-            "    padding-left: 4px;"
-            "    padding-right: 4px;"
-            "    padding-top: 4px;"
-            "    padding-bottom: 4px;"
-            "    border: 1px solid #A0A0A0;"
+            "    padding-left: 8px;"
+            "    padding-right: 8px;"
+            "    padding-top: 8px;"
+            "    padding-bottom: 8px;"
+            "    border: 1px solid #D4DEE8;"
             "}"
         )
     
@@ -439,26 +440,26 @@ class WrappedHeaderView(QHeaderView):
         painter.save()
         
         # Vẽ background đơn giản
-        painter.fillRect(rect, Qt.GlobalColor.lightGray)
+        painter.fillRect(rect, QColor("#EEF3F7"))
         
         # Vẽ border
         pen = painter.pen()
-        pen.setColor(Qt.GlobalColor.gray)
+        pen.setColor(QColor("#D4DEE8"))
         painter.setPen(pen)
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
         
         # Tính toán vùng vẽ text (trừ padding)
         text_rect = rect.adjusted(4, 4, -4, -4)
         
-        # Vẽ text với word wrap và căn giữa
+        # Vẽ text với word wrap và căn trái
         painter.setFont(self.font())
-        painter.setPen(Qt.GlobalColor.black)
+        painter.setPen(QColor("#22313F"))
         
         # Sử dụng QTextDocument để wrap text
         doc = QTextDocument()
         doc.setHtml(str(text))
         doc.setTextWidth(text_rect.width())
-        doc.setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignCenter))
+        doc.setDefaultTextOption(QTextOption(Qt.AlignmentFlag.AlignLeft))
         
         painter.translate(text_rect.topLeft())
         doc.drawContents(painter)
@@ -676,9 +677,16 @@ class MainWindow(QMainWindow):
     
     def update_loading_progress(self, value, message):
         """Cập nhật progress dialog"""
-        if self.progress_dialog:
-            self.progress_dialog.setValue(value)
-            self.progress_dialog.setLabelText(message)
+        # Protect against late queued signals after dialog was closed/reset.
+        dialog = self.progress_dialog
+        if not dialog:
+            return
+        try:
+            dialog.setValue(value)
+            dialog.setLabelText(message)
+        except (RuntimeError, AttributeError):
+            # Dialog may be deleted/cleared while queued signal is being processed.
+            return
     
     def on_data_loaded(self, data):
         """Xử lý khi data được load xong"""
@@ -800,8 +808,13 @@ class MainWindow(QMainWindow):
         """Thiết lập giao diện người dùng"""
         # Central widget
         central_widget = QWidget()
+        central_widget.setObjectName("ptRoot")
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+        self.apply_modern_theme()
+        self.setFont(QFont("Segoe UI Variable", 10))
         
         # Menu bar
         self.create_menu_bar()
@@ -815,32 +828,64 @@ class MainWindow(QMainWindow):
         # Tab 1: Project Table
         project_tab = QWidget()
         project_layout = QVBoxLayout(project_tab)
+        project_layout.setContentsMargins(6, 8, 6, 8)
+        project_layout.setSpacing(10)
+
+        # Header card
+        header_card = QFrame()
+        header_card.setObjectName("headerCard")
+        header_layout = QHBoxLayout(header_card)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(10)
+
+        title_layout = QVBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(2)
+        title_label = QLabel(self.texts.get("pt_title", "Theo Dõi Dự Án / 项目跟踪"))
+        title_label.setObjectName("titleLabel")
+        subtitle_label = QLabel(self.texts.get("search_placeholder", "Nhập từ khóa tìm kiếm dữ liệu dự án"))
+        subtitle_label.setObjectName("subtitleLabel")
+        title_layout.addWidget(title_label)
+        title_layout.addWidget(subtitle_label)
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+
+        self.summary_total = QLabel("Tổng: 0")
+        self.summary_page = QLabel("Trang: 0")
+        self.summary_status = QLabel("Sẵn sàng")
+        for summary in (self.summary_total, self.summary_page, self.summary_status):
+            summary.setObjectName("summaryChip")
+            header_layout.addWidget(summary)
+
+        project_layout.addWidget(header_card)
         
         # Table - tạo table_view TRƯỚC KHI sử dụng
         self.table_view = HorizontalScrollTableView()
         self.table_view.setSortingEnabled(False)  # Tắt sorting cho table view
         self.table_view.doubleClicked.connect(self.view_record)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table_view.setWordWrap(False)
+        self.table_view.setShowGrid(False)
         
         # ===== UI/UX: Row Hover Effects, Selection, Alternating Colors =====
-        # Style nhất quán với NoticeTab
+        # Style mới: nhẹ mắt và đọc dữ liệu nhanh hơn
         self.table_view.setStyleSheet("""
             QTableView {
-                gridline-color: #ddd;
-                alternate-background-color: #f9f9f9;
-                background-color: white;
+                gridline-color: transparent;
+                alternate-background-color: #F8FAFC;
+                background-color: #FFFFFF;
+                color: #1F2A37;
+                border: none;
+                selection-background-color: #D9ECFF;
+                selection-color: #0F172A;
             }
             QTableView::item:hover {
-                background-color: #E3F2FD;
+                background-color: #EEF6FF;
             }
             QTableView::item:selected {
-                background-color: #1976D2;
-                color: white;
-            }
-            QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 5px;
-                border: 1px solid #ccc;
-                font-weight: bold;
+                background-color: #D9ECFF;
+                color: #0F172A;
             }
         """)
         self.table_view.setAlternatingRowColors(True)
@@ -852,7 +897,7 @@ class MainWindow(QMainWindow):
         # Hiển thị số dòng (row numbers) ở phía bên trái - giống Excel
         self.table_view.verticalHeader().show()
         # Thiết lập độ rộng cho row header
-        self.table_view.verticalHeader().setDefaultSectionSize(25)
+        self.table_view.verticalHeader().setDefaultSectionSize(30)
         self.table_view.verticalHeader().setMinimumWidth(50)
         self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
         # Căn giữa số dòng (giống Excel)
@@ -860,8 +905,10 @@ class MainWindow(QMainWindow):
         # Style cho row header
         self.table_view.verticalHeader().setStyleSheet("""
             QHeaderView::section {
-                background-color: #f0f0f0;
+                background-color: #F2F6FA;
+                color: #4B5563;
                 font-weight: bold;
+                border: 1px solid #D4DEE8;
             }
         """)
         
@@ -888,31 +935,43 @@ class MainWindow(QMainWindow):
         # self.abc_header_widget = self.create_abc_header()
         # project_layout.addWidget(self.abc_header_widget)
 
-        project_layout.addWidget(self.table_view)
+        table_container = QFrame()
+        table_container.setObjectName("tableContainer")
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.addWidget(self.table_view)
+        project_layout.addWidget(table_container, 1)
         
-        # Search bar
-        search_layout = QHBoxLayout()
+        # Search & actions bar
+        filter_card = QFrame()
+        filter_card.setObjectName("filterCard")
+        search_layout = QHBoxLayout(filter_card)
+        search_layout.setContentsMargins(12, 10, 12, 10)
+        search_layout.setSpacing(8)
         search_label = QLabel(self.texts["search_label"])
+        search_label.setObjectName("searchLabel")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(self.texts["search_placeholder"])
         self.search_input.textChanged.connect(self.search_data)
+        self.search_input.setMinimumHeight(34)
         
-        search_btn = QPushButton(self.texts["search_btn"])
-        search_btn.clicked.connect(self.search_data)
+        self.search_btn = QPushButton(self.texts["search_btn"])
+        self.search_btn.setObjectName("primaryButton")
+        self.search_btn.clicked.connect(self.search_data)
         
-        clear_btn = QPushButton(self.texts["refresh_btn"])
-        clear_btn.clicked.connect(self.refresh_data)
+        self.clear_btn = QPushButton(self.texts["refresh_btn"])
+        self.clear_btn.clicked.connect(self.refresh_data)
         
         # Nút Tìm kiếm nâng cao (mở SearchDialog)
-        advanced_search_btn = QPushButton(self.texts.get("search_advanced_btn", "Tìm kiếm nâng cao"))
-        advanced_search_btn.clicked.connect(self.open_advanced_search)
+        self.advanced_search_btn = QPushButton(self.texts.get("search_advanced_btn", "Tìm kiếm nâng cao"))
+        self.advanced_search_btn.clicked.connect(self.open_advanced_search)
         
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
-        search_layout.addWidget(search_btn)
-        search_layout.addWidget(clear_btn)
-        search_layout.addWidget(advanced_search_btn)
-        project_layout.addLayout(search_layout)
+        search_layout.addWidget(self.search_btn)
+        search_layout.addWidget(self.clear_btn)
+        search_layout.addWidget(self.advanced_search_btn)
+        project_layout.addWidget(filter_card)
         
         # Pagination
         self.create_pagination(project_layout)
@@ -953,6 +1012,119 @@ class MainWindow(QMainWindow):
         
         # Thiết lập filter headers
         self.setup_filter_headers()
+
+    def apply_modern_theme(self):
+        """Áp dụng theme hiện đại, tập trung khả năng đọc dữ liệu."""
+        self.setStyleSheet("""
+            QWidget#ptRoot {
+                background: #EFF3F8;
+            }
+            QTabWidget::pane {
+                border: 1px solid #D8E0EA;
+                border-radius: 10px;
+                background: #F7FAFD;
+                margin-top: 6px;
+            }
+            QTabBar::tab {
+                background: #E7EDF4;
+                color: #334155;
+                border: 1px solid #D3DCE8;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 8px 14px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #FFFFFF;
+                color: #0F172A;
+                font-weight: 600;
+            }
+            QFrame#headerCard, QFrame#filterCard, QFrame#tableContainer, QFrame#paginationCard {
+                background: #FFFFFF;
+                border: 1px solid #D8E0EA;
+                border-radius: 10px;
+            }
+            QLabel#titleLabel {
+                color: #0F172A;
+                font-size: 17px;
+                font-weight: 700;
+            }
+            QLabel#subtitleLabel {
+                color: #64748B;
+                font-size: 11px;
+            }
+            QLabel#summaryChip {
+                background: #EFF5FC;
+                color: #1F3B57;
+                border: 1px solid #CFE0F2;
+                border-radius: 14px;
+                padding: 5px 10px;
+                font-weight: 600;
+            }
+            QLabel#searchLabel {
+                color: #334155;
+                font-weight: 600;
+            }
+            QLineEdit, QSpinBox, QComboBox, QDateEdit {
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
+                background: #FFFFFF;
+                padding: 6px 8px;
+                selection-background-color: #CAE5FF;
+            }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QDateEdit:focus {
+                border: 1px solid #4C93D6;
+            }
+            QPushButton {
+                background: #FFFFFF;
+                color: #1E293B;
+                border: 1px solid #C8D3E0;
+                border-radius: 8px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background: #F3F7FC;
+                border-color: #99B9DA;
+            }
+            QPushButton:pressed {
+                background: #E7EFF8;
+            }
+            QPushButton#primaryButton {
+                background: #1F7ACB;
+                color: #FFFFFF;
+                border: 1px solid #1A6EB6;
+                font-weight: 700;
+            }
+            QPushButton#primaryButton:hover {
+                background: #1A6EB6;
+            }
+            QStatusBar {
+                background: #FFFFFF;
+                border-top: 1px solid #D8E0EA;
+                color: #334155;
+            }
+            QMenuBar {
+                background: #F7FAFD;
+            }
+            QMenuBar::item:selected {
+                background: #E7EDF4;
+            }
+            QMenu {
+                background: #FFFFFF;
+                border: 1px solid #C9D5E3;
+            }
+        """)
+
+    def update_summary_cards(self, page_count=0):
+        """Cập nhật thông tin nhanh trên header."""
+        self.summary_total.setText(f"Tổng: {len(self.filtered_data)}")
+        self.summary_page.setText(f"Trang: {page_count}")
+        if self.is_loading:
+            self.summary_status.setText("Đang tải")
+        elif self.filtered_data:
+            self.summary_status.setText("Sẵn sàng")
+        else:
+            self.summary_status.setText("Không có dữ liệu")
     
     def on_notice_updated(self):
         """Xử lý khi có cập nhật từ Notice Tab"""
@@ -1127,7 +1299,11 @@ class MainWindow(QMainWindow):
     
     def create_pagination(self, layout):
         """Tạo phân trang"""
-        pagination_layout = QHBoxLayout()
+        pagination_card = QFrame()
+        pagination_card.setObjectName("paginationCard")
+        pagination_layout = QHBoxLayout(pagination_card)
+        pagination_layout.setContentsMargins(12, 8, 12, 8)
+        pagination_layout.setSpacing(8)
         
         # Label trang
         self.page_label = QLabel(self.texts["page_label"])
@@ -1144,14 +1320,16 @@ class MainWindow(QMainWindow):
         pagination_layout.addWidget(self.total_pages_label)
         
         # Nút Previous
-        prev_btn = QPushButton("<")
-        prev_btn.clicked.connect(self.previous_page)
-        pagination_layout.addWidget(prev_btn)
+        self.prev_btn = QPushButton("<")
+        self.prev_btn.setFixedWidth(34)
+        self.prev_btn.clicked.connect(self.previous_page)
+        pagination_layout.addWidget(self.prev_btn)
         
         # Nút Next
-        next_btn = QPushButton(">")
-        next_btn.clicked.connect(self.next_page)
-        pagination_layout.addWidget(next_btn)
+        self.next_btn = QPushButton(">")
+        self.next_btn.setFixedWidth(34)
+        self.next_btn.clicked.connect(self.next_page)
+        pagination_layout.addWidget(self.next_btn)
         
         # Label tổng số bản ghi
         self.total_records_label = QLabel(self.texts["total_records"].format(0))
@@ -1173,7 +1351,7 @@ class MainWindow(QMainWindow):
         pagination_layout.addWidget(self.page_size_spinbox)
         
         pagination_layout.addStretch()
-        layout.addLayout(pagination_layout)
+        layout.addWidget(pagination_card)
     
     def display_data(self):
         """Hiển thị dữ liệu lên bảng"""
@@ -1265,11 +1443,18 @@ class MainWindow(QMainWindow):
         # QTimer.singleShot(110, self.refresh_abc_header)
         
         # Update pagination
-        total_pages = (len(self.filtered_data) + self.items_per_page - 1) // self.items_per_page
+        total_pages = max(1, (len(self.filtered_data) + self.items_per_page - 1) // self.items_per_page)
+        self.current_page = min(max(1, self.current_page), total_pages)
+        self.page_spinbox.blockSignals(True)
         self.page_spinbox.setMaximum(total_pages)
         self.page_spinbox.setValue(self.current_page)
+        self.page_spinbox.blockSignals(False)
         self.total_pages_label.setText(f"/ {total_pages}")
         self.total_records_label.setText(self.texts["total_records"].format(len(self.filtered_data)))
+        if hasattr(self, "prev_btn") and hasattr(self, "next_btn"):
+            self.prev_btn.setEnabled(self.current_page > 1)
+            self.next_btn.setEnabled(self.current_page < total_pages)
+        self.update_summary_cards(len(page_data))
         
         # Update status
         self.status_bar.showMessage(self.texts["page_info"].format(self.current_page, total_pages, len(page_data)))

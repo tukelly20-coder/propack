@@ -10,6 +10,13 @@ from datetime import datetime
 import time
 import random
 
+# Ensure Unicode logs/prints do not crash on legacy Windows console encodings.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 # Import HorizontalScrollTableWidget for Shift+wheel horizontal scroll
 from src.models import HorizontalScrollTableWidget
 
@@ -255,7 +262,7 @@ _main_window_instance = None
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Tạo Mã Bản v�?)
+        self.setWindowTitle("Tạo Mã Bản Vẽ")
         self.resize(800, 600)
         self.tabs = QTabWidget()
         self.current_language = load_language()
@@ -342,7 +349,7 @@ class MainWindow(QWidget):
         pagination_layout.addWidget(self.refresh_button)
         tab2_layout.addLayout(pagination_layout)
         tab2.setLayout(tab2_layout)
-        self.tabs.addTab(tab2, "Lịch S�?)
+        self.tabs.addTab(tab2, "Lịch Sử")
         self.history_page = 0
         self.history_data = []
         self.history_headers = {"name": "Tên", "employee": "Mã nhân viên", "category": "Hạng mục", "code": "Mã", "time": "Thời gian"}
@@ -366,7 +373,7 @@ class MainWindow(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         tab3_layout.addWidget(spacer)
         tab3.setLayout(tab3_layout)
-        self.tabs.addTab(tab3, "Ngôn ng�?)
+        self.tabs.addTab(tab3, "Ngôn ngữ")
 
         # Tab 4: Tool Đồng b�?hóa
         tab4 = QWidget()
@@ -737,11 +744,11 @@ class MainWindow(QWidget):
         if self.current_state == 'DISCONNECTED':
             server_ip = self.server_ip
             if not server_ip:
-                print("[MainWindow] Không có server IP, không th�?kết nối")
+                print("[MainWindow] No server IP configured, cannot connect")
                 self.connection_label.setText("Chưa cấu hình IP server")
                 return
             
-            print(f"[MainWindow] Đang kiểm tra kết nối đến {server_ip}...")
+            print(f"[MainWindow] Checking connection to {server_ip}...")
             self.connection_label.setText(CLIENT_TEXT[self.current_language]['checking'])
             self.connection_checker = ConnectionChecker(server_ip)
             self.connection_checker.connection_status.connect(self.update_connection_status, Qt.QueuedConnection)
@@ -753,12 +760,12 @@ class MainWindow(QWidget):
         if status_key == 'connected':
             self.current_state = 'CONNECTED'
             self.timer.stop()
-            print(f"[MainWindow] Kết nối thành công đến {self.server_ip}")
+            print(f"[MainWindow] Connected to {self.server_ip}")
         else:
             self.current_state = 'DISCONNECTED'
             self.retry_interval = min(self.retry_interval * 2, self.max_retry_interval)
             self.timer.start(self.retry_interval * 1000)
-            print(f"[MainWindow] Kết nối thất bại, th�?lại sau {self.retry_interval} giây")
+            print(f"[MainWindow] Connection failed, retrying in {self.retry_interval} seconds")
         
         # Cập nhật UI
         status_texts = {
@@ -853,7 +860,7 @@ class MainWindow(QWidget):
             self.tab4_input_to.setText(directory.replace('/', '\\'))
 
     def open_project_tracking(self):
-        """M�?cửa s�?Project Tracking - ch�?m�?một cửa s�?""
+        """Open Project Tracking window (single instance)."""
         # Kiểm tra nếu cửa s�?đã m�?và đang hiển th�?
         if self.project_tracking_window is not None and self.project_tracking_window.isVisible():
             # Focus vào cửa s�?đã m�?
@@ -865,10 +872,10 @@ class MainWindow(QWidget):
         self.project_tracking_window.show()
 
     def on_logout(self):
-        """X�?lý đăng xuất - đóng cửa s�?hiện tại và hiện dialog đăng nhập lại"""
+        """Handle logout and show login dialog again."""
         logger.info("Người dùng yêu cầu đăng xuất")
         
-        print("[MainWindow] Đang đăng xuất...")
+        print("[MainWindow] Logging out...")
         
         # QUAN TRỌNG: Ngắt kết nối signals và ch�?threads kết thúc trước khi đóng window
         # đ�?tránh thread c�?gắng access window đã b�?hủy gây crash
@@ -898,7 +905,7 @@ class MainWindow(QWidget):
             pass
         
         # Hiển th�?dialog đăng nhập lại
-        print("[MainWindow] Hiển th�?dialog đăng nhập")
+        print("[MainWindow] Showing login dialog")
         login_dialog = LoginDialog()
         if login_dialog.exec() == QDialog.DialogCode.Accepted:
             self.close()
@@ -908,7 +915,7 @@ class MainWindow(QWidget):
             _main_window_instance.show()
         else:
             # Hủy đăng nhập, thoát app
-            print("[MainWindow] Đã hủy đăng nhập, thoát app")
+            print("[MainWindow] Login canceled, exiting app")
             self.close()
             import sys
             sys.exit(0)
@@ -973,28 +980,28 @@ if __name__ == "__main__":
     
     # Bước 1: Kiểm tra session cục b�?
     if session_manager.is_logged_in():
-        print(f"[AutoLogin] Session cục b�?tồn tại cho user: {session_manager.get_current_user()}")
+        print(f"[AutoLogin] Local session exists for user: {session_manager.get_current_user()}")
         
         # Bước 2: Lấy server IP t�?session hoặc file
         server_ip = session_manager.get_server_ip() or session_manager.load_server_ip_from_file()
         
         if server_ip:
-            print(f"[AutoLogin] Đang xác thực với server {server_ip}...")
+            print(f"[AutoLogin] Validating with server {server_ip}...")
             
             # Bước 3: Th�?xác thực với server bằng credentials đã lưu
             result = session_manager.validate_session_with_server(server_ip)
             
             if result['success']:
-                print(f"[AutoLogin] Xác thực server thành công cho user: {result['user_info'].get('username', 'unknown')}")
+                print(f"[AutoLogin] Server validation successful for user: {result['user_info'].get('username', 'unknown')}")
                 auto_login_success = True
             else:
-                auto_login_error = result.get('error', 'Xác thực thất bại')
-                print(f"[AutoLogin] Xác thực server thất bại: {auto_login_error}")
-                print("[AutoLogin] S�?hiển th�?dialog đăng nhập...")
+                auto_login_error = result.get('error', 'Validation failed')
+                print(f"[AutoLogin] Server validation failed: {auto_login_error}")
+                print("[AutoLogin] Will show login dialog...")
         else:
-            print("[AutoLogin] Không tìm thấy server IP")
+            print("[AutoLogin] Server IP not found")
     else:
-        print("[AutoLogin] Không có session cục b�?)
+        print("[AutoLogin] No local session")
     
     # Nếu auto login thành công, hiển th�?cửa s�?Project Tracking trực tiếp
     if auto_login_success:
@@ -1005,7 +1012,7 @@ if __name__ == "__main__":
     
     # Nếu auto login thất bại, hiện dialog đăng nhập
     if auto_login_error:
-        print(f"[AutoLogin] Lỗi: {auto_login_error}")
+        print(f"[AutoLogin] Error: {auto_login_error}")
     
     # Hiện dialog đăng nhập
     login_dialog = LoginDialog()
@@ -1017,5 +1024,5 @@ if __name__ == "__main__":
         sys.exit(app.exec())
     else:
         # Hủy đăng nhập, thoát app
-        print("Đã hủy đăng nhập")
+        print("Login canceled")
         sys.exit(0)

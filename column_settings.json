@@ -29,15 +29,15 @@
         "Người liên hệ (KH)": 100,
         "Quy cách": 170,
         "Thời gian mong muốn có bản vẽ": 131,
-        "Mức độ khẩn cấp": 100,
         "Trạng thái chờ": 95,
         "Số lượng": 100,
         "Người nhận": 162,
         "Thời gian nhận": 204,
-        "Mã bản vẽ phương án (mã trước khi đặt hàng)": 155,
         "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": 151,
+        "Mã bản vẽ phương án (mã trước khi đặt hàng)": 155,
         "Mã thành phẩm (Mã mẹ)": 100,
         "Hạng mục": 100,
+        "Mức độ khẩn cấp": 100,
         "Kỹ sư thiết kế": 100,
         "Tình trạng hoàn thành dự án": 137,
         "Thời gian hoàn thành kế hoạch": 144,
@@ -86,8 +86,8 @@
         "Mã PO"
     ],
     "window_state": {
-        "x": 173,
-        "y": 148,
+        "x": 269,
+        "y": 137,
         "width": 1400,
         "height": 800,
         "is_maximized": false

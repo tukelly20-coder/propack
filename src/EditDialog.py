@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout,
                                QSpinBox, QLineEdit, QDialogButtonBox, 
                                QComboBox, QDateTimeEdit, QCompleter)
 from PySide6.QtCore import Qt, QDateTime, QDate
-from PySide6.QtGui import QIntValidator
+from PySide6.QtGui import QIntValidator, QFont
 
 # Import language_manager - hỗ trợ cả chạy từ thư mục gốc và thư mục src/
 try:
@@ -25,6 +25,8 @@ class EditDialog(QDialog):
         self.setWindowTitle(texts["dialog_add_title"] if is_new else texts["dialog_edit_title"])
         self.setMinimumWidth(700)
         self.setMinimumHeight(600)
+        self.setFont(QFont("Segoe UI", 10))
+        self.apply_dialog_theme()
         
         self.parent_window = parent
         self.is_new = is_new
@@ -84,6 +86,42 @@ class EditDialog(QDialog):
             if "Ngày" in self.widgets:
                 now = QDateTime.currentDateTime()
                 self.widgets["Ngày"].setDateTime(now)
+
+    def apply_dialog_theme(self):
+        """Theme trung tính, đồng bộ Project Tracking."""
+        self.setStyleSheet("""
+            QDialog {
+                background: #F7FAFD;
+            }
+            QLabel {
+                color: #334155;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLineEdit, QComboBox, QDateTimeEdit, QSpinBox {
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
+                background: #FFFFFF;
+                color: #0F172A;
+                padding: 6px 8px;
+                min-height: 22px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDateTimeEdit:focus, QSpinBox:focus {
+                border: 1px solid #4C93D6;
+            }
+            QDialogButtonBox QPushButton {
+                background: #FFFFFF;
+                color: #1E293B;
+                border: 1px solid #C8D3E0;
+                border-radius: 8px;
+                padding: 7px 12px;
+                min-width: 90px;
+            }
+            QDialogButtonBox QPushButton:hover {
+                background: #F3F7FC;
+                border-color: #99B9DA;
+            }
+        """)
     
     def create_widget(self, field_key, field_type):
         """Tạo widget dựa trên field_type"""

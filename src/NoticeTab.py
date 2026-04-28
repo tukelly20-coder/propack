@@ -1,12 +1,12 @@
 """
-NoticeTab.py - Tab hiển th�?thông báo/pending notices
-Module này cung cấp tab đ�?hiển th�?danh sách yêu cầu ch�?x�?lý với các tính năng:
-- Hiển th�?danh sách thông báo
-- Filter theo trạng thái (Tất c�? Ch�?nhận, Đã nhận)
-- Filter theo đ�?khẩn (Bình thường, Khẩn cấp, Rất khẩn)
-- Tìm kiếm theo khách hàng/sản phẩm
-- Auto-refresh (có th�?bật/tắt)
-- Badge s�?lượng thông báo ch�?
+NoticeTab.py - Tab hiá» n thá»?thÃ´ng bÃ¡o/pending notices
+Module nÃ y cung cáº¥p tab Ä á»?hiá» n thá»?danh sÃ¡ch yÃªu cáº§u chá»?xá»?lÃ½ vá» i cÃ¡c tÃ­nh nÄ ng:
+- Hiá» n thá»?danh sÃ¡ch thÃ´ng bÃ¡o
+- Filter theo tráº¡ng thÃ¡i (Táº¥t cáº? Chá»?nháº­n, Ä Ã£ nháº­n)
+- Filter theo Ä á»?kháº©n (BÃ¬nh thÆ°á» ng, Kháº©n cáº¥p, Ráº¥t kháº©n)
+- TÃ¬m kiáº¿m theo khÃ¡ch hÃ ng/sáº£n pháº©m
+- Auto-refresh (cÃ³ thá»?báº­t/táº¯t)
+- Badge sá»?lÆ°á»£ng thÃ´ng bÃ¡o chá»?
 """
 
 import json
@@ -30,7 +30,7 @@ from src.models import HorizontalScrollTableWidget
 
 
 class NoticeLoader(QThread):
-    """Thread đ�?load notices t�?server"""
+    """Thread Ä á»?load notices tá»?server"""
     notices_loaded = Signal(list)
     error_occurred = Signal(str)
     
@@ -68,7 +68,7 @@ class NoticeLoader(QThread):
 
 
 class NoticeCountLoader(QThread):
-    """Thread đ�?load s�?lượng notice t�?server"""
+    """Thread Ä á»?load sá»?lÆ°á»£ng notice tá»?server"""
     count_loaded = Signal(int)
     error_occurred = Signal(str)
     
@@ -107,7 +107,7 @@ class NoticeCountLoader(QThread):
 
 
 class EngineerNoticeLoader(QThread):
-    """Thread đ�?load tất c�?notices cho Engineer (pending + accepted)"""
+    """Thread Ä á»?load táº¥t cáº?notices cho Engineer (pending + accepted)"""
     notices_loaded = Signal(list)
     error_occurred = Signal(str)
     
@@ -147,16 +147,16 @@ class EngineerNoticeLoader(QThread):
 
 class NoticeTab(QWidget):
     """
-    Tab hiển th�?notices với các tính năng:
-    - Filter theo trạng thái
-    - Filter theo đ�?khẩn
-    - Tìm kiếm
+    Tab hiá» n thá»?notices vá» i cÃ¡c tÃ­nh nÄ ng:
+    - Filter theo tráº¡ng thÃ¡i
+    - Filter theo Ä á»?kháº©n
+    - TÃ¬m kiáº¿m
     - Auto-refresh
     
     Signals:
-        record_accepted: Phát ra khi engineer nhận job thành công
-        record_viewed: Phát ra khi click vào record đ�?xem
-        data_updated: Phát ra khi có cập nhật d�?liệu (reload)
+        record_accepted: PhÃ¡t ra khi engineer nháº­n job thÃ nh cÃ´ng
+        record_viewed: PhÃ¡t ra khi click vÃ o record Ä á»?xem
+        data_updated: PhÃ¡t ra khi cÃ³ cáº­p nháº­t dá»?liá» u (reload)
     """
     
     record_accepted = Signal(dict)
@@ -187,7 +187,50 @@ class NoticeTab(QWidget):
         self.load_notices()
     
     def setup_ui(self):
-        """Thiết lập giao diện"""
+        """Thiáº¿t láº­p giao diá» n"""
+        self.setStyleSheet("""
+            QWidget {
+                background: #F7FAFD;
+                color: #1E293B;
+            }
+            QGroupBox {
+                border: 1px solid #D8E0EA;
+                border-radius: 8px;
+                margin-top: 8px;
+                padding-top: 8px;
+                background: #FFFFFF;
+            }
+            QLineEdit, QComboBox, QDateTimeEdit {
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
+                background: #FFFFFF;
+                padding: 6px 8px;
+            }
+            QLineEdit:focus, QComboBox:focus, QDateTimeEdit:focus {
+                border-color: #4C93D6;
+            }
+            QPushButton {
+                background: #FFFFFF;
+                color: #1E293B;
+                border: 1px solid #C8D3E0;
+                border-radius: 8px;
+                padding: 7px 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #F3F7FC;
+                border-color: #99B9DA;
+            }
+            QPushButton#acceptButton {
+                background: #1F7ACB;
+                color: #FFFFFF;
+                border-color: #1A6EB6;
+            }
+            QPushButton#acceptButton:hover {
+                background: #1A6EB6;
+            }
+        """)
+
         layout = QVBoxLayout()
         layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -205,11 +248,12 @@ class NoticeTab(QWidget):
         self.info_label = QLabel()
         self.info_label.setStyleSheet("""
             QLabel {
-                color: #666;
+                color: #475569;
                 font-size: 12px;
-                padding: 5px;
-                background-color: #f0f0f0;
-                border-radius: 4px;
+                padding: 8px;
+                background-color: #EEF4FB;
+                border: 1px solid #D5E3F2;
+                border-radius: 8px;
             }
         """)
         layout.addWidget(self.info_label)
@@ -299,18 +343,21 @@ class NoticeTab(QWidget):
         # Style
         self.table.setStyleSheet("""
             QTableWidget {
-                gridline-color: #ddd;
-                alternate-background-color: #f9f9f9;
-                background-color: white;
+                gridline-color: transparent;
+                alternate-background-color: #F8FAFC;
+                background-color: #FFFFFF;
+                border: 1px solid #D8E0EA;
+                border-radius: 8px;
             }
             QTableWidget::item:selected {
-                background-color: #1976D2;
-                color: white;
+                background-color: #D9ECFF;
+                color: #0F172A;
             }
             QHeaderView::section {
-                background-color: #e8e8e8;
-                padding: 5px;
-                border: 1px solid #ccc;
+                background-color: #EEF3F7;
+                color: #22313F;
+                padding: 7px;
+                border: 1px solid #D4DEE8;
                 font-weight: bold;
             }
         """)
@@ -334,19 +381,21 @@ class NoticeTab(QWidget):
         
         accept_text = language_manager.get_notice_tab_text('btn_accept')
         self.accept_btn = QPushButton(accept_text)
+        self.accept_btn.setObjectName("acceptButton")
         self.accept_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
-                color: white;
+                background-color: #1F7ACB;
+                color: #FFFFFF;
                 font-weight: bold;
                 padding: 10px 20px;
-                border-radius: 4px;
+                border-radius: 8px;
+                border: 1px solid #1A6EB6;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #1A6EB6;
             }
             QPushButton:disabled {
-                background-color: #cccccc;
+                background-color: #CBD5E1;
             }
         """)
         self.accept_btn.clicked.connect(self.accept_job)
@@ -367,9 +416,9 @@ class NoticeTab(QWidget):
         self.details_label.setStyleSheet("""
             QLabel {
                 padding: 10px;
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                background-color: #FFFFFF;
+                border: 1px solid #D8E0EA;
+                border-radius: 8px;
             }
         """)
         details_layout.addWidget(self.details_label, 0, 0, 1, 2)
@@ -385,7 +434,7 @@ class NoticeTab(QWidget):
         self.setLayout(layout)
     
     def set_user_info(self, user_info: Dict[str, Any]):
-        """Thiết lập thông tin user hiện tại"""
+        """Thiáº¿t láº­p thÃ´ng tin user hiá» n táº¡i"""
         self.current_user_info = user_info
         
         # Update info label
@@ -408,7 +457,7 @@ class NoticeTab(QWidget):
         from src.session_manager import session_manager
         if session_manager.can_accept_job_with_permission():
             self.accept_btn.setVisible(True)
-            # Engineers can see "Của tôi" filter
+            # Engineers can see "Cá»§a tÃ´i" filter
             self.status_filter_combo.addItem(language_manager.get_notice_tab_text('filter_mine'))
         else:
             self.accept_btn.setVisible(False)
@@ -417,7 +466,7 @@ class NoticeTab(QWidget):
         self.load_notices()
     
     def load_notices(self):
-        """Load notices t�?server"""
+        """Load notices tá»?server"""
         from src.session_manager import session_manager
         
         # Show loading text
@@ -446,7 +495,7 @@ class NoticeTab(QWidget):
         self.notice_loader.start()
     
     def on_notices_loaded(self, notices: List[Dict]):
-        """X�?lý khi load notices thành công"""
+        """Xá»?lÃ½ khi load notices thÃ nh cÃ´ng"""
         self.notices = notices
         self.apply_filters()
         
@@ -461,29 +510,29 @@ class NoticeTab(QWidget):
             self.info_label.setText(f"{total_text}\n{info_text}")
     
     def on_notices_error(self, error: str):
-        """X�?lý khi load notices lỗi"""
+        """Xá»?lÃ½ khi load notices lá» i"""
         error_title = language_manager.get_notice_tab_text('error_title')
         load_error = language_manager.get_notice_tab_text('load_error').format(error)
         QMessageBox.warning(self, error_title, load_error)
         self.info_label.setText(language_manager.get_notice_tab_text('load_error').format(error))
     
     def on_status_filter_changed(self, text: str):
-        """X�?lý khi thay đổi filter trạng thái"""
+        """Xá»?lÃ½ khi thay Ä á» i filter tráº¡ng thÃ¡i"""
         self.current_status_filter = text
         self.apply_filters()
     
     def on_urgency_filter_changed(self, text: str):
-        """X�?lý khi thay đổi filter đ�?khẩn"""
+        """Xá»?lÃ½ khi thay Ä á» i filter Ä á»?kháº©n"""
         self.current_urgency_filter = text
         self.apply_filters()
     
     def on_search_text_changed(self, text: str):
-        """X�?lý khi thay đổi text tìm kiếm"""
+        """Xá»?lÃ½ khi thay Ä á» i text tÃ¬m kiáº¿m"""
         self.current_search_text = text.strip().lower()
         self.apply_filters()
     
     def on_auto_refresh_toggled(self, checked: bool):
-        """X�?lý khi thay đổi auto-refresh"""
+        """Xá»?lÃ½ khi thay Ä á» i auto-refresh"""
         self.auto_refresh_enabled = checked
         if checked:
             self.refresh_timer.start(self.auto_refresh_interval)
@@ -491,7 +540,7 @@ class NoticeTab(QWidget):
             self.refresh_timer.stop()
     
     def apply_filters(self):
-        """Áp dụng tất c�?filters và hiển th�?""
+        """Apply all filters and refresh table."""
         filtered_notices = self.notices.copy()
         
         # Get filter values from language_manager
@@ -535,12 +584,12 @@ class NoticeTab(QWidget):
         self.populate_table(filtered_notices)
     
     def _matches_search(self, notice: Dict, search_text: str) -> bool:
-        """Kiểm tra notice có khớp với text tìm kiếm không"""
-        # Lấy data - ưu tiên t�?root level, nếu không có thì parse t�?'data' field
-        if 'Khách hàng' in notice:
-            data = notice  # D�?liệu �?root level (schema mới)
+        """Kiá» m tra notice cÃ³ khá» p vá» i text tÃ¬m kiáº¿m khÃ´ng"""
+        # Láº¥y data - Æ°u tiÃªn tá»?root level, náº¿u khÃ´ng cÃ³ thÃ¬ parse tá»?'data' field
+        if 'KhÃ¡ch hÃ ng' in notice:
+            data = notice  # Dá»?liá» u á»?root level (schema má» i)
         else:
-            # Parse data t�?'data' field (schema cũ)
+            # Parse data tá»?'data' field (schema cÅ©)
             data_str = notice.get('data', '{}')
             try:
                 data = json.loads(data_str) if isinstance(data_str, str) else data_str
@@ -548,10 +597,10 @@ class NoticeTab(QWidget):
                 data = {}
         
         # Check various fields
-        customer = data.get('Khách hàng', '').lower()
-        product = data.get('Tên sản phẩm', '').lower()
+        customer = data.get('KhÃ¡ch hÃ ng', '').lower()
+        product = data.get('TÃªn sáº£n pháº©m', '').lower()
         tracking_id = str(notice.get('Tracking ID', ''))
-        sales_name = data.get('Nhân viên kinh doanh', '').lower()
+        sales_name = data.get('NhÃ¢n viÃªn kinh doanh', '').lower()
         
         return (search_text in customer or
                 search_text in product or 
@@ -559,18 +608,18 @@ class NoticeTab(QWidget):
                 search_text in sales_name)
     
     def populate_table(self, notices: List[Dict]):
-        """Hiển th�?notices lên table"""
+        """Hiá» n thá»?notices lÃªn table"""
         self.table.setRowCount(0)
         
         for notice in notices:
             row = self.table.rowCount()
             self.table.insertRow(row)
             
-            # Lấy data - ưu tiên t�?root level, nếu không có thì parse t�?'data' field
-            if 'Khách hàng' in notice:
-                data = notice  # D�?liệu �?root level (schema mới)
+            # Láº¥y data - Æ°u tiÃªn tá»?root level, náº¿u khÃ´ng cÃ³ thÃ¬ parse tá»?'data' field
+            if 'KhÃ¡ch hÃ ng' in notice:
+                data = notice  # Dá»?liá» u á»?root level (schema má» i)
             else:
-                # Parse data t�?'data' field (schema cũ)
+                # Parse data tá»?'data' field (schema cÅ©)
                 data_str = notice.get('data', '{}')
                 try:
                     data = json.loads(data_str) if isinstance(data_str, str) else data_str
@@ -587,15 +636,15 @@ class NoticeTab(QWidget):
             self.table.setItem(row, 0, item_id)
             
             # Customer
-            customer = data.get('Khách hàng', '-')
+            customer = data.get('KhÃ¡ch hÃ ng', '-')
             self.table.setItem(row, 1, QTableWidgetItem(customer))
             
             # Product
-            product = data.get('Tên sản phẩm', '-')
+            product = data.get('TÃªn sáº£n pháº©m', '-')
             self.table.setItem(row, 2, QTableWidgetItem(product))
             
-            # Created Date - s�?dụng Created_Date hoặc Ngày thay vì created_at
-            created = notice.get('Created_Date', notice.get('Ngày', '-'))
+            # Created Date - sá»?dá»¥ng Created_Date hoáº·c NgÃ y thay vÃ¬ created_at
+            created = notice.get('Created_Date', notice.get('NgÃ y', '-'))
             if created and created != '-':
                 try:
                     dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
@@ -646,12 +695,12 @@ class NoticeTab(QWidget):
         self.table.resizeColumnsToContents()
     
     def on_double_click(self, index):
-        """X�?lý khi double-click vào row"""
+        """Xá»?lÃ½ khi double-click vÃ o row"""
         row = index.row()
         self.view_details(row)
     
     def view_selected(self):
-        """Xem chi tiết record được chọn"""
+        """Xem chi tiáº¿t record Ä Æ°á»£c chá» n"""
         selected = self.table.selectedIndexes()
         if not selected:
             select_warning = language_manager.get_notice_tab_text('select_to_view')
@@ -662,7 +711,7 @@ class NoticeTab(QWidget):
         self.view_details(row)
     
     def view_details(self, row: int):
-        """Hiển th�?chi tiết của row"""
+        """Hiá» n thá»?chi tiáº¿t cá»§a row"""
         # Get the notice from the table item
         item = self.table.item(row, 0)
         if not item:
@@ -672,9 +721,9 @@ class NoticeTab(QWidget):
         if not notice:
             return
         
-        # Lấy data - ưu tiên t�?root level, nếu không có thì parse t�?'data' field
-        if 'Khách hàng' in notice:
-            data = notice  # D�?liệu �?root level (schema mới)
+        # Láº¥y data - Æ°u tiÃªn tá»?root level, náº¿u khÃ´ng cÃ³ thÃ¬ parse tá»?'data' field
+        if 'KhÃ¡ch hÃ ng' in notice:
+            data = notice  # Dá»?liá» u á»?root level (schema má» i)
         else:
             data_str = notice.get('data', '{}')
             try:
@@ -687,45 +736,44 @@ class NoticeTab(QWidget):
         
         # Build details text using language_manager
         is_pending = notice.get('is_pending', 'yes')
-        status_pending = texts.get('notice_status_pending', '�?Ch�?nhận')
-        status_accepted = texts.get('notice_status_accepted', '�?Đã nhận')
+        status_pending = texts.get('notice_status_pending', 'â ?Chá»?nháº­n')
+        status_accepted = texts.get('notice_status_accepted', 'â ?Ä Ã£ nháº­n')
         status_text = status_pending if is_pending == 'yes' else status_accepted
         accepted_by = notice.get('accepted_by', '-')
         accepted_at = notice.get('accepted_at', '-')
         
         # Get desired time - check both new and old keys for compatibility
-        desired_time = data.get('Thời gian mong muốn có bản v�?, 
-                    data.get('Desired Solution Time', '-'))
+        desired_time = data.get('Desired Solution Time', '-')
         
         # Get urgency level and display in current language
         urgency_value = notice.get('urgency_level', data.get('urgency_level', 'normal'))
         urgency_display = language_manager.get_urgency_level_display(urgency_value)
         
         details = f"""
-<b>{texts.get('notice_details_title', '📝 Chi tiết')}</b>
+<b>{texts.get('notice_details_title', 'ð    Chi tiáº¿t')}</b>
 
 <b>{texts.get('notice_details_tracking_id', 'Tracking ID:')}</b> {notice.get('Tracking ID', 0)}
-<b>{texts.get('notice_details_created_date', 'Ngày tạo:')}</b> {notice.get('Created_Date', notice.get('Ngày', '-'))}
+<b>{texts.get('notice_details_created_date', 'NgÃ y táº¡o:')}</b> {notice.get('Created_Date', notice.get('NgÃ y', '-'))}
 
-<b>{texts.get('notice_details_customer_info', '👤 THÔNG TIN KHÁCH HÀNG')}</b>
-<b>{texts.get('notice_details_customer_name', 'Tên khách hàng:')}</b> {data.get('Khách hàng', '-')}
-<b>{texts.get('notice_details_contact', 'Người liên h�?')}</b> {data.get('Người liên hệ\n(KH)', '-')}
+<b>{texts.get('notice_details_customer_info', 'ð  ¤ THÃ NG TIN KHÃ CH HÃ NG')}</b>
+<b>{texts.get('notice_details_customer_name', 'TÃªn khÃ¡ch hÃ ng:')}</b> {data.get('KhÃ¡ch hÃ ng', '-')}
+<b>{texts.get('notice_details_contact', 'NgÆ°á» i liÃªn há»?')}</b> {data.get('NgÆ°á» i liÃªn há» \n(KH)', '-')}
 
-<b>{texts.get('notice_details_product_info', '📦 THÔNG TIN SẢN PHẨM')}</b>
-<b>{texts.get('notice_details_product_name', 'Tên sản phẩm:')}</b> {data.get('Tên sản phẩm', '-')}
-<b>{texts.get('notice_details_specs', 'Quy cách:')}</b> {data.get('Quy cách', '-')}
+<b>{texts.get('notice_details_product_info', 'ð  ¦ THÃ NG TIN Sáº¢N PHáº¨M')}</b>
+<b>{texts.get('notice_details_product_name', 'TÃªn sáº£n pháº©m:')}</b> {data.get('TÃªn sáº£n pháº©m', '-')}
+<b>{texts.get('notice_details_specs', 'Quy cÃ¡ch:')}</b> {data.get('Quy cÃ¡ch', '-')}
 
-<b>{texts.get('notice_details_time_info', '�?THỜI GIAN')}</b>
-<b>{texts.get('notice_details_urgency', 'Đ�?khẩn:')}</b> {urgency_display}
-<b>{texts.get('notice_details_desired_time', 'Thời gian mong muốn:')}</b> {desired_time}
+<b>{texts.get('notice_details_time_info', 'â ?THá» I GIAN')}</b>
+<b>{texts.get('notice_details_urgency', 'Ä á»?kháº©n:')}</b> {urgency_display}
+<b>{texts.get('notice_details_desired_time', 'Thá» i gian mong muá» n:')}</b> {desired_time}
 
-<b>{texts.get('notice_details_sales_info', '👨‍�?NHÂN VIÊN TẠO')}</b>
-<b>{texts.get('notice_details_sales_name', 'Tên:')}</b> {data.get('Nhân viên kinh doanh', '-')}
+<b>{texts.get('notice_details_sales_info', 'ð  ¨â  ð  ?NHÃ N VIÃ N Táº O')}</b>
+<b>{texts.get('notice_details_sales_name', 'TÃªn:')}</b> {data.get('NhÃ¢n viÃªn kinh doanh', '-')}
 
-<b>{texts.get('notice_details_status_info', '📊 TRẠNG THÁI')}</b>
-<b>{texts.get('notice_details_status', 'Trạng thái:')}</b> {status_text}
-<b>{texts.get('notice_details_accepted_by', 'Người nhận:')}</b> {accepted_by}
-<b>{texts.get('notice_details_accepted_at', 'Thời gian nhận:')}</b> {accepted_at}
+<b>{texts.get('notice_details_status_info', 'ð    TRáº NG THÃ I')}</b>
+<b>{texts.get('notice_details_status', 'Tráº¡ng thÃ¡i:')}</b> {status_text}
+<b>{texts.get('notice_details_accepted_by', 'NgÆ°á» i nháº­n:')}</b> {accepted_by}
+<b>{texts.get('notice_details_accepted_at', 'Thá» i gian nháº­n:')}</b> {accepted_at}
         """
         
         self.details_label.setText(details)
@@ -735,18 +783,18 @@ class NoticeTab(QWidget):
         self.record_viewed.emit(notice)
     
     def hide_details(self):
-        """Ẩn panel chi tiết"""
+        """áº¨n panel chi tiáº¿t"""
         self.details_group.setVisible(False)
     
     def accept_job(self):
-        """Engineer nhận job"""
-        # Kiểm tra permission trước
+        """Engineer nháº­n job"""
+        # Kiá» m tra permission trÆ°á» c
         from src.session_manager import session_manager
         if not session_manager.can_accept_job_with_permission():
             QMessageBox.warning(
                 self, 
                 language_manager.get_notice_tab_text('error_title'), 
-                "Bạn không có quyền nhận job.\nVui lòng liên h�?Admin đ�?được cấp quyền."
+                "Báº¡n khÃ´ng cÃ³ quyá» n nháº­n job.\nVui lÃ²ng liÃªn há»?Admin Ä á»?Ä Æ°á»£c cáº¥p quyá» n."
             )
             return
         
@@ -773,9 +821,9 @@ class NoticeTab(QWidget):
             QMessageBox.warning(self, language_manager.get_notice_tab_text('notice_confirm_accept'), already_accepted)
             return
         
-        # Lấy data - ưu tiên t�?root level, nếu không có thì parse t�?'data' field
-        if 'Khách hàng' in notice:
-            data = notice  # D�?liệu �?root level (schema mới)
+        # Láº¥y data - Æ°u tiÃªn tá»?root level, náº¿u khÃ´ng cÃ³ thÃ¬ parse tá»?'data' field
+        if 'KhÃ¡ch hÃ ng' in notice:
+            data = notice  # Dá»?liá» u á»?root level (schema má» i)
         else:
             data_str = notice.get('data', '{}')
             try:
@@ -786,7 +834,7 @@ class NoticeTab(QWidget):
         confirm_title = language_manager.get_notice_tab_text('confirm_accept')
         confirm_msg = language_manager.get_notice_tab_text('confirm_accept_msg').format(
             notice.get('Tracking ID', 0),
-            data.get('Khách hàng', '-')
+            data.get('KhÃ¡ch hÃ ng', '-')
         )
         reply = QMessageBox.question(
             self,
@@ -866,7 +914,7 @@ class NoticeTab(QWidget):
         self.load_notices()
     
     def get_pending_count(self) -> int:
-        """Lấy s�?lượng pending notices"""
+        """Láº¥y sá»?lÆ°á»£ng pending notices"""
         user_id = None
         from src.session_manager import session_manager
         if session_manager.is_sales():
@@ -880,12 +928,12 @@ class NoticeTab(QWidget):
         return 0  # Will be updated via signal
     
     def _on_count_loaded(self, count: int):
-        """X�?lý khi load count thành công"""
+        """Xá»?lÃ½ khi load count thÃ nh cÃ´ng"""
         # Emit signal to parent for tab badge update
         self.data_updated.emit()
     
     def get_pending_count_sync(self) -> int:
-        """Lấy s�?lượng pending notices (synchronous, for badge)"""
+        """Láº¥y sá»?lÆ°á»£ng pending notices (synchronous, for badge)"""
         user_id = None
         from src.session_manager import session_manager
         if session_manager.is_sales():

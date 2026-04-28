@@ -91,23 +91,23 @@ class NewSalesWizard(QDialog):
     URGENCY_URGENT = "urgent"
     URGENCY_VERY_URGENT = "very_urgent"
     
-    # Design tokens - Material Design 3
+    # Design tokens - tông cơ bản trung tính
     COLORS = {
-        "primary": "#1976D2",
-        "primary_dark": "#1565C0",
-        "primary_light": "#42A5F5",
-        "secondary": "#006B59",
-        "error": "#BA1A1A",
-        "error_light": "#FFDAD6",
-        "success": "#2E7D32",
-        "success_light": "#C8E6C9",
-        "warning": "#ED6C02",
+        "primary": "#1F7ACB",
+        "primary_dark": "#1A6EB6",
+        "primary_light": "#EAF3FC",
+        "secondary": "#335E7E",
+        "error": "#B42318",
+        "error_light": "#FEE4E2",
+        "success": "#157347",
+        "success_light": "#E8F5EE",
+        "warning": "#B54708",
         "warning_light": "#FFF4E5",
-        "surface": "#FFFEFE",
-        "surface_variant": "#E7E0EC",
-        "on_surface": "#1C1B1F",
-        "outline": "#79747E",
-        "outline_variant": "#CAC4D0",
+        "surface": "#F7FAFD",
+        "surface_variant": "#E8EFF7",
+        "on_surface": "#0F172A",
+        "outline": "#9BAEC3",
+        "outline_variant": "#D8E2EC",
     }
     
     def __init__(self, parent=None, server_ip: str = None):
@@ -170,7 +170,7 @@ class NewSalesWizard(QDialog):
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {self.COLORS['surface']};
-                font-family: 'Segoe UI', 'Roboto', sans-serif;
+                font-family: 'Segoe UI', sans-serif;
                 font-size: 14px;
             }}
             
@@ -183,7 +183,7 @@ class NewSalesWizard(QDialog):
             
             QLabel.step-subtitle {{
                 font-size: 14px;
-                color: #666;
+                color: #64748B;
             }}
             
             /* Progress Bar */
@@ -441,7 +441,7 @@ class NewSalesWizard(QDialog):
         self.step1_tracking_id_input = QLineEdit()
         self.step1_tracking_id_input.setText("AUTO")
         self.step1_tracking_id_input.setReadOnly(True)
-        self.step1_tracking_id_input.setStyleSheet("background-color: #E8E8E8; color: #666;")
+        self.step1_tracking_id_input.setStyleSheet("background-color: #F3F6FA; color: #64748B; border: 1px solid #C9D5E3;")
         form.addRow(self.step1_tracking_id_label, self.step1_tracking_id_input)
         
         # Ngày tạo (auto)
@@ -449,7 +449,7 @@ class NewSalesWizard(QDialog):
         self.step1_created_date_input = QLineEdit()
         self.step1_created_date_input.setText(datetime.now().strftime("%Y-%m-%d %H:%M"))
         self.step1_created_date_input.setReadOnly(True)
-        self.step1_created_date_input.setStyleSheet("background-color: #E8E8E8; color: #666;")
+        self.step1_created_date_input.setStyleSheet("background-color: #F3F6FA; color: #64748B; border: 1px solid #C9D5E3;")
         form.addRow(self.step1_created_date_label, self.step1_created_date_input)
         
         # Nhân viên KD (auto từ session)
@@ -466,7 +466,7 @@ class NewSalesWizard(QDialog):
         except:
             pass
         
-        self.step1_sales_name_input.setStyleSheet("background-color: #E8E8E8; color: #666;")
+        self.step1_sales_name_input.setStyleSheet("background-color: #F3F6FA; color: #64748B; border: 1px solid #C9D5E3;")
         form.addRow(self.step1_sales_name_label, self.step1_sales_name_input)
         
         # Khách hàng (REQUIRED)
@@ -947,11 +947,11 @@ class NewSalesWizard(QDialog):
                 row.setSpacing(8)
                 
                 field_label = QLabel(f"  {label}:")
-                field_label.setStyleSheet("color: #666; min-width: 150px;")
+                field_label.setStyleSheet("color: #64748B; min-width: 150px;")
                 field_label.setAlignment(Qt.AlignmentFlag.AlignRight)
                 
                 field_value = QLabel(value if value else "-")
-                field_value.setStyleSheet("font-weight: 500; color: #333;")
+                field_value.setStyleSheet("font-weight: 500; color: #1E293B;")
                 
                 row.addWidget(field_label)
                 row.addWidget(field_value, 1)

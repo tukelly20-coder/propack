@@ -68,62 +68,66 @@ class NewSalesDialog(QDialog):
         """Thiết lập style cho dialog"""
         self.setStyleSheet("""
             QDialog {
-                background-color: #f5f5f5;
+                background-color: #F7FAFD;
             }
             QLabel {
-                color: #333;
+                color: #334155;
                 font-size: 13px;
+                font-weight: 600;
             }
             QLineEdit {
                 padding: 8px;
-                border: 2px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
                 font-size: 13px;
                 min-height: 20px;
+                background: #FFFFFF;
             }
             QLineEdit:focus {
-                border-color: #4CAF50;
+                border-color: #4C93D6;
             }
             QComboBox {
                 padding: 8px;
-                border: 2px solid #ddd;
-                border-radius: 4px;
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
                 font-size: 13px;
                 min-height: 20px;
+                background: #FFFFFF;
             }
             QComboBox:focus {
-                border-color: #4CAF50;
+                border-color: #4C93D6;
             }
             QPushButton {
                 padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
+                border: 1px solid #C8D3E0;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
             }
             QPushButton#save_button {
-                background-color: #4CAF50;
+                background-color: #1F7ACB;
                 color: white;
+                border-color: #1A6EB6;
             }
             QPushButton#save_button:hover {
-                background-color: #45a049;
+                background-color: #1A6EB6;
             }
             QPushButton#cancel_button {
-                background-color: #f44336;
-                color: white;
+                background-color: #FFFFFF;
+                color: #1E293B;
             }
             QPushButton#cancel_button:hover {
-                background-color: #da190b;
+                background-color: #F3F7FC;
             }
             QLabel.section_title {
                 font-size: 15px;
                 font-weight: bold;
-                color: #1976D2;
+                color: #1F3B57;
                 margin-top: 10px;
                 margin-bottom: 5px;
             }
             QLabel.required {
-                color: #f44336;
+                color: #C2410C;
             }
         """)
     
@@ -148,9 +152,10 @@ class NewSalesDialog(QDialog):
         self.tracking_id_input.setPlaceholderText("...")
         self.tracking_id_input.setStyleSheet("""
             QLineEdit {
-                background-color: #e8e8e8;
-                color: #666;
+                background-color: #F3F6FA;
+                color: #64748B;
                 font-weight: bold;
+                border: 1px solid #C9D5E3;
             }
         """)
         
@@ -160,8 +165,9 @@ class NewSalesDialog(QDialog):
         self.created_date_input.setReadOnly(True)
         self.created_date_input.setStyleSheet("""
             QLineEdit {
-                background-color: #e8e8e8;
-                color: #666;
+                background-color: #F3F6FA;
+                color: #64748B;
+                border: 1px solid #C9D5E3;
             }
         """)
         
@@ -172,8 +178,9 @@ class NewSalesDialog(QDialog):
         self.sales_name_input.setReadOnly(True)
         self.sales_name_input.setStyleSheet("""
             QLineEdit {
-                background-color: #e8e8e8;
-                color: #666;
+                background-color: #F3F6FA;
+                color: #64748B;
+                border: 1px solid #C9D5E3;
             }
         """)
         

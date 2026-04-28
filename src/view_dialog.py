@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox, QCompleter
 )
 from PySide6.QtCore import QDateTime, Qt
-from PySide6.QtGui import QIntValidator
+from PySide6.QtGui import QIntValidator, QFont
 
 try:
     from src.language_manager import language_manager
@@ -35,6 +35,8 @@ class ViewDialog(QDialog):
         self.setWindowTitle(texts["dialog_view_title"])
         self.setMinimumWidth(800)
         self.setMinimumHeight(650)
+        self.setFont(QFont("Segoe UI", 10))
+        self.apply_dialog_theme()
         
         self.parent_window = parent
         self.record = record
@@ -134,6 +136,65 @@ class ViewDialog(QDialog):
         # Điền dữ liệu
         if record:
             self.populate_data(record)
+
+    def apply_dialog_theme(self):
+        """Theme cơ bản, đồng bộ với cửa sổ chính."""
+        self.setStyleSheet("""
+            QDialog {
+                background: #F7FAFD;
+            }
+            QTabWidget::pane {
+                border: 1px solid #D8E0EA;
+                border-radius: 8px;
+                background: #FFFFFF;
+            }
+            QTabBar::tab {
+                background: #E7EDF4;
+                color: #334155;
+                border: 1px solid #D3DCE8;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                padding: 7px 12px;
+                margin-right: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #FFFFFF;
+                color: #0F172A;
+                font-weight: 600;
+            }
+            QLabel {
+                color: #334155;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLineEdit, QComboBox, QDateTimeEdit, QSpinBox {
+                border: 1px solid #C9D5E3;
+                border-radius: 8px;
+                background: #FFFFFF;
+                color: #0F172A;
+                padding: 6px 8px;
+                min-height: 22px;
+            }
+            QLineEdit:disabled, QComboBox:disabled, QDateTimeEdit:disabled, QSpinBox:disabled {
+                background: #F3F6FA;
+                color: #64748B;
+            }
+            QLineEdit:focus, QComboBox:focus, QDateTimeEdit:focus, QSpinBox:focus {
+                border: 1px solid #4C93D6;
+            }
+            QPushButton {
+                background: #FFFFFF;
+                color: #1E293B;
+                border: 1px solid #C8D3E0;
+                border-radius: 8px;
+                padding: 7px 12px;
+                min-width: 90px;
+            }
+            QPushButton:hover {
+                background: #F3F7FC;
+                border-color: #99B9DA;
+            }
+        """)
     
     def load_dropdown_data(self):
         """Load dữ liệu dropdown từ DB.json"""

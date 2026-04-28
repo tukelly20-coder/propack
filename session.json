@@ -1,25 +1,28 @@
 {
-  "username": "Sales",
+  "username": "admin",
   "user_info": {
-    "created_at": "2026-02-11 09:59:14",
-    "department": "Sales",
-    "employee_id": "001",
-    "full_name": "张利刚",
-    "last_login": null,
-    "permissions": [
-      "create_code",
-      "create_sales_record",
-      "export",
-      "view_history"
-    ],
-    "role": "sales",
+    "user_id": 1,
+    "username": "admin",
+    "role": "admin",
+    "full_name": "Administrator",
+    "employee_id": null,
+    "department": "Administration",
     "status": "active",
-    "user_created_at": "2026-02-11T16:59:14.498727",
-    "user_id": 3,
-    "username": "Sales"
+    "last_login": null,
+    "user_created_at": "2026-04-23T16:50:13.281688",
+    "email": null,
+    "phone": null,
+    "permissions": [
+      "admin",
+      "create_code",
+      "delete_history",
+      "export",
+      "job_accept",
+      "view_history"
+    ]
   },
-  "login_time": "2026-03-14T09:54:52.086692",
-  "expire_time": "2026-03-15T09:54:52.086695",
+  "login_time": "2026-04-28T09:19:45.486454",
+  "expire_time": "2026-04-29T09:19:45.486458",
   "is_valid": true,
   "server_ip": "localhost"
 }
