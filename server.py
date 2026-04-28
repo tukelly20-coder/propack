@@ -1343,12 +1343,42 @@ def api_codes_history():
     
     offset = (page - 1) * limit
     limited_history = cached_sorted_history[offset:offset + limit]
+
+    # Build lightweight stats from full history (not only current page)
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    today = now.date()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+
+    today_count = 0
+    week_count = 0
+    latest_time = cached_sorted_history[0].get('time') if cached_sorted_history else None
+
+    for item in cached_sorted_history:
+        ts = item.get('time')
+        if not ts:
+            continue
+        try:
+            item_dt = datetime.fromisoformat(ts)
+        except Exception:
+            continue
+        item_date = item_dt.date()
+        if item_date == today:
+            today_count += 1
+        if item_date >= week_start:
+            week_count += 1
     
     return jsonify({
         "data": limited_history,
         "total": len(cached_sorted_history),
         "total_pages": (len(cached_sorted_history) + limit - 1) // limit,
-        "page": page
+        "page": page,
+        "stats": {
+            "total": len(cached_sorted_history),
+            "today": today_count,
+            "week": week_count,
+            "latest_time": latest_time
+        }
     })
 
 

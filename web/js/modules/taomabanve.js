@@ -131,6 +131,10 @@ function renderTaomabanveContent() {
                         <!-- Result Display -->
                         <div class="mt-3" id="generated-code-container" style="display: none;">
                             <div class="input-group">
+                                <input type="text" class="form-control fw-bold text-primary" id="generated-code" readonly>
+                                <button class="btn btn-outline-secondary" type="button" id="btn-copy-generated-code" title="Copy">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -303,6 +307,27 @@ function setupTaomabanveEvents() {
             $(this).removeClass('is-valid');
         }
     });
+
+    // Copy generated code
+    $('#btn-copy-generated-code').click(function() {
+        const code = ($('#generated-code').val() || '').trim();
+        if (!code) return;
+        navigator.clipboard.writeText(code).then(() => {
+            showToast(t_taomabanve('toast_success'), t_taomabanve('toast_code_copy'), 'success');
+        }).catch(() => {
+            showToast(t_taomabanve('toast_error'), 'Không thể copy mã vào clipboard', 'error');
+        });
+    });
+
+    // History pagination
+    $(document).off('click', '#code-history-pagination .page-link').on('click', '#code-history-pagination .page-link', function(e) {
+        e.preventDefault();
+        const page = parseInt($(this).data('page'), 10);
+        if (!Number.isFinite(page)) return;
+        if (page < 1 || page > TaoMaBanVeState.totalPages || page === TaoMaBanVeState.currentPage) return;
+        TaoMaBanVeState.currentPage = page;
+        loadCodeHistory();
+    });
 }
 
 // ============================================
@@ -386,24 +411,24 @@ async function loadCodeHistory() {
     TaoMaBanVeState.isLoading = true;
     
     try {
-        const result = await api.getCodeHistory(1, 999999);
+        const result = await api.getCodeHistory(TaoMaBanVeState.currentPage, TaoMaBanVeState.pageSize);
         
         if (result && result.data && Array.isArray(result.data)) {
             TaoMaBanVeState.codeHistory = result.data;
-            TaoMaBanVeState.totalRecords = result.total || 0;
+            TaoMaBanVeState.totalRecords = result.total || result.data.length || 0;
+            TaoMaBanVeState.totalPages = result.total_pages || Math.max(1, Math.ceil(TaoMaBanVeState.totalRecords / TaoMaBanVeState.pageSize));
             
             // Load parent codes for all history items
             TaoMaBanVeState.codeHistory = await loadParentCodesForHistory(TaoMaBanVeState.codeHistory);
             
-            calculateAndDisplayStats(result.data);
+            calculateAndDisplayStats(result.stats, result.data);
             renderCodeHistoryTable();
-            
-            // Hide pagination since we loaded all data
-            $('#code-history-pagination').closest('.col-auto').hide();
-            $('#code-history-page-size').closest('.col-auto').hide();
         } else {
             TaoMaBanVeState.codeHistory = [];
+            TaoMaBanVeState.totalRecords = 0;
+            TaoMaBanVeState.totalPages = 1;
             tbody.html(createEmptyState(t_taomabanve('no_history'), 8));
+            $('#code-history-pagination').html('');
         }
     } catch (error) {
         console.error('[TaoMaBanVe] Load error:', error);
@@ -426,8 +451,10 @@ function renderCodeHistoryTable() {
     }
     
     // Calculate pagination values
-    const start = (TaoMaBanVeState.currentPage - 1) * TaoMaBanVeState.pageSize + 1;
-    const end = Math.min(TaoMaBanVeState.currentPage * TaoMaBanVeState.pageSize, TaoMaBanVeState.totalRecords);
+    const start = TaoMaBanVeState.totalRecords > 0
+        ? (TaoMaBanVeState.currentPage - 1) * TaoMaBanVeState.pageSize + 1
+        : 0;
+    const end = start > 0 ? (start + TaoMaBanVeState.codeHistory.length - 1) : 0;
     const pageInfoText = t_taomabanve('page_info', { start: start, end: end, total: TaoMaBanVeState.totalRecords });
     $('#code-history-page-info').text(pageInfoText);
     
@@ -459,6 +486,7 @@ function renderCodeHistoryTable() {
     });
     
     tbody.html(html);
+    renderCodeHistoryPagination();
     
     // Add click handlers
     $('.btn-copy-history').click(function() {
@@ -474,11 +502,72 @@ function renderCodeHistoryTable() {
     });
 }
 
+function renderCodeHistoryPagination() {
+    const pagination = $('#code-history-pagination');
+    const current = TaoMaBanVeState.currentPage;
+    const total = TaoMaBanVeState.totalPages;
+
+    if (total <= 1) {
+        pagination.html('');
+        return;
+    }
+
+    const pages = [];
+    pages.push(1);
+    if (current - 1 > 1) pages.push(current - 1);
+    if (current > 1) pages.push(current);
+    if (current + 1 < total) pages.push(current + 1);
+    pages.push(total);
+
+    const uniquePages = [...new Set(pages)].sort((a, b) => a - b);
+
+    let html = `
+        <li class="page-item ${current === 1 ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${current - 1}">&laquo;</a>
+        </li>
+    `;
+
+    let prevPage = 0;
+    uniquePages.forEach(page => {
+        if (prevPage && page - prevPage > 1) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        html += `
+            <li class="page-item ${page === current ? 'active' : ''}">
+                <a class="page-link" href="#" data-page="${page}">${page}</a>
+            </li>
+        `;
+        prevPage = page;
+    });
+
+    html += `
+        <li class="page-item ${current === total ? 'disabled' : ''}">
+            <a class="page-link" href="#" data-page="${current + 1}">&raquo;</a>
+        </li>
+    `;
+
+    pagination.html(html);
+}
+
 /**
  * Calculate and display statistics
  * @param {Array} data - Code history data
  */
-function calculateAndDisplayStats(data) {
+function calculateAndDisplayStats(stats, data) {
+    if (stats && typeof stats === 'object') {
+        $('#stat-total-code').text(stats.total ?? 0);
+        $('#stat-today-code').text(stats.today ?? 0);
+        $('#stat-week-code').text(stats.week ?? 0);
+
+        if (stats.latest_time) {
+            const latestDate = new Date(stats.latest_time);
+            $('#stat-latest-code').text(getRelativeTime(latestDate, TaoMaBanVeState.currentLang));
+        } else {
+            $('#stat-latest-code').text('-');
+        }
+        return;
+    }
+
     if (!data || data.length === 0) {
         $('#stat-total-code').text('0');
         $('#stat-today-code').text('0');
@@ -584,8 +673,7 @@ async function handleCreateCode(e) {
         const result = await api.createCode(name, category, employeeCode);
         
         if (result.success && result.code) {
-            $('#generated-code').text(result.code);
-            $('#generated-code-container').removeClass('d-none');
+            $('#generated-code').val(result.code);
             $('#generated-code-container').show();
             
             // Copy to clipboard automatically
@@ -595,8 +683,6 @@ async function handleCreateCode(e) {
             } catch (clipErr) {
                 showToast(t_taomabanve('toast_success'), t_taomabanve('toast_code_created') + result.code, 'success');
             }
-            
-            $('#generated-code-container').hide();
             
             // Reload history
             setTimeout(async () => {
@@ -750,7 +836,7 @@ function handleTaomabanveLanguageChange(lang) {
     translateCategoryDropdown();
     
     // Cập nhật lại các thống kê với ngôn ngữ mới
-    calculateAndDisplayStats(TaoMaBanVeState.codeHistory);
+    calculateAndDisplayStats(null, TaoMaBanVeState.codeHistory);
 }
 
 // Lắng nghe sự kiện thay đổi ngôn ngữ từ header chính
@@ -782,7 +868,7 @@ window.addEventListener('languageChanged', function(e) {
     translateCategoryDropdown();
     
     // Cập nhật lại các thống kê
-    calculateAndDisplayStats(TaoMaBanVeState.codeHistory);
+    calculateAndDisplayStats(null, TaoMaBanVeState.codeHistory);
 });
 
 // Get relative time string - sử dụng hàm dịch toàn cục

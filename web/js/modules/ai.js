@@ -11,9 +11,10 @@ const AIState = {
     messages: [],
     isLoading: false,
     isConnected: false,
-    currentModel: 'openai/gpt-oss-20b:free',  // Stable free OpenRouter default
+    currentModel: localStorage.getItem('ai_current_model') || 'openai/gpt-oss-20b:free',
     chatHistory: [],
     STORAGE_KEY: 'gemini_ai_history',
+    MODEL_STORAGE_KEY: 'ai_current_model',
     useStreaming: true,  // Enable streaming by default
     abortController: null,  // For stopping streaming
     isAdmin: false
@@ -32,6 +33,21 @@ function isCurrentUserAdmin() {
     const role = String(user.role || '').toLowerCase();
     const username = String(user.username || '').toLowerCase();
     return role === 'admin' || username === 'administrator';
+}
+
+function getProviderFromModel(model) {
+    if (!model) return 'openrouter';
+    if (model.startsWith('gemini')) return 'gemini';
+    if (model.includes('/')) return 'openrouter';
+    return 'ollama';
+}
+
+function persistCurrentModel() {
+    try {
+        localStorage.setItem(AIState.MODEL_STORAGE_KEY, AIState.currentModel);
+    } catch (e) {
+        console.warn('[AI] Could not persist selected model:', e);
+    }
 }
 
 // ============================================
@@ -57,8 +73,8 @@ function initAIModule() {
     // Load chat history from localStorage
     loadChatHistory();
     
-    // Check connection
-    checkConnection();
+    // Auto-select a usable model/provider then check connection
+    initializeAIProvider();
     
     // Start periodic connection check
     startConnectionCheck();
@@ -609,10 +625,26 @@ function setupAIEvents() {
     });
     
     // Model select
-    document.getElementById('model-select-ai').addEventListener('change', function() {
+    const onModelSelected = function() {
         AIState.currentModel = this.value;
+        persistCurrentModel();
+
+        const statusText = document.getElementById('status-text-ai');
+        if (statusText) {
+            const provider = getProviderFromModel(this.value);
+            if (provider === 'gemini') {
+                statusText.textContent = 'Đang kiểm tra Gemini...';
+            } else if (provider === 'openrouter') {
+                statusText.textContent = 'Đang kiểm tra OpenRouter...';
+            } else {
+                statusText.textContent = 'Đang kiểm tra Ollama...';
+            }
+        }
+
         checkConnection();  // Re-check connection for the new model
-    });
+    };
+    document.getElementById('model-select-ai').addEventListener('change', onModelSelected);
+    document.getElementById('model-select-ai').addEventListener('input', onModelSelected);
 
     if (AIState.isAdmin) {
         const toggleBtn = document.getElementById('system-prompt-toggle-ai');
@@ -722,21 +754,38 @@ async function saveSystemPromptEditor() {
 // CONNECTION
 // ============================================
 
+async function initializeAIProvider() {
+    const modelSelect = document.getElementById('model-select-ai');
+    if (modelSelect) {
+        const optionExists = Array.from(modelSelect.options).some(opt => opt.value === AIState.currentModel);
+        if (optionExists) {
+            modelSelect.value = AIState.currentModel;
+        }
+    }
+    checkConnection();
+}
+
 /**
  * Check Gemini connection
  */
 async function checkConnection() {
     const statusDot = document.getElementById('status-dot-ai');
     const statusText = document.getElementById('status-text-ai');
+    const modelSelect = document.getElementById('model-select-ai');
+    if (modelSelect && modelSelect.value && modelSelect.value !== AIState.currentModel) {
+        AIState.currentModel = modelSelect.value;
+        persistCurrentModel();
+    }
     const model = AIState.currentModel;
+    const provider = getProviderFromModel(model);
     
     try {
         // Check based on model type
         let endpoint = '/api/ollama-status';
-        if (model.startsWith('gemini')) {
+        if (provider === 'gemini') {
             endpoint = '/api/gemini/status';
-        } else if (model.includes('/') || model.includes(':')) {
-            // OpenRouter model format: provider/model-name or stepfun/step-3.5-flash:free
+        } else if (provider === 'openrouter') {
+            // OpenRouter model format: provider/model-name
             endpoint = '/api/openrouter/status';
         }
         
@@ -749,7 +798,7 @@ async function checkConnection() {
             const data = await response.json();
             
             // For Gemini
-            if (model.startsWith('gemini')) {
+            if (provider === 'gemini') {
                 if (data.configured && data.connected) {
                     statusDot.classList.add('connected');
                     statusText.textContent = 'Đã kết nối ' + (data.model || 'Gemini');
@@ -763,7 +812,7 @@ async function checkConnection() {
                     statusText.textContent = 'Chưa cấu hình Gemini';
                     AIState.isConnected = false;
                 }
-            } else if (model.includes('/') || model.includes(':')) {
+            } else if (provider === 'openrouter') {
                 // For OpenRouter
                 if (data.configured && data.connected) {
                     statusDot.classList.add('connected');
@@ -775,7 +824,7 @@ async function checkConnection() {
                     AIState.isConnected = false;
                 } else {
                     statusDot.classList.remove('connected');
-                    statusText.textContent = 'Chưa cấu hình OpenRouter';
+                    statusText.textContent = 'OpenRouter chưa cấu hình, vui lòng chọn model khác';
                     AIState.isConnected = false;
                 }
             } else {
@@ -805,6 +854,8 @@ async function checkConnection() {
         statusText.textContent = 'Chưa kết nối';
         AIState.isConnected = false;
     }
+
+    updateAISendButton();
 }
 
 /**
@@ -879,6 +930,11 @@ async function sendAIMessage() {
     const prompt = chatInput.value.trim();
     
     if (!prompt || AIState.isLoading) return;
+
+    if (!AIState.isConnected) {
+        addAIError('AI hiện chưa sẵn sàng. Vui lòng chọn model khác hoặc kiểm tra kết nối API.');
+        return;
+    }
     
     // Add user message
     addAIMessage('user', prompt);
@@ -965,7 +1021,7 @@ function createAIMessagePlaceholder() {
             <i class="bi bi-robot"></i>
         </div>
         <div class="message-content-wrapper">
-            <div class="message-content" id="ai-response-content"></div>
+            <div class="message-content ai-response-content"></div>
             <div class="message-time">${timeStr}</div>
         </div>
     `;
@@ -983,15 +1039,15 @@ function createAIMessagePlaceholder() {
  * Get AI message content
  */
 function getAIMessageContent(messageDiv) {
-    const contentDiv = messageDiv.querySelector('#ai-response-content');
-    return contentDiv ? contentDiv.innerHTML : '';
+    const contentDiv = messageDiv.querySelector('.ai-response-content');
+    return contentDiv ? (contentDiv.textContent || '').trim() : '';
 }
 
 /**
  * Update AI message content
  */
 function updateAIMessageContent(messageDiv, content) {
-    const contentDiv = messageDiv.querySelector('#ai-response-content');
+    const contentDiv = messageDiv.querySelector('.ai-response-content');
     if (contentDiv) {
         contentDiv.innerHTML = parseSimpleMarkdown(content);
     }
@@ -1004,7 +1060,7 @@ function updateAIMessageContent(messageDiv, content) {
  * Append to AI message content (for streaming)
  */
 function appendToAIMessageContent(messageDiv, newContent) {
-    const contentDiv = messageDiv.querySelector('#ai-response-content');
+    const contentDiv = messageDiv.querySelector('.ai-response-content');
     if (contentDiv) {
         // Don't escape - it's already streamed HTML
         contentDiv.innerHTML = newContent;
@@ -1038,12 +1094,13 @@ async function sendToAIStream(prompt, history, messageDiv) {
     // Determine which API to use based on current model
     let endpoint = '/api/ollama/chat/stream';
     const model = AIState.currentModel;
+    const provider = getProviderFromModel(model);
     
     // Check if it's a Gemini model
-    if (model.startsWith('gemini')) {
+    if (provider === 'gemini') {
         endpoint = '/api/gemini/chat/stream';
-    } else if (model.includes('/') || model.includes(':')) {
-        // OpenRouter model format: provider/model-name or stepfun/step-3.5-flash:free
+    } else if (provider === 'openrouter') {
+        // OpenRouter model format: provider/model-name
         endpoint = '/api/openrouter/chat/stream';
     }
     
@@ -1280,7 +1337,7 @@ function addAIError(message) {
 function updateAISendButton() {
     const chatInput = document.getElementById('chat-input-ai');
     const sendBtn = document.getElementById('send-btn-ai');
-    sendBtn.disabled = chatInput.value.trim().length === 0;
+    sendBtn.disabled = chatInput.value.trim().length === 0 || !AIState.isConnected;
 }
 
 /**
@@ -1316,10 +1373,19 @@ function loadChatHistory() {
         const saved = localStorage.getItem(AIState.STORAGE_KEY);
         if (saved) {
             AIState.chatHistory = JSON.parse(saved);
+            if (Array.isArray(AIState.chatHistory) && AIState.chatHistory.length > 0) {
+                AIState.messages = AIState.chatHistory.slice(-50);
+                AIState.messages.forEach(msg => {
+                    if (msg && (msg.role === 'user' || msg.role === 'ai') && msg.content) {
+                        addAIMessage(msg.role, msg.content);
+                    }
+                });
+            }
         }
     } catch (e) {
         console.warn('[AI] Could not load from localStorage:', e);
         AIState.chatHistory = [];
+        AIState.messages = [];
     }
 }
 
