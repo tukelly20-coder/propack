@@ -83,7 +83,7 @@ propack/
 │       ├── app.js
 │       ├── api.js
 │       └── modules/
-├── Tool open/
+├── tools/open/
 │   ├── app.py        # Tool Open backend
 │   └── Mở mã liệu...
 └── ...

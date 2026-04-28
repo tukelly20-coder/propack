@@ -54,12 +54,12 @@
 **File Storage**
 - `used_codes.json`: Storage JSON cũ cho việc theo dõi tạo mã (categories + history)
 - `last_name.txt`, `last_employee.txt`, `last_category.txt`, `language.txt`: Lưu trạng thái UI
-- `Toolsysnc/From.txt`, `Toolsysync/To.txt`: Cấu hình tool đồng bộ thư mục
+- `tools/sync/From.txt`, `tools/sync/To.txt`: Cấu hình tool đồng bộ thư mục                       
 - `logs/`: Log submissions từ web client dạng `.txt` có timestamp
 - Material Excel: `\\192.168.2.165\...\存货档案库.xlsx` (network UNC path)
 
 **Module: Tool Open (Tra cứu Vật liệu)**
-- Module `material_core`: Load động từ `Tool open/Mở mã liệu 打开链接VP.py`
+- Module `material_core`: Load động từ `tools/open/Mở mã liệu 打开链接VP.py`                      
 - Excel lookup cache: DataFrame in-memory cho mapping `cEngineerFigNo` → `cInvCode`
 - Query file system: Tìm kiếm thư mục chia sẻ theo `cInvCode` và copy đường dẫn matching vào clipboard
 

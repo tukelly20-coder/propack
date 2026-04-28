@@ -43,8 +43,8 @@
   - “应用”按钮应用语言更改（保存在`language.txt`中）。
 
 - **同步工具选项卡**：
-  - 来源路径输入框（From）：输入来源目录路径，保存在`Toolsysnc/From.txt`中。
-  - 目标路径输入框（To）：输入目标目录路径，保存在`Toolsysnc/To.txt`中。
+  - 来源路径输入框（From）：输入来源目录路径，保存在`tools/sync/From.txt`中。
+  - 目标路径输入框（To）：输入目标目录路径，保存在`tools/sync/To.txt`中。
   - “Browse”按钮选择目录。
   - “立即同步”按钮：保存信息到文件并运行同步工具，使用`robocopy`进行镜像模式同步，从来源复制并同步到目标，删除目标中不存在的文件。
 
@@ -118,7 +118,7 @@
 - `last_ip.txt`：记住最后服务器IP。
 - `last_category.txt`：记住最后类别。
 - `language.txt`：记住当前语言（vi或zh）。
-- `Toolsysnc/From.txt`、`Toolsysnc/To.txt`：保存同步工具的路径。
+- `tools/sync/From.txt`、`tools/sync/To.txt`：保存同步工具的路径。
 - `client.spec`、`server.spec`：PyInstaller配置文件。
 - `build/`：构建后可执行文件目录。
 - `src/`、`Test/`：补充目录（可能包含旧代码或测试）。
