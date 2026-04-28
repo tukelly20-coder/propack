@@ -10,7 +10,7 @@
 const ProjectsState = {
     projects: [],
     currentPage: 1,
-    pageSize: 50,
+    pageSize: 100000,
     totalRecords: 0,
     totalPages: 1,
     selectedIds: [],
@@ -22,9 +22,9 @@ const ProjectsState = {
     filterCustomer: '',
     // Customers list for dropdown
     customers: [],
+    autoScrollToBottomOnLoad: true,
     // Column visibility
     visibleColumns: {
-        'stt': true,
         'tracking_id': true,
         'ngay': true,
         'khachhang': true,
@@ -38,7 +38,6 @@ const ProjectsState = {
         'mabavkythuat': true,
         'mame': true,
         'loaisanpham': true,
-        'kysu': true,
         'tinhtrang': true,
         'dokhan': true,
         'tg_mongmuon': true,
@@ -48,7 +47,6 @@ const ProjectsState = {
     },
     // Available columns config
     columnsConfig: [
-        { key: 'stt', label: 'STT', default: true },
         { key: 'tracking_id', label: 'Tracking ID', default: true },
         { key: 'ngay', label: 'Ngày', default: true },
         { key: 'khachhang', label: 'Khách hàng', default: true },
@@ -64,7 +62,6 @@ const ProjectsState = {
         { key: 'loaisanpham', label: 'Loại sản phẩm', default: false },
         { key: 'dokhan', label: 'Độ khẩn', default: true },
         { key: 'tinhtrang', label: 'Tình trạng', default: true },
-        { key: 'kysu', label: 'Kỹ sư', default: false },
         { key: 'tg_mongmuon', label: 'TG mong muốn', default: false },
         { key: 'tg_hoanthanh', label: 'TG hoàn thành', default: false },
         { key: 'trangthai', label: 'Trạng thái', default: true },
@@ -81,6 +78,10 @@ const ProjectsState = {
  */
 function initProjectsModule() {
     console.log('[Projects] Initializing...');
+    
+    if (window.history && 'scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+    }
     
     // Render the module content
     renderProjectsContent();
@@ -218,7 +219,6 @@ function renderProjectsContent() {
                            style="width: 100%; table-layout: fixed;">
                         <thead class="table-light">
                             <tr>
-                                <th style="width: 50px;" data-i18n="col_stt">${t('col_stt')}</th>
                                 <th style="width: 130px;" data-i18n="col_tracking_id">${t('col_tracking_id')}</th>
                                 <th style="width: 100px;" data-i18n="col_ngay">${t('col_ngay')}</th>
                                 <th style="width: 120px;" data-i18n="col_khachhang">${t('col_khachhang')}</th>
@@ -234,12 +234,10 @@ function renderProjectsContent() {
                                 <th style="width: 100px;" data-i18n="col_loaisanpham">${t('col_loaisanpham')}</th>
                                 <th style="width: 90px;" data-i18n="col_dokhan">${t('col_dokhan')}</th>
                                 <th style="width: 100px;" data-i18n="col_tinhtrang">${t('col_tinhtrang')}</th>
-                                <th style="width: 80px;" data-i18n="col_kysu">${t('col_kysu')}</th>
                                 <th style="width: 140px;" data-i18n="col_tg_mongmuon">${t('col_tg_mongmuon')}</th>
                                 <th style="width: 140px;" data-i18n="col_tg_hoanthanh">${t('col_tg_hoanthanh')}</th>
                                 <th style="width: 100px;" data-i18n="col_trangthai">${t('col_trangthai')}</th>
                                 <th style="width: 100px;" data-i18n="col_nguoinhan">${t('col_nguoinhan')}</th>
-                                <th style="width: 50px;" data-i18n="col_actions">${t('col_actions')}</th>
                             </tr>
                         </thead>
                         <tbody id="projects-table-body">
@@ -249,41 +247,11 @@ function renderProjectsContent() {
                 </div>
             </div>
         </div>
-        
-        <!-- Pagination with Jump to Page -->
-        <div class="card mt-2">
-            <div class="card-body py-2">
-                <div class="row align-items-center">
-                    <div class="col-auto">
-                        <span id="page-info-project">${t('page_info', { start: 0, end: 0, total: 0 })}</span>
-                    </div>
-                    <div class="col-auto ms-auto">
-                        <nav>
-                            <ul class="pagination mb-0" id="pagination-project">
-                                <!-- Pagination will be generated here -->
-                            </ul>
-                        </nav>
-                    </div>
-                    <div class="col-auto">
-                        <div class="d-flex align-items-center gap-2">
-                            <select class="form-select form-select-sm" id="page-size-project" style="width: auto;">
-                                <option value="10">10 ${t('per_page')}</option>
-                                <option value="25">25 ${t('per_page')}</option>
-                                <option value="50" selected>50 ${t('per_page')}</option>
-                                <option value="100">100 ${t('per_page')}</option>
-                            </select>
-                            <span class="text-muted">|</span>
-                            <div class="input-group input-group-sm" style="width: 120px;">
-                                <input type="number" class="form-control" id="jump-to-page" 
-                                       placeholder="${t('page')}" data-i18n-placeholder="page" min="1">
-                                <button class="btn btn-outline-secondary" type="button" id="btn-jump-to-page" title="${t('jump_to_page')}" data-i18n-title="jump_to_page">
-                                    <i class="bi bi-arrow-right"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div id="project-row-context-menu" class="dropdown-menu" style="position: fixed; display: none; z-index: 2000;">
+            <button type="button" class="dropdown-item ctx-view"><i class="bi bi-eye text-info"></i> ${t('quick_view')}</button>
+            <button type="button" class="dropdown-item ctx-edit"><i class="bi bi-pencil text-warning"></i> ${t('quick_edit')}</button>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item text-danger ctx-delete"><i class="bi bi-trash"></i> ${t('quick_delete')}</button>
         </div>
         
         <!-- Add/Edit Modal -->
@@ -351,63 +319,6 @@ function renderProjectsContent() {
                                 <div class="col-12">
                                     <label class="form-label">${t('form_mapo')}</label>
                                     <input type="text" class="form-control" id="field-mapo">
-                                </div>
-                            </div>
-                            
-                            <!-- Mã bản vẽ -->
-                            <div class="section-header drawing-section">
-                                <h6 class="section-title">${t('drawing_codes')}</h6>
-                            </div>
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label class="form-label">${t('form_mabave_chinh')}</label>
-                                    <input type="text" class="form-control" id="field-mabave_chinh">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">${t('form_mabave')}</label>
-                                    <input type="text" class="form-control" id="field-mabave">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">${t('form_mabavkythuat')}</label>
-                                    <input type="text" class="form-control" id="field-mabavkythuat">
-                                </div>
-                                <div class="col-md-6">
-                                    <label class="form-label">${t('form_mame')}</label>
-                                    <input type="text" class="form-control" id="field-mame">
-                                </div>
-                            </div>
-                            
-                            <!-- Thông tin kỹ thuật -->
-                            <div class="section-header">
-                                <h6 class="section-title">${t('technical_info')}</h6>
-                            </div>
-                            <div class="row g-3">
-                                <div class="col-12">
-                                    <label class="form-label">${t('form_loaisanpham')}</label>
-                                    <select class="form-select" id="field-loaisanpham">
-                                        <option value="">${t('select_loaisanpham')}</option>
-                                        <option value="SJT散件图">SJT - ${t('loaisanpham_sjt')}</option>
-                                        <option value="WLJ物料架">WLJ - ${t('loaisanpham_wlj')}</option>
-                                        <option value="ZZC周转车">ZZC - ${t('loaisanpham_zzc')}</option>
-                                        <option value="GZT工作台">GZT - ${t('loaisanpham_gzt')}</option>
-                                        <option value="WCP无尘棚">WCP - ${t('loaisanpham_wcp')}</option>
-                                        <option value="LSX流水线">LSX - ${t('loaisanpham_lsx')}</option>
-                                        <option value="ZWJ转弯机">ZWJ - ${t('loaisanpham_zwj')}</option>
-                                        <option value="GZL改造类">GZL - ${t('loaisanpham_gzl')}</option>
-                                        <option value="BSX倍速线">BSX - ${t('loaisanpham_bsx')}</option>
-                                        <option value="WLL围栏类">WLL - ${t('loaisanpham_wll')}</option>
-                                        <option value="GTX滚筒线">GTX - ${t('loaisanpham_gtx')}</option>
-                                        <option value="ZHT展会图">ZHT - ${t('loaisanpham_zht')}</option>
-                                        <option value="LHX老化线">LHX - ${t('loaisanpham_lhx')}</option>
-                                    </select>
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label">${t('form_kysu')}</label>
-                                    <input type="text" class="form-control" id="field-kysu">
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label">${t('form_tinhtrang')}</label>
-                                    <input type="text" class="form-control" id="field-tinhtrang">
                                 </div>
                             </div>
                             
@@ -507,6 +418,7 @@ function setupProjectsEvents() {
     
     // Refresh button
     $('#btn-refresh-project').click(function() {
+        ProjectsState.autoScrollToBottomOnLoad = true;
         loadProjects();
     });
     
@@ -570,31 +482,6 @@ function setupProjectsEvents() {
         ProjectsState.searchText = '';
         ProjectsState.currentPage = 1;
         loadProjects();
-    });
-    
-    // Page size change
-    $('#page-size-project').change(function() {
-        ProjectsState.pageSize = parseInt($(this).val());
-        ProjectsState.currentPage = 1;
-        loadProjects();
-    });
-    
-    // Jump to page
-    $('#btn-jump-to-page').click(function() {
-        const page = parseInt($('#jump-to-page').val());
-        if (page >= 1 && page <= ProjectsState.totalPages) {
-            ProjectsState.currentPage = page;
-            loadProjects();
-        } else {
-            showToast(t('error'), t('validation_invalid_page', { max: ProjectsState.totalPages }), 'warning');
-        }
-    });
-    
-    // Enter key for jump to page
-    $('#jump-to-page').keypress(function(e) {
-        if (e.which === 13) {
-            $('#btn-jump-to-page').click();
-        }
     });
     
     // Save button
@@ -759,18 +646,6 @@ function updateProjectsFilterOptions() {
         urgencyFilter.find('option').eq(3).text(t('urgency_very_urgent'));
     }
     
-    // Page size options
-    const pageSizeSelect = $('#page-size-project');
-    if (pageSizeSelect.length) {
-        const currentVal = pageSizeSelect.val();
-        pageSizeSelect.find('option').each(function(i) {
-            const val = [10, 25, 50, 100][i];
-            if (val) {
-                $(this).text(val + ' ' + t('per_page'));
-            }
-        });
-        pageSizeSelect.val(currentVal);
-    }
 }
 
 // ============================================
@@ -812,7 +687,9 @@ async function loadProjects() {
             ProjectsState.totalPages = Math.ceil(ProjectsState.totalRecords / ProjectsState.pageSize) || 1;
             
             renderProjectsTable();
-            updatePagination();
+            if (ProjectsState.autoScrollToBottomOnLoad) {
+                ensureProjectsInitialScrollToBottom();
+            }
         } else {
             ProjectsState.projects = [];
             ProjectsState.totalRecords = 0;
@@ -828,6 +705,30 @@ async function loadProjects() {
     }
 }
 
+function scrollProjectsToBottom() {
+    const wrap = document.querySelector('#projects-container .table-responsive');
+    if (!wrap) return;
+    wrap.scrollTop = wrap.scrollHeight;
+}
+
+function ensureProjectsInitialScrollToBottom(retries = 12) {
+    if (!ProjectsState.autoScrollToBottomOnLoad) return;
+    const container = document.getElementById('projects-container');
+    const wrap = document.querySelector('#projects-container .table-responsive');
+    if (container && wrap && container.offsetParent !== null && ProjectsState.projects.length > 0) {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                scrollProjectsToBottom();
+                setTimeout(scrollProjectsToBottom, 80);
+            });
+        });
+        ProjectsState.autoScrollToBottomOnLoad = false;
+        return;
+    }
+    if (retries <= 0) return;
+    setTimeout(() => ensureProjectsInitialScrollToBottom(retries - 1), 80);
+}
+
 /**
  * Render projects table
  */
@@ -835,21 +736,20 @@ function renderProjectsTable() {
     const tbody = $('#projects-table-body');
     
     if (ProjectsState.projects.length === 0) {
-        tbody.html(createEmptyState(t('no_data_projects'), 23));
+        tbody.html(createEmptyState(t('no_data_projects'), 19));
         return;
     }
     
     let html = '';
     const colKeys = [
-        'stt', 'tracking_id', 'ngay', 'khachhang', 'nhanvienkd', 
-        'tensanpham', 'quycach', 'lienhe', 'soluong', 'mapo', 'mabave', 
-        'mabavkythuat', 'mame', 'loaisanpham', 'kysu', 'tinhtrang', 'dokhan', 
-        'tg_mongmuon', 'tg_hoanthanh', 'trangthai', 'nguoinhan', 'actions'
+        'tracking_id', 'ngay', 'khachhang', 'nhanvienkd',
+        'tensanpham', 'quycach', 'lienhe', 'soluong', 'mapo', 'mabave',
+        'mabavkythuat', 'mame', 'loaisanpham', 'tinhtrang', 'dokhan',
+        'tg_mongmuon', 'tg_hoanthanh', 'trangthai', 'nguoinhan'
     ];
     
     // Map key to data field
     const keyToField = {
-        'stt': 'STT',
         'tracking_id': 'Tracking ID',
         'ngay': 'Ngày',
         'khachhang': 'Khách hàng',
@@ -863,7 +763,6 @@ function renderProjectsTable() {
         'mabave': 'Mã bản vẽ',
         'mame': 'Mã mẹ',
         'loaisanpham': 'Loại sản phẩm',
-        'kysu': 'Kỹ sư',
         'tinhtrang': 'Tình trạng',
         'dokhan': 'Độ khẩn',
         'tg_mongmuon': 'TG mong muốn',
@@ -910,7 +809,6 @@ function renderProjectsTable() {
     };
     
      ProjectsState.projects.forEach((project, index) => {
-          const rowNum = (ProjectsState.currentPage - 1) * ProjectsState.pageSize + index + 1;
           const trackingId = getProjectValue(project, ['Tracking ID', 'tracking_id'], '-');
           const ngay = getProjectValue(project, ['Ngày', 'Created_Date'], '');
           const khachHang = getProjectValue(project, ['Khách hàng', 'khach_hang'], '-');
@@ -924,7 +822,6 @@ function renderProjectsTable() {
           const maBanVeKt = getProjectValue(project, ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)', 'Mã bản vẽ kỹ thuật', 'ma_ban_ve_ky_thuat'], '-');
           const maMe = getProjectValue(project, ['Mã mẹ', 'Mã mẹ ', 'Mã thành phẩm (Mã mẹ)', 'ma_me'], '-');
           const loaiSanPham = getProjectValue(project, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '-');
-          const kySu = getProjectValue(project, ['Nhân viên thiết kế', 'Kỹ sư', 'Kỹ sư thiết kế', 'nhan_vien_thiet_ke'], '-');
           const tinhTrang = getProjectValue(project, ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], '-');
           const doKhan = getProjectValue(project, ['Tính cấp bách', 'Mức độ khẩn cấp', 'Độ khẩn', 'urgency_level'], '');
           const tgMongMuon = getProjectValue(project, ['Thời gian mong muốn có bản vẽ', 'TG mong muốn', 'thoi_gian_mong_muon_ban_ve'], '');
@@ -933,11 +830,6 @@ function renderProjectsTable() {
           const nguoiNhan = getProjectValue(project, ['accepted_by', 'Người nhận', 'accepted_by'], '');
           
           html += `<tr data-id="${trackingId}">`;
-         
-         // Column: STT
-         if (ProjectsState.visibleColumns.stt) {
-             html += `<td>${rowNum}</td>`;
-         }
          
           // Column: Tracking ID
           if (ProjectsState.visibleColumns.tracking_id) {
@@ -1014,11 +906,6 @@ function renderProjectsTable() {
               html += `<td>${escapeHtml(String(tinhTrang))}</td>`;
           }
          
-          // Column: Kỹ sư
-          if (ProjectsState.visibleColumns.kysu) {
-              html += `<td>${escapeHtml(String(kySu))}</td>`;
-          }
-         
           // Column: TG mong muốn
           if (ProjectsState.visibleColumns.tg_mongmuon) {
               html += `<td>${formatDateTime(tgMongMuon) || '-'}</td>`;
@@ -1038,27 +925,6 @@ function renderProjectsTable() {
           if (ProjectsState.visibleColumns.nguoinhan) {
               html += `<td>${escapeHtml(String(nguoiNhan || getPendingReceiverText()))}</td>`;
           }
-         
-         // Column: Actions (Quick actions menu)
-         html += `<td>
-             <div class="dropdown">
-                 <button class="btn btn-sm btn-light p-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                     <i class="bi bi-three-dots-vertical"></i>
-                 </button>
-                 <ul class="dropdown-menu dropdown-menu-end">
-                     <li><a class="dropdown-item quick-view" href="#" data-id="${trackingId}">
-                         <i class="bi bi-eye text-info"></i> ${t('quick_view')}
-                     </a></li>
-                     <li><a class="dropdown-item quick-edit" href="#" data-id="${trackingId}">
-                         <i class="bi bi-pencil text-warning"></i> ${t('quick_edit')}
-                     </a></li>
-                     <li><hr class="dropdown-divider"></li>
-                     <li><a class="dropdown-item quick-delete text-danger" href="#" data-id="${trackingId}">
-                         <i class="bi bi-trash"></i> ${t('quick_delete')}
-                     </a></li>
-                 </ul>
-             </div>
-         </td>`;
          
          html += '</tr>';
      });
@@ -1082,20 +948,28 @@ function setupRowHandlers() {
     
     // Row click for selection (single select)
     $('#projects-table-body tr').click(function(e) {
-        if (!$(e.target).closest('.dropdown').length) {
-            const id = $(this).data('id');
-            ProjectsState.selectedIds = [id];
-            
-            // Update row styling
-            $('#projects-table-body tr').removeClass('table-primary');
-            $(this).addClass('table-primary');
-            
-            updateToolbarState();
-        }
+        const id = $(this).data('id');
+        ProjectsState.selectedIds = [id];
+        
+        // Update row styling
+        $('#projects-table-body tr').removeClass('table-primary');
+        $(this).addClass('table-primary');
+        
+        updateToolbarState();
     });
-    
-    // Quick action handlers
-    setupQuickActionHandlers();
+
+    // Right-click context menu on row
+    $('#projects-table-body tr').off('contextmenu.projectCtx').on('contextmenu.projectCtx', function(e) {
+        e.preventDefault();
+        const id = $(this).data('id');
+        ProjectsState.selectedIds = [id];
+        $('#projects-table-body tr').removeClass('table-primary');
+        $(this).addClass('table-primary');
+        updateToolbarState();
+        showProjectContextMenu(e.clientX, e.clientY, id);
+    });
+
+    setupProjectContextMenuHandlers();
 }
 
 /**
@@ -1133,38 +1007,6 @@ function updateToolbarState() {
     $('#btn-edit-project').prop('disabled', count !== 1);
     $('#btn-delete-project').prop('disabled', count === 0);
     
-    const start = (ProjectsState.currentPage - 1) * ProjectsState.pageSize + 1;
-    const end = Math.min(ProjectsState.currentPage * ProjectsState.pageSize, ProjectsState.totalRecords);
-    
-    $('#page-info-project').text(
-        ProjectsState.totalRecords > 0 
-        ? t('page_info', { start: start, end: end, total: ProjectsState.totalRecords })
-        : t('page_info', { start: 0, end: 0, total: 0 })
-    );
-}
-
-/**
- * Update pagination
- */
-function updatePagination() {
-    const pagination = $('#pagination-project');
-    
-    if (ProjectsState.totalPages <= 1) {
-        pagination.html('');
-        return;
-    }
-    
-    pagination.html(createPagination(ProjectsState.currentPage, ProjectsState.totalPages));
-    
-    // Add click handlers
-    $('.page-link').click(function(e) {
-        e.preventDefault();
-        const page = parseInt($(this).data('page'));
-        if (page >= 1 && page <= ProjectsState.totalPages) {
-            ProjectsState.currentPage = page;
-            loadProjects();
-        }
-    });
 }
 
 // ============================================
@@ -1234,7 +1076,11 @@ function setupRealTimeValidation() {
         const $input = $(field.id);
         if ($input.length) {
             $input.off('blur.realvalidation').on('blur.realvalidation', function() {
-                validateFieldOnBlur($(this), field.name);
+                if (field.id === '#field-khachhang') {
+                    validateCustomerField();
+                } else {
+                    validateFieldOnBlur($(this), field.name);
+                }
             });
             
             // Also validate on keyup for better UX
@@ -1255,6 +1101,8 @@ function setupRealTimeValidation() {
                 $('#field-khachhang').val(selectedValue);
                 clearFieldError($('#field-khachhang'));
                 $('#field-khachhang').addClass('is-valid');
+            } else {
+                validateCustomerField();
             }
         });
     }
@@ -1299,6 +1147,24 @@ function validateFieldOnBlur($input, fieldName) {
         $input.addClass('is-valid');
         return true;
     }
+}
+
+function getCustomerFieldValue() {
+    const selectedCustomer = ($('#field-khachhang-select').val() || '').trim();
+    const typedCustomer = ($('#field-khachhang').val() || '').trim();
+    return typedCustomer || selectedCustomer;
+}
+
+function validateCustomerField() {
+    const customerValue = getCustomerFieldValue();
+    const $customerInput = $('#field-khachhang');
+    if (!customerValue) {
+        showFieldError($customerInput, 'Khách hàng là trường bắt buộc');
+        return false;
+    }
+    clearFieldError($customerInput);
+    $customerInput.addClass('is-valid');
+    return true;
 }
 
 /**
@@ -1406,9 +1272,7 @@ function updateProjectFormLabels() {
     // Section headers
     $('#project-form .section-title').eq(0).text(t('basic_info'));
     $('#project-form .section-title').eq(1).text(t('product_info'));
-    $('#project-form .section-title').eq(2).text(t('drawing_codes'));
-    $('#project-form .section-title').eq(3).text(t('technical_info'));
-    $('#project-form .section-title').eq(4).text(t('time_urgency'));
+    $('#project-form .section-title').eq(2).text(t('time_urgency'));
     
     // Labels
     $('#project-form label').eq(0).html(t('form_ngay_khoitao'));
@@ -1419,12 +1283,9 @@ function updateProjectFormLabels() {
     $('#project-form label').eq(5).html(t('form_lienhe_kh'));
     $('#project-form label').eq(6).html(t('form_soluong'));
     $('#project-form label').eq(7).html(t('form_mapo'));
-    $('#project-form label').eq(8).html(t('form_loaisanpham'));
-    $('#project-form label').eq(9).html(t('form_kysu'));
-    $('#project-form label').eq(10).html(t('form_tinhtrang'));
-    $('#project-form label').eq(11).html(t('form_capbach'));
-    $('#project-form label').eq(12).html(t('form_tg_mongmuon'));
-    $('#project-form label').eq(13).html(t('form_tg_hoanthanh'));
+    $('#project-form label').eq(8).html(t('form_capbach'));
+    $('#project-form label').eq(9).html(t('form_tg_mongmuon'));
+    $('#project-form label').eq(10).html(t('form_tg_hoanthanh'));
 
     // Customer controls
     const customerSelect = $('#field-khachhang-select');
@@ -1478,21 +1339,6 @@ async function editProject(id) {
             $('#field-lienhe').val(result['nguoi_lien_he_kh'] || result['Người liên hệ (KH)'] || result['Người liên hệ\n(KH)'] || '');
             $('#field-soluong').val(result['so_luong'] || result['Số lượng'] || '');
             $('#field-mapo').val(result['ma_po'] || result['Mã PO'] || '');
-            $('#field-mabave_chinh').val(result['ma_ban_ve'] || result['Mã bản vẽ chính'] || result['Mã bản vẽ'] || '');
-            $('#field-mabave').val(result['Mã bản vẽ'] || result['ma_ban_ve'] || '');
-            $('#field-mabavkythuat').val(
-                result['ma_ban_ve_ky_thuat']
-                || result['Mã bản vẽ kỹ thuật (sau khi đặt hàng)']
-                || result['Mã bản vẽ kỹ thuật']
-                || ''
-            );
-            $('#field-mame').val(result['ma_me'] || result['Mã mẹ'] || result['Mã mẹ '] || result['Mã thành phẩm (Mã mẹ)'] || '');
-            
-            // Thông tin kỹ thuật
-            $('#field-loaisanpham').val(result['loai_san_pham'] || result['Loại sản phẩm'] || result['Hạng mục'] || '');
-            $('#field-kysu').val(result['nhan_vien_thiet_ke'] || result['Nhân viên thiết kế'] || result['Kỹ sư thiết kế'] || result['Kỹ sư'] || '');
-            $('#field-tinhtrang').val(result['tinh_trang_hoan_thanh'] || result['Tình trạng hoàn thành dự án'] || result['Tình trạng'] || '');
-            
             // Thời gian & Độ khẩn
             $('#field-capbach').val(result['urgency_level'] || result['Độ khẩn'] || result['Tính cấp bách'] || result['Mức độ khẩn cấp'] || 'normal');
             $('#field-tg-mongmuon').val(result['thoi_gian_mong_muon_ban_ve'] || result['Thời gian mong muốn có bản vẽ'] || result['TG mong muốn'] || '');
@@ -1591,15 +1437,12 @@ async function saveProject() {
     $('.invalid-feedback').remove();
     
     // Validation - Kiểm tra các trường bắt buộc
-    const selectedCustomer = ($('#field-khachhang-select').val() || '').trim();
-    const typedCustomer = ($('#field-khachhang').val() || '').trim();
-    const khachhang = typedCustomer || selectedCustomer;
+    const khachhang = getCustomerFieldValue();
     const tensanpham = $('#field-tensanpham').val().trim();
     const lienhe = $('#field-lienhe').val().trim();
     let hasError = false;
     
-    if (!khachhang) {
-        showFieldError($('#field-khachhang'), 'Khách hàng là trường bắt buộc');
+    if (!validateCustomerField()) {
         hasError = true;
     }
     
@@ -1640,12 +1483,6 @@ async function saveProject() {
         'nguoi_lien_he_kh': $('#field-lienhe').val().trim(),
         'so_luong': $('#field-soluong').val(),
         'ma_po': $('#field-mapo').val().trim(),
-        'ma_ban_ve': ($('#field-mabave').val() || $('#field-mabave_chinh').val() || '').trim(),
-        'ma_ban_ve_ky_thuat': $('#field-mabavkythuat').val().trim(),
-        'ma_me': $('#field-mame').val().trim(),
-        'loai_san_pham': $('#field-loaisanpham').val().trim(),
-        'nhan_vien_thiet_ke': $('#field-kysu').val().trim(),
-        'tinh_trang_hoan_thanh': $('#field-tinhtrang').val().trim(),
         'urgency_level': $('#field-capbach').val(),
         'thoi_gian_mong_muon_ban_ve': $('#field-tg-mongmuon').val(),
         'thoi_gian_hoan_thanh_ke_hoach': $('#field-tg-hoanthanh').val(),
@@ -1658,12 +1495,6 @@ async function saveProject() {
         'Người liên hệ (KH)': $('#field-lienhe').val().trim(),
         'Số lượng': $('#field-soluong').val(),
         'Mã PO': $('#field-mapo').val().trim(),
-        'Mã bản vẽ': ($('#field-mabave').val() || $('#field-mabave_chinh').val() || '').trim(),
-        'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': $('#field-mabavkythuat').val().trim(),
-        'Mã mẹ': $('#field-mame').val().trim(),
-        'Loại sản phẩm': $('#field-loaisanpham').val().trim(),
-        'Kỹ sư': $('#field-kysu').val().trim(),
-        'Tình trạng': $('#field-tinhtrang').val().trim(),
         'Tính cấp bách': $('#field-capbach').val(),
         'TG mong muốn': $('#field-tg-mongmuon').val(),
         'TG hoàn thành': $('#field-tg-hoanthanh').val()
@@ -1912,30 +1743,46 @@ function applyColumnVisibility() {
     renderProjectsTable();
 }
 
-/**
- * Setup quick action handlers
- */
-function setupQuickActionHandlers() {
-    // Quick view
-    $('.quick-view').click(function(e) {
-        e.preventDefault();
-        const id = $(this).data('id');
-        viewProject(id);
+function hideProjectContextMenu() {
+    $('#project-row-context-menu').hide().removeData('rowId');
+}
+
+function showProjectContextMenu(x, y, rowId) {
+    const menu = $('#project-row-context-menu');
+    if (!menu.length) return;
+    menu.data('rowId', rowId).css({ left: x, top: y, display: 'block' });
+}
+
+function setupProjectContextMenuHandlers() {
+    const menu = $('#project-row-context-menu');
+    if (!menu.length) return;
+
+    menu.off('click.ctxActions');
+    menu.on('click.ctxActions', '.ctx-view', function() {
+        const id = menu.data('rowId');
+        hideProjectContextMenu();
+        if (id) viewProject(id);
     });
-    
-    // Quick edit
-    $('.quick-edit').click(function(e) {
-        e.preventDefault();
-        const id = $(this).data('id');
-        editProject(id);
+    menu.on('click.ctxActions', '.ctx-edit', function() {
+        const id = menu.data('rowId');
+        hideProjectContextMenu();
+        if (id) editProject(id);
     });
-    
-    // Quick delete
-    $('.quick-delete').click(function(e) {
-        e.preventDefault();
-        const id = $(this).data('id');
+    menu.on('click.ctxActions', '.ctx-delete', function() {
+        const id = menu.data('rowId');
+        hideProjectContextMenu();
+        if (!id) return;
         ProjectsState.selectedIds = [id];
         showDeleteConfirmModal();
+    });
+
+    $(document).off('click.projectCtxMenu').on('click.projectCtxMenu', function(e) {
+        if (!$(e.target).closest('#project-row-context-menu').length) {
+            hideProjectContextMenu();
+        }
+    });
+    $(window).off('scroll.projectCtxMenu resize.projectCtxMenu').on('scroll.projectCtxMenu resize.projectCtxMenu', function() {
+        hideProjectContextMenu();
     });
 }
 
@@ -1953,5 +1800,9 @@ window.onProjectsTabInit = function() {
     
     if (!ProjectsState.isLoading && ProjectsState.projects.length === 0) {
         loadProjects();
+    }
+    
+    if (ProjectsState.autoScrollToBottomOnLoad) {
+        ensureProjectsInitialScrollToBottom();
     }
 };
