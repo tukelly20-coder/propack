@@ -333,7 +333,7 @@ class APIClient {
             page: 1,
             limit: 50,
             sort_by: 'Tracking ID',
-            sort_order: 'desc'
+            sort_order: 'asc'
         };
         
         return this.request('GET', '/projects', null, { ...defaultParams, ...params });
@@ -371,7 +371,7 @@ class APIClient {
     /**
      * Tìm kiếm dự án (với pagination)
      */
-    async searchProjects(searchText, columns = [], page = 1, limit = 50, sort_by = 'Tracking ID', sort_order = 'desc') {
+    async searchProjects(searchText, columns = [], page = 1, limit = 50, sort_by = 'Tracking ID', sort_order = 'asc') {
         return this.request('POST', '/projects/search', { 
             search: searchText, 
             columns,
@@ -385,7 +385,7 @@ class APIClient {
     /**
      * Lọc dự án (với pagination)
      */
-    async filterProjects(filters, page = 1, limit = 50, sort_by = 'Tracking ID', sort_order = 'desc') {
+    async filterProjects(filters, page = 1, limit = 50, sort_by = 'Tracking ID', sort_order = 'asc') {
         return this.request('POST', '/projects/filter', {
             ...filters,
             page,

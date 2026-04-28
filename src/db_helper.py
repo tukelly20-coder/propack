@@ -1253,7 +1253,7 @@ def filter_data(data, column_filters):
     return results
 
 
-def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_order="asc"):
     """
     Tìm kiếm TRỰC TIẾP bằng SQL (hiệu suất cao)
     Thay vì load all data rồi filter bằng Python, sử dụng SQL WHERE
@@ -1373,7 +1373,7 @@ def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_o
         return get_paged_data(filtered, page, limit, sort_by, sort_order)
 
 
-def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sort_order="asc"):
     """
     Lọc dữ liệu TRỰC TIẾP bằng SQL (hiệu suất cao)
     
@@ -1585,7 +1585,7 @@ def _convert_rows_to_format(rows):
     return data
 
 
-def get_paged_data(data, page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+def get_paged_data(data, page=1, limit=50, sort_by="Tracking ID", sort_order="asc"):
     """
     Lấy dữ liệu phân trang với sắp xếp
     Args:
@@ -1619,7 +1619,7 @@ def get_paged_data(data, page=1, limit=50, sort_by="Tracking ID", sort_order="de
     }
 
 
-def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="desc"):
+def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="asc"):
     """
     Lấy dữ liệu phân trang TRỰC TIẾP từ SQL (hiệu suất cao hơn)
     Thay vì load all data rồi phân trang ở Python, thực hiện LIMIT/OFFSET ở SQL

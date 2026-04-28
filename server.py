@@ -17,16 +17,45 @@ import secrets
 import time
 import queue
 import uuid
+import logging
 from flask import Flask, request, jsonify, send_from_directory, make_response, session, Response, stream_with_context
 from flask_cors import CORS
 
 # ========================================================================
 # Utility Functions
 # ========================================================================
+def configure_logging():
+    """Configure consistent terminal logging for the unified server."""
+    log_level = os.getenv('SERVER_LOG_LEVEL', 'INFO').upper()
+    level = getattr(logging, log_level, logging.INFO)
+
+    formatter = logging.Formatter(
+        fmt='%(asctime)s | %(levelname)-7s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+    root_logger.setLevel(level)
+
+    # Hide verbose development request logs from Flask/Werkzeug.
+    logging.getLogger('werkzeug').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+
+configure_logging()
+LOGGER = logging.getLogger('unified_server')
+
+
 def safe_print(*args, **kwargs):
     """Thread-safe print wrapper"""
     try:
-        print(*args, **kwargs)
+        sep = kwargs.get('sep', ' ')
+        msg = sep.join(str(a) for a in args)
+        LOGGER.info(msg)
     except Exception:
         pass  # Silently ignore print errors
 
@@ -37,6 +66,34 @@ def safe_print(*args, **kwargs):
 app = Flask(__name__,
             template_folder='web/templates',
             static_folder='web/static')
+
+REQUEST_LOG_ENABLED = os.getenv('SERVER_LOG_REQUESTS', '1') == '1'
+STATIC_LOG_ENABLED = os.getenv('SERVER_LOG_STATIC', '0') == '1'
+
+
+@app.before_request
+def start_request_timer():
+    request._start_time = time.perf_counter()
+
+
+@app.after_request
+def log_http_request(response):
+    if not REQUEST_LOG_ENABLED:
+        return response
+
+    path = request.path or ''
+    if not STATIC_LOG_ENABLED and (
+        path.startswith('/js/') or
+        path.startswith('/css/') or
+        path.startswith('/static/') or
+        path == '/favicon.ico'
+    ):
+        return response
+
+    duration_ms = (time.perf_counter() - getattr(request, '_start_time', time.perf_counter())) * 1000
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '-')
+    safe_print(f"[HTTP] {client_ip} | {request.method} {path} | {response.status_code} | {duration_ms:.1f} ms")
+    return response
 
 # Flask Session Configuration
 app.secret_key = 'propack-vp-secret-key-2024'
@@ -155,13 +212,13 @@ def load_data():
                             for item in history:
                                 if 'parent_code' not in item:
                                     item['parent_code'] = ''
-                        print(f"Load success with encoding: {encoding}")
+                        safe_print(f"[Storage] Load success with encoding: {encoding}")
                         return used, history
                 except Exception as e:
                     continue
         return {}, []
     except Exception as e:
-        print(f"Load file error: {e}")
+        safe_print(f"[Storage] Load file error: {e}")
         return [], []
 
 def save_data_data(used_codes_param, history_param):
@@ -176,7 +233,7 @@ def save_data_data(used_codes_param, history_param):
         with open(STORAGE_PATH, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        print(f"Loi khi save file: {e}")
+        safe_print(f"[Storage] Loi khi save file: {e}")
 
 # Load initial data
 used_codes, history = load_data()
@@ -513,7 +570,7 @@ def socket_api():
             page = req_data.get('page', 1)
             limit = req_data.get('limit', 50)
             sort_by = req_data.get('sort_by', 'Tracking ID')
-            sort_order = req_data.get('sort_order', 'desc')
+            sort_order = req_data.get('sort_order', 'asc')
             result = get_paged_data_sql(page, limit, sort_by, sort_order)
             response_data = result
             
@@ -1190,7 +1247,7 @@ def api_projects():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 50))
         sort_by = request.args.get('sort_by', 'Tracking ID')
-        sort_order = request.args.get('sort_order', 'desc')
+        sort_order = request.args.get('sort_order', 'asc')
         
         result = get_paged_data_sql(page, limit, sort_by, sort_order)
         return jsonify(result)
@@ -1265,7 +1322,7 @@ def api_projects_search():
     page = data.get('page', 1)
     limit = data.get('limit', 50)
     sort_by = data.get('sort_by', 'Tracking ID')
-    sort_order = data.get('sort_order', 'desc')
+    sort_order = data.get('sort_order', 'asc')
     
     from src.db_helper import search_data_sql
     result = search_data_sql(search_text, page, limit, sort_by, sort_order)
@@ -1282,7 +1339,7 @@ def api_projects_filter():
     page = data.get('page', 1)
     limit = data.get('limit', 50)
     sort_by = data.get('sort_by', 'Tracking ID')
-    sort_order = data.get('sort_order', 'desc')
+    sort_order = data.get('sort_order', 'asc')
     
     # Remove pagination keys from filters
     filters = {k: v for k, v in data.items() if k not in ['page', 'limit', 'sort_by', 'sort_order']}
@@ -3691,7 +3748,7 @@ def handle_tcp_client(client_socket, client_address):
             page = request.get('page', 1)
             limit = request.get('limit', 50)
             sort_by = request.get('sort_by', 'Tracking ID')
-            sort_order = request.get('sort_order', 'desc')
+            sort_order = request.get('sort_order', 'asc')
             result = get_paged_data_sql(page, limit, sort_by, sort_order)
             response_data = result
             
@@ -4002,6 +4059,24 @@ def run_tcp_server(port):
             break
 
 
+def print_startup_banner(http_port=8001, tcp_port=12345):
+    border = '=' * 72
+    safe_print(border)
+    safe_print('Unified Server | Multi-Port Runtime')
+    safe_print(border)
+    safe_print(f"[HTTP] Web UI        : http://localhost:{http_port}")
+    safe_print(f"[HTTP] REST API      : http://localhost:{http_port}/api/projects")
+    safe_print(f"[HTTP] Login         : http://localhost:{http_port}/api/login")
+    safe_print(f"[HTTP] Tool Open API : http://localhost:{http_port}/api/tool-search")
+    safe_print(f"[TCP ] Legacy Socket : localhost:{tcp_port}")
+    safe_print(
+        f"[LOG ] level={os.getenv('SERVER_LOG_LEVEL', 'INFO').upper()} "
+        f"requests={'on' if REQUEST_LOG_ENABLED else 'off'} "
+        f"static={'on' if STATIC_LOG_ENABLED else 'off'}"
+    )
+    safe_print(border)
+
+
 # ========================================================================
 # Run Server on Multiple Ports (8001 and 12345)
 # ========================================================================
@@ -4009,20 +4084,8 @@ def run_tcp_server(port):
 if __name__ == '__main__':
     import threading
     import time
-    
-    print("=" * 60)
-    print("Unified Server - Running on Ports 8001 & 12345")
-    print("=" * 60)
-    print("Web UI: http://localhost:8001")
-    print("Web UI (Legacy): http://localhost:12345")
-    print("REST API: http://localhost:8001/api/projects")
-    print("Login: http://localhost:8001/api/login")
-    print("Tool Open: http://localhost:8001/api/tool-search")
-    print("=" * 60)
-    print("Server is listening on BOTH ports for backward compatibility")
-    print("Port 12345: TCP Socket Server (for old client V7)")
-    print("Port 8001: HTTP Server (for new client V8)")
-    print("=" * 60)
+
+    print_startup_banner(http_port=8001, tcp_port=12345)
     
     # Run Flask HTTP server on port 8001
     def run_http_server(port):
@@ -4037,14 +4100,12 @@ if __name__ == '__main__':
     # Start TCP socket server on port 12345 (for legacy V7 client)
     tcp_thread = threading.Thread(target=run_tcp_server, args=(12345,), daemon=True)
     tcp_thread.start()
-    
-    print("Servers started:")
-    print("  - HTTP Server: http://localhost:8001")
-    print("  - TCP Socket Server: localhost:12345")
+
+    safe_print("[System] Servers started successfully")
     
     # Keep main thread alive
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nShutting down servers...")
+        safe_print("[System] Shutting down servers...")

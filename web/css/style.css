@@ -132,8 +132,6 @@ body {
 
 #projects-table tbody tr {
     transition: background-color 0.15s ease;
-    height: 36px;
-    max-height: 36px;
 }
 
 #projects-table tbody tr:hover {
@@ -141,10 +139,10 @@ body {
 }
 
 #projects-table tbody td {
-    padding: 4px 8px;
-    vertical-align: middle;
+    padding: 6px 10px;
+    vertical-align: top;
     border: 1px solid #ddd;
-    line-height: 1.3;
+    line-height: 1.35;
 }
 
 /* Row selection */
@@ -2357,10 +2355,50 @@ body.resizing .table * {
     z-index: 30;
 }
 
+#projects-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+}
+
+.projects-table-wrap {
+    max-height: calc(100vh - 230px);
+    overflow: auto;
+}
+
+#projects-table thead th {
+    width: auto !important;
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.25;
+}
+
 #projects-table tbody td {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+/* Keep compact columns readable */
+#projects-table th:nth-child(1), #projects-table td:nth-child(1) { width: 48px; text-align: center; }
+#projects-table th:nth-child(2), #projects-table td:nth-child(2) { width: 80px; text-align: center; }
+#projects-table th:nth-child(3), #projects-table td:nth-child(3) { width: 95px; }
+#projects-table th:nth-child(9), #projects-table td:nth-child(9) { width: 64px; text-align: center; }
+#projects-table th:nth-child(15), #projects-table td:nth-child(15) { width: 88px; text-align: center; }
+#projects-table th:nth-child(21), #projects-table td:nth-child(21) { width: 58px; text-align: center; }
+
+/* Long text columns wrap naturally to reduce horizontal scroll */
+#projects-table th:nth-child(4), #projects-table td:nth-child(4),
+#projects-table th:nth-child(6), #projects-table td:nth-child(6),
+#projects-table th:nth-child(7), #projects-table td:nth-child(7),
+#projects-table th:nth-child(10), #projects-table td:nth-child(10),
+#projects-table th:nth-child(11), #projects-table td:nth-child(11),
+#projects-table th:nth-child(12), #projects-table td:nth-child(12),
+#projects-table th:nth-child(13), #projects-table td:nth-child(13),
+#projects-table th:nth-child(17), #projects-table td:nth-child(17),
+#projects-table th:nth-child(18), #projects-table td:nth-child(18) {
+    width: 120px;
 }
 
 #projects-table tbody td .badge,
