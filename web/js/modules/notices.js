@@ -106,43 +106,21 @@ function renderNoticesContent() {
     const container = document.getElementById('notices-container');
     
     container.innerHTML = `
-        <!-- Optimized Toolbar -->
-        <div class="card mb-3">
+        <!-- Compact Toolbar -->
+        <div class="card mb-2 notices-toolbar-card">
             <div class="card-body py-2">
-                <!-- Row 1: Action Buttons -->
-                <div class="row g-2 align-items-center mb-2">
-                    <!-- Group 1: Main Actions -->
-                    <div class="col-auto">
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-primary btn-sm" id="btn-accept-selected-notice" disabled title="Nhận các việc đang chọn">
-                                <i class="bi bi-check2-square"></i> Nhận đã chọn
-                            </button>
-                            <button class="btn btn-outline-primary btn-sm" id="btn-view-selected-notice" disabled title="Xem chi tiết thông báo đang chọn">
-                                <i class="bi bi-eye"></i> Xem chi tiết
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="col-auto"><div class="vr"></div></div>
-                    
-                    <!-- Group 2: Quick Actions -->
-                    <div class="col-auto">
-                        <button class="btn btn-secondary btn-sm" id="btn-refresh-notice" title="${t('refresh')}">
+                <div class="notices-toolbar">
+                    <div class="notices-toolbar-actions">
+                        <button class="btn btn-primary btn-sm" id="btn-accept-selected-notice" disabled title="Nhận các việc đang chọn">
+                            <i class="bi bi-check2-square"></i> Nhận
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" id="btn-refresh-notice" title="${t('refresh')}">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
-                        <button class="btn btn-outline-secondary btn-sm" id="btn-toggle-columns-notice" title="${t('toggle_columns')}">
-                            <i class="bi bi-layout-columns"></i> <span class="d-none d-md-inline">${t('btn_toggle_columns')}</span>
-                        </button>
-                    </div>
-                    
-                    <div class="col-auto"><div class="vr"></div></div>
-                    
-                    <!-- Group 3: Export -->
-                    <div class="col-auto">
                         <div class="dropdown">
-                            <button class="btn btn-info btn-sm dropdown-toggle" type="button" 
-                                    data-bs-toggle="dropdown" aria-expanded="false">
-                                <i class="bi bi-download"></i> ${t('export')}
+                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" 
+                                    data-bs-toggle="dropdown" aria-expanded="false" title="${t('export')}">
+                                <i class="bi bi-download"></i>
                             </button>
                             <ul class="dropdown-menu">
                                 <li><a class="dropdown-item" href="#" id="btn-export-excel-notice">
@@ -154,49 +132,36 @@ function renderNoticesContent() {
                             </ul>
                         </div>
                     </div>
-                    
-                    <!-- Group 4: Search & Filters -->
-                    <div class="col ms-auto">
-                        <div class="d-flex float-end align-items-center gap-2">
-                            <!-- Quick Status Filter -->
-                            <select class="form-select form-select-sm" id="filter-status-notice" style="width: 140px;" title="${t('notice_filter_status')}">
-                                <option value="">${t('notice_all_status')}</option>
-                                <option value="pending">${t('status_pending_option')}</option>
-                                <option value="accepted">${t('status_accepted')}</option>
-                            </select>
-                            
-                            <!-- Quick Urgency Filter -->
-                            <select class="form-select form-select-sm" id="filter-urgency-notice" style="width: 130px;" title="${t('notice_filter_urgency')}">
-                                <option value="">${t('notice_all_urgency')}</option>
-                                <option value="normal">${t('urgency_normal')}</option>
-                                <option value="urgent">${t('urgency_urgent')}</option>
-                                <option value="very_urgent">${t('urgency_very_urgent')}</option>
-                            </select>
-                            
-                            <!-- Search Input -->
-                            <div class="input-group input-group-sm">
-                                <input type="text" class="form-control" id="search-input-notice" 
-                                       placeholder="${t('search_placeholder')}" style="width: 200px;">
-                                <button class="btn btn-outline-secondary" type="button" id="btn-clear-search-notice" title="${t('clear_search')}">
-                                    <i class="bi bi-x-lg"></i>
-                                </button>
-                            </div>
-                        </div>
+
+                    <div class="notices-toolbar-stats">
+                        <span class="notice-stat-chip">${t('stat_total')}: <strong id="stat-total-notices">0</strong></span>
+                        <span class="notice-stat-chip is-pending">${t('stat_pending')}: <strong id="stat-pending-notices">0</strong></span>
+                        <span class="notice-stat-chip is-accepted">${t('stat_accepted')}: <strong id="stat-accepted-notices">0</strong></span>
+                        <span class="notice-stat-chip is-urgent">${t('stat_urgent')}: <strong id="stat-urgent-notices">0</strong></span>
                     </div>
-                </div>
-                
-                <!-- Stats Cards -->
-                <div class="row g-2">
-                    <div class="col-auto">
-                        <div class="d-flex align-items-center gap-2">
-                            <span class="bg-primary text-white px-2 py-1 rounded"><i class="bi bi-list-ul"></i> ${t('stat_total')}: <span id="stat-total-notices">0</span></span>
-                            <span class="bg-danger text-white px-2 py-1 rounded"><i class="bi bi-clock"></i> ${t('stat_pending')}: <span id="stat-pending-notices">0</span></span>
-                            <span class="bg-success text-white px-2 py-1 rounded"><i class="bi bi-check-circle"></i> ${t('stat_accepted')}: <span id="stat-accepted-notices">0</span></span>
-                            <span class="bg-warning text-dark px-2 py-1 rounded"><i class="bi bi-exclamation-triangle"></i> ${t('stat_urgent')}: <span id="stat-urgent-notices">0</span></span>
+
+                    <div class="notices-toolbar-filters">
+                        <select class="form-select form-select-sm" id="filter-status-notice" title="${t('notice_filter_status')}">
+                            <option value="">${t('notice_all_status')}</option>
+                            <option value="pending">${t('status_pending_option')}</option>
+                            <option value="accepted">${t('status_accepted')}</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="filter-urgency-notice" title="${t('notice_filter_urgency')}">
+                            <option value="">${t('notice_all_urgency')}</option>
+                            <option value="normal">${t('urgency_normal')}</option>
+                            <option value="urgent">${t('urgency_urgent')}</option>
+                            <option value="very_urgent">${t('urgency_very_urgent')}</option>
+                        </select>
+                        <div class="input-group input-group-sm notices-search">
+                            <input type="text" class="form-control" id="search-input-notice" 
+                                   placeholder="${t('notice_search_placeholder') || t('search_placeholder') || 'Tìm kiếm...'}">
+                            <button class="btn btn-outline-secondary" type="button" id="btn-clear-search-notice" title="${t('clear_search')}">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
                         </div>
-                    </div>
-                    <div class="col-auto ms-auto">
-                        <small class="text-muted"><i class="bi bi-info-circle"></i> <span id="notice-scope-label">${t('auto_refresh_note')}</span></small>
+                        <span class="notice-realtime-status" id="notice-realtime-status" title="${t('auto_refresh_note')}">
+                            <i class="bi bi-broadcast-pin"></i> Đang kết nối
+                        </span>
                     </div>
                 </div>
             </div>
@@ -212,8 +177,8 @@ function renderNoticesContent() {
                 <!-- Generated by JS -->
             </div>
             <div class="column-selector-footer">
-                <button class="btn btn-sm btn-outline-secondary" id="btn-reset-columns-notice">${t('column_reset')}</button>
-                <button class="btn btn-sm btn-primary" id="btn-apply-columns-notice">${t('column_apply')}</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="btn-reset-columns-notice">${t('column_reset')}</button>
+                    <button class="btn btn-sm btn-primary" id="btn-apply-columns-notice">${t('column_apply')}</button>
             </div>
         </div>
 
@@ -224,12 +189,7 @@ function renderNoticesContent() {
                     <input type="checkbox" id="select-all-notices" class="form-check-input">
                     <span class="fw-semibold">${t('notices_title')}</span>
                 </div>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="notice-realtime-status" id="notice-realtime-status">
-                        <i class="bi bi-broadcast-pin"></i> Realtime: Đang kết nối...
-                    </span>
-                    <small class="text-muted" id="notice-selection-info">0 đã chọn</small>
-                </div>
+                <small class="text-muted" id="notice-selection-info">0 đã chọn</small>
             </div>
             <div class="card-body p-0">
                 <div class="notice-feed-list" id="notices-table-body">
@@ -1418,7 +1378,11 @@ function updateNoticeRealtimeStatus(text, connected) {
     if (!statusEl.length) return;
 
     const icon = connected ? 'bi-broadcast-pin' : 'bi-wifi-off';
-    statusEl.html(`<i class="bi ${icon}"></i> ${escapeHtml(text)}`);
+    const compactText = String(text || '')
+        .replace(/^Realtime:\s*/i, '')
+        .replace(/\.{3}$/, '')
+        .trim();
+    statusEl.html(`<i class="bi ${icon}"></i> ${escapeHtml(compactText || 'Đang kết nối')}`);
     statusEl.removeClass('connected disconnected');
     statusEl.addClass(connected ? 'connected' : 'disconnected');
 }

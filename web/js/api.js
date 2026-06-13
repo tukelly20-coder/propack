@@ -472,7 +472,7 @@ class APIClient {
     /**
      * Tạo mã bản vẽ mới
      */
-    async createCode(name, category, employee) {
+    async createCode(name, category, employee, planCode = '') {
         try {
             const response = await fetch(`${this.baseUrl}/codes/create`, {
                 method: 'POST',
@@ -483,7 +483,8 @@ class APIClient {
                 body: JSON.stringify({
                     name: name,
                     category: category,
-                    employee: employee
+                    employee: employee,
+                    plan_code: planCode
                 })
             });
             
@@ -535,8 +536,12 @@ class APIClient {
     /**
      * Lấy lịch sử tạo mã (có phân trang)
      */
-    async getCodeHistory(page = 1, limit = 100) {
-        return this.request('GET', '/codes/history', null, { page, limit });
+    async getCodeHistory(page = 1, limit = 100, search = '') {
+        const params = { page, limit };
+        if (search) {
+            params.search = search;
+        }
+        return this.request('GET', '/codes/history', null, params);
     }
     
     /**

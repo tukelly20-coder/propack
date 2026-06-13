@@ -22,7 +22,12 @@ const ProjectsState = {
     filterCustomer: '',
     // Customers list for dropdown
     customers: [],
+    quickAddDraft: {},
+    quickAddStarted: false,
+    quickAddPreviewId: null,
     autoScrollToBottomOnLoad: true,
+    activeCell: null,
+    editingCell: null,
     // Column visibility
     visibleColumns: {
         'tracking_id': true,
@@ -38,8 +43,10 @@ const ProjectsState = {
         'mabavkythuat': true,
         'mame': true,
         'loaisanpham': true,
+        'nhanvienthietke': true,
         'tinhtrang': true,
         'dokhan': true,
+        'tg_tiepnhan': true,
         'tg_mongmuon': true,
         'tg_hoanthanh': true,
         'trangthai': true,
@@ -59,14 +66,75 @@ const ProjectsState = {
         { key: 'mabavkythuat', label: 'Mã bản vẽ KT', default: true },
         { key: 'mabave', label: 'Mã bản vẽ', default: true },
         { key: 'mame', label: 'Mã mẹ', default: true },
-        { key: 'loaisanpham', label: 'Loại sản phẩm', default: false },
+        { key: 'loaisanpham', label: 'Loại sản phẩm', default: true },
+        { key: 'nhanvienthietke', label: 'Nhân viên thiết kế', default: true },
         { key: 'dokhan', label: 'Độ khẩn', default: true },
         { key: 'tinhtrang', label: 'Tình trạng', default: true },
-        { key: 'tg_mongmuon', label: 'TG mong muốn', default: false },
-        { key: 'tg_hoanthanh', label: 'TG hoàn thành', default: false },
+        { key: 'tg_tiepnhan', label: 'TG tiếp nhận', default: true },
+        { key: 'tg_mongmuon', label: 'TG mong muốn', default: true },
+        { key: 'tg_hoanthanh', label: 'TG hoàn thành', default: true },
         { key: 'trangthai', label: 'Trạng thái', default: true },
-        { key: 'nguoinhan', label: 'Người nhận', default: false }
+        { key: 'nguoinhan', label: 'Người nhận', default: true }
     ]
+};
+
+const PROJECT_VISIBLE_COLUMNS_STORAGE_KEY = 'projects_visible_columns_v2';
+
+const PROJECT_SPREADSHEET_COLUMNS = [
+    { key: 'tracking_id', label: 'STT', zhLabel: '序号', width: 88, readOnly: true, fields: ['Tracking ID', 'tracking_id'], className: 'col-stt' },
+    { key: 'ngay', label: 'Ngày', zhLabel: '日期', width: 96, fields: ['Ngày', 'Created_Date'], updateKey: 'Ngày', type: 'date' },
+    { key: 'khachhang', label: 'Khách hàng', zhLabel: '客户', width: 118, fields: ['Khách hàng', 'khach_hang'], updateKey: 'Khách hàng' },
+    { key: 'nhanvienkd', label: 'Nhân viên kinh doanh', zhLabel: '业务员', width: 126, fields: ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], updateKey: 'Nhân viên kinh doanh' },
+    { key: 'tensanpham', label: 'Tên sản phẩm', zhLabel: '客户需求名称', width: 150, fields: ['Tên sản phẩm', 'ten_san_pham'], updateKey: 'Tên sản phẩm' },
+    { key: 'quycach', label: 'Quy cách', zhLabel: '客户需求规格', width: 160, fields: ['Quy cách', 'quy_cach'], updateKey: 'Quy cách' },
+    { key: 'lienhe', label: 'Người liên hệ (KH)', zhLabel: '对接人', width: 114, fields: ['Người liên hệ (KH)', 'Người liên hệ\n(KH)', 'nguoi_lien_he_kh'], updateKey: 'Người liên hệ (KH)' },
+    { key: 'soluong', label: 'Số lượng', zhLabel: '数量', width: 72, fields: ['Số lượng', 'so_luong'], updateKey: 'Số lượng', type: 'number', className: 'text-center' },
+    { key: 'mapo', label: 'Mã PO', zhLabel: 'PO号', width: 112, fields: ['Mã PO', 'ma_po'], updateKey: 'Mã PO' },
+    { key: 'mabave', label: 'Mã bản vẽ phương án', zhLabel: '方案图号（下单前）', width: 146, fields: ['Mã bản vẽ phương án', 'Mã bản vẽ phương án (mã trước khi đặt hàng)', 'Mã bản vẽ', 'ma_ban_ve'], updateKey: 'Mã bản vẽ phương án (mã trước khi đặt hàng)' },
+    { key: 'mabavkythuat', label: 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)', zhLabel: '工程图号（下单后）', width: 166, fields: ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)', 'Mã bản vẽ kỹ thuật', 'ma_ban_ve_ky_thuat'], updateKey: 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)' },
+    { key: 'mame', label: 'Mã mẹ', zhLabel: '母料号', width: 118, fields: ['Mã mẹ', 'Mã mẹ ', 'Mã thành phẩm (Mã mẹ)', 'ma_me'], updateKey: 'Mã mẹ' },
+    { key: 'loaisanpham', label: 'Loại sản phẩm', zhLabel: '产品类型', width: 168, fields: ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], updateKey: 'Loại sản phẩm', type: 'select', optionsSource: 'productTypes' },
+    { key: 'nhanvienthietke', label: 'Nhân viên thiết kế', zhLabel: '设计者', width: 122, fields: ['Nhân viên thiết kế', 'Kỹ sư thiết kế', 'nhan_vien_thiet_ke'], updateKey: 'Nhân viên thiết kế', type: 'select', optionsSource: 'engineers' },
+    { key: 'tinhtrang', label: 'Tình trạng hoàn thành dự án', zhLabel: '工程完成情况', width: 166, fields: ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], updateKey: 'Tình trạng hoàn thành dự án', type: 'select', optionsSource: 'completionStatus' },
+    { key: 'dokhan', label: 'Tính cấp bách', zhLabel: '紧急程度', width: 112, fields: ['Tính cấp bách', 'Mức độ khẩn cấp', 'Độ khẩn', 'urgency_level'], updateKey: 'Tính cấp bách', type: 'select', optionsSource: 'urgency' },
+    { key: 'tg_tiepnhan', label: 'Thời gian tiếp nhận phương án', zhLabel: '接收方案时间', width: 142, fields: ['Thời gian nhận', 'accepted_at'], updateKey: 'accepted_at', type: 'datetime' },
+    { key: 'tg_mongmuon', label: 'Thời gian mong muốn có bản vẽ', zhLabel: '期望出图时间', width: 146, fields: ['Thời gian mong muốn có bản vẽ', 'TG mong muốn', 'thoi_gian_mong_muon_ban_ve'], updateKey: 'Thời gian mong muốn có bản vẽ', type: 'datetime' },
+    { key: 'tg_hoanthanh', label: 'Thời gian hoàn thành kế hoạch', zhLabel: '方案完成时间', width: 146, fields: ['Thời gian hoàn thành kế hoạch', 'TG hoàn thành', 'thoi_gian_hoan_thanh_ke_hoach'], updateKey: 'Thời gian hoàn thành kế hoạch', type: 'datetime' },
+    { key: 'trangthai', label: 'Trạng thái nhận', zhLabel: '接收状态', width: 108, fields: ['is_pending', 'Trạng thái chờ'], updateKey: 'is_pending', type: 'select', optionsSource: 'pendingStatus' },
+    { key: 'nguoinhan', label: 'Người nhận', zhLabel: '接收人', width: 108, fields: ['accepted_by', 'Người nhận'], updateKey: 'accepted_by' }
+];
+
+const PROJECT_SELECT_OPTIONS = {
+    urgency: [
+        { value: 'normal', label: '正常 - Bình thường' },
+        { value: 'urgent', label: '紧急 - Khẩn cấp' },
+        { value: 'very_urgent', label: '非常紧急 - Rất khẩn cấp' }
+    ],
+    pendingStatus: [
+        { value: 'yes', label: 'Chờ nhận / 待接收' },
+        { value: 'no', label: 'Đã nhận / 已接收' }
+    ],
+    completionStatus: [
+        '待出图 - Đang vẽ',
+        '方案已完成 - Đã ra BV',
+        'BOM待建立- Đang làm BOM',
+        'BOM已完成 -  BOM đã hoàn thành',
+        'C类结案-Kết thúc vụ án loại C'
+    ],
+    productTypes: [
+        'WLJ物料架 - Giá đựng vật liệu',
+        'ZZC周转车 - xe trung chuyển',
+        'GZT工作台 - bàn thao tác',
+        'WCP无尘棚 - phòng sạch',
+        'LSX流水线 - băng tải',
+        'ZWJ转弯机 - bang tải chuyển hướng 90*: 180*',
+        'GZL改造类 - sửa đổi',
+        'SJT散件图 - bản vẽ tách chi tiết',
+        'BSX倍速线 - Dây chuyền băng tải tự động',
+        'WLL围栏类 - hàng rào',
+        'GTX滚筒线 - băng tải con lăn'
+    ],
+    engineers: ['孟令宝', '邓氏乔贞', '阮文张', '阮克南', '黄庭字', '孙啸', '陈孟辉']
 };
 
 // ============================================
@@ -83,6 +151,8 @@ function initProjectsModule() {
         window.history.scrollRestoration = 'manual';
     }
     
+    loadProjectColumnVisibility();
+
     // Render the module content
     renderProjectsContent();
     
@@ -114,57 +184,9 @@ function renderProjectsContent() {
         <!-- Optimized Toolbar -->
         <div class="card mb-3">
             <div class="card-body py-2">
-                <!-- Row 1: Action Buttons -->
+                <!-- Row 1: Search & Filters -->
                 <div class="row g-2 align-items-center mb-2">
-                    <!-- Group 1: Main Actions -->
-                    <div class="col-auto">
-                        <div class="btn-group" role="group">
-                            <button class="btn btn-success btn-sm" id="btn-add-project" title="${t('add_project')}">
-                                <i class="bi bi-plus-circle"></i> <span data-i18n="add">${t('add')}</span>
-                            </button>
-                            <button class="btn btn-warning btn-sm" id="btn-edit-project" disabled title="${t('edit_project')}">
-                                <i class="bi bi-pencil"></i> <span data-i18n="edit">${t('edit')}</span>
-                            </button>
-                            <button class="btn btn-danger btn-sm" id="btn-delete-project" disabled title="${t('delete_project')}">
-                                <i class="bi bi-trash"></i> <span data-i18n="delete">${t('delete')}</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="col-auto"><div class="vr"></div></div>
-                    
-                    <!-- Group 2: Quick Actions -->
-                    <div class="col-auto">
-                        <button class="btn btn-secondary btn-sm" id="btn-refresh-project" title="${t('refresh_projects')}">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                        <button class="btn btn-outline-secondary btn-sm" id="btn-toggle-columns" title="${t('toggle_columns')}">
-                            <i class="bi bi-layout-columns"></i> <span class="d-none d-md-inline" data-i18n="btn_toggle_columns">${t('btn_toggle_columns')}</span>
-                        </button>
-                    </div>
-                    
-                    <div class="col-auto"><div class="vr"></div></div>
-                    
-                    <!-- Group 3: Export -->
-                    <div class="col-auto">
-                        <div class="dropdown">
-                            <button class="btn btn-info btn-sm dropdown-toggle" type="button" 
-                                    data-bs-toggle="dropdown" aria-expanded="false">
-                                <i class="bi bi-download"></i> <span data-i18n="export">${t('export')}</span>
-                            </button>
-                            <ul class="dropdown-menu">
-                                <li><a class="dropdown-item" href="#" id="btn-export-excel-project">
-                                    <i class="bi bi-file-earmark-excel text-success"></i> <span data-i18n="export_excel">${t('export_excel')}</span>
-                                </a></li>
-                                <li><a class="dropdown-item" href="#" id="btn-export-csv-project">
-                                    <i class="bi bi-file-earmark-text text-primary"></i> <span data-i18n="export_csv">${t('export_csv')}</span>
-                                </a></li>
-                            </ul>
-                        </div>
-                    </div>
-                    
-                    <!-- Group 4: Search & Filters -->
-                    <div class="col ms-auto">
+                    <div class="col">
                         <div class="d-flex float-end align-items-center gap-2">
                             <!-- Quick Status Filter -->
                             <select class="form-select form-select-sm" id="filter-status" style="width: 140px;" title="${t('filter_status')}">
@@ -214,7 +236,7 @@ function renderProjectsContent() {
         <!-- Data Table -->
         <div class="card">
             <div class="card-body p-0">
-                <div class="table-responsive" style="max-height: calc(100vh - 280px); overflow-y: auto;">
+                <div class="table-responsive" id="projects-table-wrap" style="max-height: calc(100vh - 280px); overflow-y: auto;">
                     <table id="projects-table" class="table table-striped table-hover table-bordered mb-0" 
                            style="width: 100%; table-layout: fixed;">
                         <thead class="table-light">
@@ -248,10 +270,16 @@ function renderProjectsContent() {
             </div>
         </div>
         <div id="project-row-context-menu" class="dropdown-menu" style="position: fixed; display: none; z-index: 2000;">
-            <button type="button" class="dropdown-item ctx-view"><i class="bi bi-eye text-info"></i> ${t('quick_view')}</button>
-            <button type="button" class="dropdown-item ctx-edit"><i class="bi bi-pencil text-warning"></i> ${t('quick_edit')}</button>
+            <button type="button" class="dropdown-item ctx-add"><i class="bi bi-plus-circle text-success"></i> <span data-menu-label="add">${t('add')}</span></button>
+            <button type="button" class="dropdown-item ctx-view"><i class="bi bi-eye text-info"></i> <span data-menu-label="view">${t('quick_view')}</span></button>
+            <button type="button" class="dropdown-item ctx-edit"><i class="bi bi-pencil text-warning"></i> <span data-menu-label="edit">${t('quick_edit')}</span></button>
+            <button type="button" class="dropdown-item text-danger ctx-delete"><i class="bi bi-trash"></i> <span data-menu-label="delete">${t('quick_delete')}</span></button>
             <div class="dropdown-divider"></div>
-            <button type="button" class="dropdown-item text-danger ctx-delete"><i class="bi bi-trash"></i> ${t('quick_delete')}</button>
+            <button type="button" class="dropdown-item ctx-refresh"><i class="bi bi-arrow-clockwise text-secondary"></i> <span data-menu-label="refresh">${t('refresh')}</span></button>
+            <button type="button" class="dropdown-item ctx-columns"><i class="bi bi-layout-columns text-secondary"></i> <span data-menu-label="columns">${t('btn_toggle_columns')}</span></button>
+            <div class="dropdown-divider"></div>
+            <button type="button" class="dropdown-item ctx-export-excel"><i class="bi bi-file-earmark-excel text-success"></i> <span data-menu-label="exportExcel">${t('export_excel')}</span></button>
+            <button type="button" class="dropdown-item ctx-export-csv"><i class="bi bi-file-earmark-text text-primary"></i> <span data-menu-label="exportCsv">${t('export_csv')}</span></button>
         </div>
         
         <!-- Add/Edit Modal -->
@@ -330,9 +358,9 @@ function renderProjectsContent() {
                                 <div class="col-12">
                                     <label class="form-label">${t('form_capbach')}</label>
                                     <select class="form-select" id="field-capbach">
-                                        <option value="normal">${t('urgency_normal_option')}</option>
-                                        <option value="urgent">${t('urgency_urgent_option')}</option>
-                                        <option value="very_urgent">${t('urgency_very_urgent_option')}</option>
+                                        <option value="normal">正常 - Bình thường</option>
+                                        <option value="urgent">紧急 - Khẩn cấp</option>
+                                        <option value="very_urgent">非常紧急 - Rất khẩn cấp</option>
                                     </select>
                                 </div>
                                 <div class="col-12">
@@ -397,36 +425,6 @@ function renderProjectsContent() {
  * Setup Projects event listeners
  */
 function setupProjectsEvents() {
-    // Add button
-    $('#btn-add-project').click(function() {
-        showProjectModal();
-    });
-    
-    // Edit button
-    $('#btn-edit-project').click(function() {
-        if (ProjectsState.selectedIds.length === 1) {
-            editProject(ProjectsState.selectedIds[0]);
-        }
-    });
-    
-    // Delete button
-    $('#btn-delete-project').click(function() {
-        if (ProjectsState.selectedIds.length > 0) {
-            showDeleteConfirmModal();
-        }
-    });
-    
-    // Refresh button
-    $('#btn-refresh-project').click(function() {
-        ProjectsState.autoScrollToBottomOnLoad = true;
-        loadProjects();
-    });
-    
-    // Column toggle button
-    $('#btn-toggle-columns').click(function() {
-        toggleColumnSelector();
-    });
-    
     // Close column selector
     $('#btn-close-column-selector').click(function() {
         $('#column-selector').hide();
@@ -441,18 +439,6 @@ function setupProjectsEvents() {
     $('#btn-apply-columns').click(function() {
         applyColumnVisibility();
         $('#column-selector').hide();
-    });
-    
-    // Export Excel button
-    $('#btn-export-excel-project').click(function(e) {
-        e.preventDefault();
-        exportToExcel();
-    });
-    
-    // Export CSV button
-    $('#btn-export-csv-project').click(function(e) {
-        e.preventDefault();
-        exportToCSV();
     });
     
     // Filter: Status
@@ -496,7 +482,7 @@ function setupProjectsEvents() {
     
     // Close column selector when clicking outside
     $(document).click(function(e) {
-        if (!$(e.target).closest('#column-selector, #btn-toggle-columns').length) {
+        if (!$(e.target).closest('#column-selector, #project-row-context-menu').length) {
             $('#column-selector').hide();
         }
     });
@@ -559,51 +545,13 @@ function updateProjectsI18n() {
  * Update toolbar buttons with i18n
  */
 function updateToolbarButtonsI18n() {
-    // Add button
-    const btnAdd = $('#btn-add-project');
-    if (btnAdd.length) {
-        btnAdd.html('<i class="bi bi-plus-circle"></i> ' + t('add'));
-        btnAdd.attr('title', t('add_project'));
-    }
-    
-    // Edit button
-    const btnEdit = $('#btn-edit-project');
-    if (btnEdit.length) {
-        btnEdit.html('<i class="bi bi-pencil"></i> ' + t('edit'));
-        btnEdit.attr('title', t('edit_project'));
-    }
-    
-    // Delete button
-    const btnDelete = $('#btn-delete-project');
-    if (btnDelete.length) {
-        btnDelete.html('<i class="bi bi-trash"></i> ' + t('delete'));
-        btnDelete.attr('title', t('delete_project'));
-    }
-    
-    // Refresh button
-    const btnRefresh = $('#btn-refresh-project');
-    if (btnRefresh.length) {
-        btnRefresh.attr('title', t('refresh_projects'));
-    }
-    
-    // Toggle columns button
-    const btnColumns = $('#btn-toggle-columns');
-    if (btnColumns.length) {
-        btnColumns.html('<i class="bi bi-layout-columns"></i> <span class="d-none d-md-inline">' + t('btn_toggle_columns') + '</span>');
-        btnColumns.attr('title', t('toggle_columns'));
-    }
-    
-    // Export button text
-    const exportBtn = $('#projects-container .dropdown-toggle');
-    if (exportBtn.length) {
-        exportBtn.html('<i class="bi bi-download"></i> ' + t('export'));
-    }
-    
     // Search input placeholder
     const searchInput = $('#search-input-project');
     if (searchInput.length) {
         searchInput.attr('placeholder', t('search_placeholder'));
     }
+
+    updateProjectContextMenuI18n();
 }
 
 /**
@@ -659,7 +607,8 @@ async function loadProjects() {
     console.log('[Projects] Loading projects...');
     
     const tbody = $('#projects-table-body');
-    tbody.html(createLoadingState(22));
+    renderProjectsSpreadsheetHeader();
+    tbody.html(createLoadingState(getVisibleProjectColumns().length));
     
     ProjectsState.isLoading = true;
     updateToolbarState();
@@ -734,242 +683,793 @@ function ensureProjectsInitialScrollToBottom(retries = 12) {
  */
 function renderProjectsTable() {
     const tbody = $('#projects-table-body');
-    
-    if (ProjectsState.projects.length === 0) {
-        tbody.html(createEmptyState(t('no_data_projects'), 19));
-        return;
-    }
-    
+    renderProjectsSpreadsheetHeader();
     let html = '';
-    const colKeys = [
-        'tracking_id', 'ngay', 'khachhang', 'nhanvienkd',
-        'tensanpham', 'quycach', 'lienhe', 'soluong', 'mapo', 'mabave',
-        'mabavkythuat', 'mame', 'loaisanpham', 'tinhtrang', 'dokhan',
-        'tg_mongmuon', 'tg_hoanthanh', 'trangthai', 'nguoinhan'
-    ];
+    const columns = getVisibleProjectColumns();
     
-    // Map key to data field
-    const keyToField = {
-        'tracking_id': 'Tracking ID',
-        'ngay': 'Ngày',
-        'khachhang': 'Khách hàng',
-        'nhanvienkd': 'Nhân viên KD',
-        'tensanpham': 'Tên sản phẩm',
-        'quycach': 'Quy cách',
-        'lienhe': 'Người liên hệ (KH)',
-        'soluong': 'Số lượng',
-        'mapo': 'Mã PO',
-        'mabavkythuat': 'Mã bản vẽ KT',
-        'mabave': 'Mã bản vẽ',
-        'mame': 'Mã mẹ',
-        'loaisanpham': 'Loại sản phẩm',
-        'tinhtrang': 'Tình trạng',
-        'dokhan': 'Độ khẩn',
-        'tg_mongmuon': 'TG mong muốn',
-        'tg_hoanthanh': 'TG hoàn thành',
-        'trangthai': 'Trạng thái',
-        'nguoinhan': 'Người nhận'
-    };
+    ProjectsState.projects.forEach((project, rowIndex) => {
+        const trackingId = getProjectValue(project, ['Tracking ID', 'tracking_id'], '');
+        html += `<tr data-id="${escapeHtml(String(trackingId))}" data-row-index="${rowIndex}">`;
 
-    const getProjectValue = (project, keys, fallback = '') => {
-        for (const key of keys) {
-            const value = project[key];
-            if (value === undefined || value === null) continue;
-            if (typeof value === 'string' && value.trim() === '') continue;
-            return value;
-        }
-        return fallback;
-    };
+        columns.forEach((column, colIndex) => {
+            const rawValue = getProjectValue(project, column.fields, '');
+            const displayValue = formatProjectCellValue(column, rawValue, rowIndex);
+            const classes = [
+                'project-sheet-cell',
+                column.readOnly ? 'readonly' : 'editable',
+                column.className || '',
+                getProjectCellStateClass(column, rawValue)
+            ].filter(Boolean).join(' ');
+            html += `
+                <td class="${classes}"
+                    tabindex="0"
+                    data-row="${rowIndex}"
+                    data-col="${colIndex}"
+                    data-key="${column.key}"
+                    data-id="${escapeHtml(String(trackingId))}"
+                    data-update-key="${escapeHtml(String(column.updateKey || ''))}"
+                    data-raw-value="${escapeHtml(String(rawValue || ''))}">
+                    ${displayValue}
+                </td>
+            `;
+        });
 
-    const getStatusText = (rawStatus) => {
-        const status = String(rawStatus || '').toLowerCase().trim();
-        const isZh = window.currentLanguage === 'zh';
-        if (status === 'yes' || status === 'pending') {
-            return isZh ? '待接收' : 'Chờ nhận';
-        }
-        if (status === 'no' || status === 'accepted') {
-            return isZh ? '已接收' : 'Đã nhận';
-        }
-        return rawStatus || '-';
-    };
+        html += '</tr>';
+    });
 
-    const getPendingReceiverText = () => {
-        return window.currentLanguage === 'zh' ? '未接收' : 'Chưa nhận';
-    };
-
-    const getProjectStatusBadge = (rawStatus) => {
-        const status = String(rawStatus || '').toLowerCase().trim();
-        if (status === 'yes' || status === 'pending') {
-            return `<span class="badge bg-danger-subtle text-danger-emphasis">Chờ nhận</span>`;
-        }
-        if (status === 'no' || status === 'accepted') {
-            return `<span class="badge bg-success-subtle text-success-emphasis">Đã nhận</span>`;
-        }
-        return `<span class="badge bg-secondary-subtle text-secondary-emphasis">${escapeHtml(String(rawStatus || '-'))}</span>`;
-    };
-    
-     ProjectsState.projects.forEach((project, index) => {
-          const trackingId = getProjectValue(project, ['Tracking ID', 'tracking_id'], '-');
-          const ngay = getProjectValue(project, ['Ngày', 'Created_Date'], '');
-          const khachHang = getProjectValue(project, ['Khách hàng', 'khach_hang'], '-');
-          const nhanVienKd = getProjectValue(project, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '-');
-          const tenSanPham = getProjectValue(project, ['Tên sản phẩm', 'ten_san_pham'], '-');
-          const quyCach = getProjectValue(project, ['Quy cách', 'quy_cach'], '-');
-          const lienHe = getProjectValue(project, ['Người liên hệ (KH)', 'Người liên hệ\n(KH)', 'nguoi_lien_he_kh'], '-');
-          const soLuong = getProjectValue(project, ['Số lượng', 'so_luong'], '-');
-          const maPo = getProjectValue(project, ['Mã PO', 'ma_po'], '-');
-          const maBanVe = getProjectValue(project, ['Mã bản vẽ', 'ma_ban_ve'], '-');
-          const maBanVeKt = getProjectValue(project, ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)', 'Mã bản vẽ kỹ thuật', 'ma_ban_ve_ky_thuat'], '-');
-          const maMe = getProjectValue(project, ['Mã mẹ', 'Mã mẹ ', 'Mã thành phẩm (Mã mẹ)', 'ma_me'], '-');
-          const loaiSanPham = getProjectValue(project, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '-');
-          const tinhTrang = getProjectValue(project, ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], '-');
-          const doKhan = getProjectValue(project, ['Tính cấp bách', 'Mức độ khẩn cấp', 'Độ khẩn', 'urgency_level'], '');
-          const tgMongMuon = getProjectValue(project, ['Thời gian mong muốn có bản vẽ', 'TG mong muốn', 'thoi_gian_mong_muon_ban_ve'], '');
-          const tgHoanThanh = getProjectValue(project, ['Thời gian hoàn thành kế hoạch', 'TG hoàn thành', 'thoi_gian_hoan_thanh_ke_hoach'], '');
-          const pendingStatus = getProjectValue(project, ['is_pending', 'Trạng thái chờ'], '');
-          const nguoiNhan = getProjectValue(project, ['accepted_by', 'Người nhận', 'accepted_by'], '');
-          
-          html += `<tr data-id="${trackingId}">`;
-         
-          // Column: Tracking ID
-          if (ProjectsState.visibleColumns.tracking_id) {
-              html += `<td><a href="#" class="view-link view-project" data-id="${trackingId}">${trackingId || '-'}</a></td>`;
-          }
-         
-          // Column: Ngày
-          if (ProjectsState.visibleColumns.ngay) {
-              html += `<td>${formatDate(ngay) || '-'}</td>`;
-          }
-         
-          // Column: Khách hàng
-          if (ProjectsState.visibleColumns.khachhang) {
-              html += `<td>${escapeHtml(String(khachHang))}</td>`;
-          }
-         
-          // Column: Nhân viên KD
-          if (ProjectsState.visibleColumns.nhanvienkd) {
-              html += `<td>${escapeHtml(String(nhanVienKd))}</td>`;
-          }
-         
-          // Column: Tên sản phẩm
-          if (ProjectsState.visibleColumns.tensanpham) {
-              html += `<td>${escapeHtml(String(tenSanPham))}</td>`;
-          }
-         
-          // Column: Quy cách
-          if (ProjectsState.visibleColumns.quycach) {
-              html += `<td>${escapeHtml(String(quyCach))}</td>`;
-          }
-         
-          // Column: Người liên hệ (KH)
-          if (ProjectsState.visibleColumns.lienhe) {
-              html += `<td>${escapeHtml(String(lienHe))}</td>`;
-          }
-         
-          // Column: Số lượng
-          if (ProjectsState.visibleColumns.soluong) {
-              html += `<td>${soLuong}</td>`;
-          }
-         
-          // Column: Mã PO
-          if (ProjectsState.visibleColumns.mapo) {
-              html += `<td>${escapeHtml(String(maPo))}</td>`;
-          }
-         
-          // Column: Mã bản vẽ KT
-          if (ProjectsState.visibleColumns.mabavkythuat) {
-              html += `<td>${escapeHtml(String(maBanVeKt))}</td>`;
-          }
-         
-          // Column: Mã bản vẽ
-          if (ProjectsState.visibleColumns.mabave) {
-              html += `<td>${escapeHtml(String(maBanVe))}</td>`;
-          }
-         
-          // Column: Mã mẹ
-          if (ProjectsState.visibleColumns.mame) {
-              html += `<td>${escapeHtml(String(maMe))}</td>`;
-          }
-         
-          // Column: Loại sản phẩm
-          if (ProjectsState.visibleColumns.loaisanpham) {
-              html += `<td>${escapeHtml(String(loaiSanPham))}</td>`;
-          }
-         
-          // Column: Độ khẩn
-          if (ProjectsState.visibleColumns.dokhan) {
-              html += `<td>${getUrgencyBadge(doKhan)}</td>`;
-          }
-         
-          // Column: Tình trạng
-          if (ProjectsState.visibleColumns.tinhtrang) {
-              html += `<td>${escapeHtml(String(tinhTrang))}</td>`;
-          }
-         
-          // Column: TG mong muốn
-          if (ProjectsState.visibleColumns.tg_mongmuon) {
-              html += `<td>${formatDateTime(tgMongMuon) || '-'}</td>`;
-          }
-         
-          // Column: TG hoàn thành
-          if (ProjectsState.visibleColumns.tg_hoanthanh) {
-              html += `<td>${formatDateTime(tgHoanThanh) || '-'}</td>`;
-          }
-         
-          // Column: Trạng thái
-          if (ProjectsState.visibleColumns.trangthai) {
-              html += `<td>${getProjectStatusBadge(pendingStatus)}</td>`;
-          }
-         
-          // Column: Người nhận
-          if (ProjectsState.visibleColumns.nguoinhan) {
-              html += `<td>${escapeHtml(String(nguoiNhan || getPendingReceiverText()))}</td>`;
-          }
-         
-         html += '</tr>';
-     });
+    html += renderQuickAddProjectRow(columns, ProjectsState.projects.length);
     
     tbody.html(html);
     
-    // Setup row click handlers
-    setupRowHandlers();
+    setupSpreadsheetHandlers();
+}
+
+function renderQuickAddProjectRow(columns, rowIndex) {
+    let html = `<tr class="project-quick-add-row${ProjectsState.quickAddStarted ? ' project-quick-add-started' : ''}" data-id="__new__" data-row-index="${rowIndex}" data-draft-row="true">`;
+
+    if (!ProjectsState.quickAddStarted) {
+        html += `
+            <td class="project-sheet-cell quick-add-full-cell readonly"
+                tabindex="0"
+                colspan="${columns.length}"
+                data-row="${rowIndex}"
+                data-col="0"
+                data-key="tracking_id"
+                data-id="__new__"
+                data-draft="true">
+                ${renderQuickAddControl()}
+            </td>
+        `;
+        html += '</tr>';
+        return html;
+    }
+
+    columns.forEach((column, colIndex) => {
+        const rawValue = getProjectDraftValue(column);
+        const isReadonly = column.readOnly;
+        const displayValue = isReadonly
+            ? renderQuickAddControl()
+            : formatProjectCellValue(column, rawValue, rowIndex);
+        const classes = [
+            'project-sheet-cell',
+            'quick-add-cell',
+            isReadonly ? 'readonly' : 'editable',
+            column.className || '',
+            getProjectCellStateClass(column, rawValue)
+        ].filter(Boolean).join(' ');
+
+        html += `
+            <td class="${classes}"
+                tabindex="0"
+                data-row="${rowIndex}"
+                data-col="${colIndex}"
+                data-key="${column.key}"
+                data-id="__new__"
+                data-draft="true"
+                data-update-key="${escapeHtml(String(column.updateKey || ''))}"
+                data-raw-value="${escapeHtml(String(rawValue || ''))}">
+                ${displayValue}
+            </td>
+        `;
+    });
+
+    html += '</tr>';
+    return html;
+}
+
+function renderQuickAddControl() {
+    if (!ProjectsState.quickAddStarted) {
+        return `
+            <button type="button" class="quick-add-start" title="${escapeHtml(t('quick_add_start_title'))}">
+                <span class="quick-add-plus">+</span>
+                <span class="quick-add-hint">${escapeHtml(t('quick_add_double_click'))}</span>
+            </button>
+        `;
+    }
+
+    return `
+        <div class="quick-add-actions">
+            <span class="quick-add-id">${escapeHtml(t('quick_add_new_id'))}: ${escapeHtml(String(ProjectsState.quickAddPreviewId || ''))}</span>
+            <button type="button" class="btn btn-sm btn-success quick-add-save" title="${escapeHtml(t('quick_add_save_title'))}">
+                <i class="bi bi-check-lg"></i>
+                <span>${escapeHtml(t('save'))}</span>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary quick-add-cancel" title="${escapeHtml(t('cancel'))}">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    `;
+}
+
+function getVisibleProjectColumns() {
+    return PROJECT_SPREADSHEET_COLUMNS.filter(column => ProjectsState.visibleColumns[column.key] !== false);
+}
+
+function renderProjectsSpreadsheetHeader() {
+    const columns = getVisibleProjectColumns();
+    const totalWidth = columns.reduce((sum, column) => sum + (column.width || 100), 0) || 1;
+    const colgroup = columns
+        .map(column => {
+            const widthPercent = ((column.width || 100) / totalWidth) * 100;
+            return `<col style="width: ${widthPercent.toFixed(4)}%;">`;
+        })
+        .join('');
+    const header = columns
+        .map(column => `
+            <th class="project-sheet-header" title="${escapeHtml(column.label)} / ${escapeHtml(column.zhLabel || '')}">
+                <span class="project-sheet-header-main">${escapeHtml(column.label)}</span>
+                <span class="project-sheet-header-sub">${escapeHtml(column.zhLabel || '')}</span>
+            </th>
+        `)
+        .join('');
+
+    const table = $('#projects-table');
+    table.find('colgroup').remove();
+    table.toggleClass('project-many-columns', columns.length >= 18);
+    table.prepend(`<colgroup>${colgroup}</colgroup>`);
+    table.find('thead').html(`
+        <tr class="project-sheet-header-row">${header}</tr>
+    `);
+}
+
+function getProjectValue(project, keys, fallback = '') {
+    for (const key of keys || []) {
+        const value = project[key];
+        if (value === undefined || value === null) continue;
+        if (typeof value === 'string' && value.trim() === '') continue;
+        return value;
+    }
+    return fallback;
+}
+
+function getProjectDraftValue(column) {
+    if (!column) return '';
+    if (ProjectsState.quickAddDraft[column.key] !== undefined) {
+        return ProjectsState.quickAddDraft[column.key];
+    }
+    if (column.updateKey && ProjectsState.quickAddDraft[column.updateKey] !== undefined) {
+        return ProjectsState.quickAddDraft[column.updateKey];
+    }
+    return '';
+}
+
+function setProjectDraftValue(column, value) {
+    if (!column) return;
+    ProjectsState.quickAddDraft[column.key] = value;
+    if (column.updateKey) {
+        ProjectsState.quickAddDraft[column.updateKey] = value;
+    }
+}
+
+function getCurrentUserDisplayName() {
+    const currentUserStr = localStorage.getItem('current_user');
+    if (!currentUserStr) return '';
+    try {
+        const currentUser = JSON.parse(currentUserStr);
+        return currentUser.full_name || currentUser.username || '';
+    } catch (e) {
+        console.error('Error parsing current user:', e);
+        return '';
+    }
+}
+
+function getProjectDraftFieldValue(...keys) {
+    for (const key of keys) {
+        const value = ProjectsState.quickAddDraft[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            return String(value).trim();
+        }
+    }
+    return '';
+}
+
+function getMissingQuickAddRequiredFields() {
+    const missing = [];
+    if (!getProjectDraftFieldValue('khachhang', 'Khách hàng')) missing.push('Khách hàng');
+    if (!getProjectDraftFieldValue('tensanpham', 'Tên sản phẩm')) missing.push('Tên sản phẩm');
+    if (!getProjectDraftFieldValue('lienhe', 'Người liên hệ (KH)')) missing.push('Người liên hệ');
+    return missing;
+}
+
+function hasQuickAddDraftData() {
+    return Object.values(ProjectsState.quickAddDraft).some(value => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+function getNextQuickAddPreviewId() {
+    const ids = ProjectsState.projects
+        .map(project => Number(getProjectValue(project, ['Tracking ID', 'tracking_id'], 0)))
+        .filter(id => Number.isFinite(id));
+    return (ids.length ? Math.max(...ids) : 0) + 1;
+}
+
+function getCurrentLocalDateTimeValue() {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().slice(0, 16);
+}
+
+function startQuickAddProject() {
+    if (ProjectsState.quickAddStarted) return;
+
+    ProjectsState.quickAddStarted = true;
+    ProjectsState.quickAddPreviewId = getNextQuickAddPreviewId();
+    ProjectsState.quickAddDraft = {
+        ...ProjectsState.quickAddDraft,
+        tracking_id: ProjectsState.quickAddPreviewId,
+        'Tracking ID': ProjectsState.quickAddPreviewId,
+        ngay: getProjectDraftFieldValue('ngay', 'Ngày') || getCurrentLocalDateTimeValue(),
+        'Ngày': getProjectDraftFieldValue('ngay', 'Ngày') || getCurrentLocalDateTimeValue(),
+        nhanvienkd: getProjectDraftFieldValue('nhanvienkd', 'Nhân viên kinh doanh') || getCurrentUserDisplayName(),
+        'Nhân viên kinh doanh': getProjectDraftFieldValue('nhanvienkd', 'Nhân viên kinh doanh') || getCurrentUserDisplayName(),
+        dokhan: getProjectDraftFieldValue('dokhan', 'Tính cấp bách') || 'normal',
+        'Tính cấp bách': getProjectDraftFieldValue('dokhan', 'Tính cấp bách') || 'normal'
+    };
+    renderProjectsTable();
+
+    const firstEditable = $('#projects-table-body .project-quick-add-row .project-sheet-cell.editable').first();
+    if (firstEditable.length) {
+        firstEditable.focus();
+        activateProjectCell(firstEditable);
+    }
+}
+
+function resetQuickAddProject() {
+    ProjectsState.quickAddDraft = {};
+    ProjectsState.quickAddStarted = false;
+    ProjectsState.quickAddPreviewId = null;
+    renderProjectsTable();
+}
+
+function buildQuickAddProjectPayload() {
+    const defaultDate = getCurrentLocalDateTimeValue();
+
+    const khachhang = getProjectDraftFieldValue('khachhang', 'Khách hàng');
+    const tensanpham = getProjectDraftFieldValue('tensanpham', 'Tên sản phẩm');
+    const lienhe = getProjectDraftFieldValue('lienhe', 'Người liên hệ (KH)');
+    const nhanvienkd = getProjectDraftFieldValue('nhanvienkd', 'Nhân viên kinh doanh') || getCurrentUserDisplayName();
+    const ngay = getProjectDraftFieldValue('ngay', 'Ngày') || defaultDate;
+
+    const formData = {
+        'Created_Date': ngay,
+        'khach_hang': khachhang,
+        'nhan_vien_kinh_doanh': nhanvienkd,
+        'ten_san_pham': tensanpham,
+        'quy_cach': getProjectDraftFieldValue('quycach', 'Quy cách'),
+        'nguoi_lien_he_kh': lienhe,
+        'so_luong': getProjectDraftFieldValue('soluong', 'Số lượng'),
+        'ma_po': getProjectDraftFieldValue('mapo', 'Mã PO'),
+        'ma_ban_ve': getProjectDraftFieldValue('mabave', 'Mã bản vẽ phương án (mã trước khi đặt hàng)'),
+        'ma_ban_ve_ky_thuat': getProjectDraftFieldValue('mabavkythuat', 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+        'ma_me': getProjectDraftFieldValue('mame', 'Mã mẹ'),
+        'loai_san_pham': getProjectDraftFieldValue('loaisanpham', 'Loại sản phẩm'),
+        'nhan_vien_thiet_ke': getProjectDraftFieldValue('nhanvienthietke', 'Nhân viên thiết kế'),
+        'tinh_trang_hoan_thanh': getProjectDraftFieldValue('tinhtrang', 'Tình trạng hoàn thành dự án'),
+        'urgency_level': getProjectDraftFieldValue('dokhan', 'Tính cấp bách') || 'normal',
+        'thoi_gian_mong_muon_ban_ve': getProjectDraftFieldValue('tg_mongmuon', 'Thời gian mong muốn có bản vẽ'),
+        'thoi_gian_hoan_thanh_ke_hoach': getProjectDraftFieldValue('tg_hoanthanh', 'Thời gian hoàn thành kế hoạch'),
+        'Ngày': ngay,
+        'Khách hàng': khachhang,
+        'Nhân viên KD': nhanvienkd,
+        'Tên sản phẩm': tensanpham,
+        'Quy cách': getProjectDraftFieldValue('quycach', 'Quy cách'),
+        'Người liên hệ (KH)': lienhe,
+        'Số lượng': getProjectDraftFieldValue('soluong', 'Số lượng'),
+        'Mã PO': getProjectDraftFieldValue('mapo', 'Mã PO'),
+        'Mã bản vẽ phương án (mã trước khi đặt hàng)': getProjectDraftFieldValue('mabave', 'Mã bản vẽ phương án (mã trước khi đặt hàng)'),
+        'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': getProjectDraftFieldValue('mabavkythuat', 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)'),
+        'Mã mẹ': getProjectDraftFieldValue('mame', 'Mã mẹ'),
+        'Loại sản phẩm': getProjectDraftFieldValue('loaisanpham', 'Loại sản phẩm'),
+        'Nhân viên thiết kế': getProjectDraftFieldValue('nhanvienthietke', 'Nhân viên thiết kế'),
+        'Tình trạng hoàn thành dự án': getProjectDraftFieldValue('tinhtrang', 'Tình trạng hoàn thành dự án'),
+        'Tính cấp bách': getProjectDraftFieldValue('dokhan', 'Tính cấp bách') || 'normal',
+        'TG mong muốn': getProjectDraftFieldValue('tg_mongmuon', 'Thời gian mong muốn có bản vẽ'),
+        'TG hoàn thành': getProjectDraftFieldValue('tg_hoanthanh', 'Thời gian hoàn thành kế hoạch')
+    };
+
+    Object.keys(formData).forEach(key => {
+        const value = formData[key];
+        if (value === '' || value === null || value === undefined) {
+            delete formData[key];
+        }
+    });
+
+    return formData;
+}
+
+function formatProjectCellValue(column, rawValue, rowIndex) {
+    if (column.key === 'tracking_id') {
+        const value = rawValue || rowIndex + 1;
+        return `<a href="#" class="view-link view-project" data-id="${escapeHtml(String(rawValue))}">${escapeHtml(String(value))}</a>`;
+    }
+    if (column.key === 'trangthai') {
+        return renderPendingStatus(rawValue);
+    }
+    if (column.key === 'dokhan') {
+        return renderUrgencyCell(rawValue);
+    }
+    const text = rawValue === undefined || rawValue === null || rawValue === '' ? '' : String(rawValue);
+    return escapeHtml(text);
+}
+
+function renderPendingStatus(rawStatus) {
+    const status = String(rawStatus || '').toLowerCase().trim();
+    if (status === 'yes' || status === 'pending') {
+        return '<span class="project-sheet-pill status-pending">Chờ nhận / 待接收</span>';
+    }
+    if (status === 'no' || status === 'accepted') {
+        return '<span class="project-sheet-pill status-accepted">Đã nhận / 已接收</span>';
+    }
+    return escapeHtml(String(rawStatus || ''));
+}
+
+function normalizeProjectUrgency(rawUrgency) {
+    const value = String(rawUrgency || '').trim();
+    const normalized = value.toLowerCase();
+
+    if (!value) {
+        return { value: '', label: '' };
+    }
+    if (normalized === 'very_urgent' || normalized.includes('very') || value.includes('非常')) {
+        return { value: 'very_urgent', label: '非常紧急 - Rất khẩn cấp' };
+    }
+    if (normalized === 'urgent' || value.includes('紧急')) {
+        return { value: 'urgent', label: '紧急 - Khẩn cấp' };
+    }
+    if (normalized === 'normal' || value.includes('正常')) {
+        return { value: 'normal', label: '正常 - Bình thường' };
+    }
+
+    return { value: value, label: value };
+}
+
+function renderUrgencyCell(rawUrgency) {
+    const urgency = normalizeProjectUrgency(rawUrgency);
+    let cls = 'urgency-normal';
+    if (urgency.value === 'very_urgent') {
+        cls = 'urgency-very-urgent';
+    } else if (urgency.value === 'urgent') {
+        cls = 'urgency-urgent';
+    }
+    return urgency.label ? `<span class="project-sheet-pill ${cls}">${escapeHtml(urgency.label)}</span>` : '';
+}
+
+function getProjectCellStateClass(column, rawValue) {
+    if (column.key === 'dokhan') {
+        const urgency = normalizeProjectUrgency(rawValue);
+        if (urgency.value === 'very_urgent') return 'cell-very-urgent';
+        if (urgency.value === 'urgent') return 'cell-urgent';
+        if (urgency.value || urgency.label) return 'cell-normal';
+    }
+    if (column.key === 'trangthai') {
+        const value = String(rawValue || '').toLowerCase();
+        if (value === 'yes' || value === 'pending') return 'cell-pending';
+        if (value === 'no' || value === 'accepted') return 'cell-accepted';
+    }
+    return '';
 }
 
 /**
  * Setup row event handlers
  */
 function setupRowHandlers() {
-    // View link
-    $('.view-project').click(function(e) {
+    setupSpreadsheetHandlers();
+}
+
+function setupSpreadsheetHandlers() {
+    const tbody = $('#projects-table-body');
+
+    tbody.off('click.projectSheet').on('click.projectSheet', '.project-sheet-cell', function(e) {
+        if ($(e.target).closest('.view-project, input, select, textarea, button').length) return;
+        activateProjectCell($(this));
+    });
+
+    tbody.off('focus.projectSheet').on('focus.projectSheet', '.project-sheet-cell', function() {
+        activateProjectCell($(this));
+    });
+
+    tbody.off('dblclick.projectSheet').on('dblclick.projectSheet', '.project-sheet-cell.editable', function() {
+        beginProjectCellEdit($(this));
+    });
+
+    tbody.off('dblclick.quickAddStart').on('dblclick.quickAddStart', '.quick-add-start, .project-quick-add-row .project-sheet-cell.readonly', function(e) {
         e.preventDefault();
+        e.stopPropagation();
+        startQuickAddProject();
+    });
+
+    tbody.off('click.quickAddSave').on('click.quickAddSave', '.quick-add-save', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        saveQuickAddProject();
+    });
+
+    tbody.off('click.quickAddCancel').on('click.quickAddCancel', '.quick-add-cancel', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        resetQuickAddProject();
+    });
+
+    tbody.off('keydown.projectSheet').on('keydown.projectSheet', '.project-sheet-cell', function(e) {
+        handleProjectCellKeydown(e, $(this));
+    });
+
+    tbody.off('paste.projectSheet').on('paste.projectSheet', '.project-sheet-cell', function(e) {
+        handleProjectCellPaste(e, $(this));
+    });
+
+    tbody.off('copy.projectSheet').on('copy.projectSheet', '.project-sheet-cell', function(e) {
+        const value = $(this).attr('data-raw-value') || $(this).text().trim();
+        e.originalEvent.clipboardData.setData('text/plain', value);
+        e.preventDefault();
+    });
+
+    tbody.off('click.viewProject').on('click.viewProject', '.view-project', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
         const id = $(this).data('id');
         viewProject(id);
     });
-    
-    // Row click for selection (single select)
-    $('#projects-table-body tr').click(function(e) {
-        const id = $(this).data('id');
-        ProjectsState.selectedIds = [id];
-        
-        // Update row styling
-        $('#projects-table-body tr').removeClass('table-primary');
-        $(this).addClass('table-primary');
-        
-        updateToolbarState();
-    });
 
-    // Right-click context menu on row
-    $('#projects-table-body tr').off('contextmenu.projectCtx').on('contextmenu.projectCtx', function(e) {
+    tbody.off('contextmenu.projectCtx').on('contextmenu.projectCtx', 'tr', function(e) {
+        if ($(this).data('draft-row')) return;
         e.preventDefault();
+        e.stopPropagation();
         const id = $(this).data('id');
-        ProjectsState.selectedIds = [id];
-        $('#projects-table-body tr').removeClass('table-primary');
-        $(this).addClass('table-primary');
-        updateToolbarState();
+        selectProjectRow(id, $(this));
         showProjectContextMenu(e.clientX, e.clientY, id);
     });
 
+    $('#projects-table-wrap').off('contextmenu.projectCtxBlank').on('contextmenu.projectCtxBlank', function(e) {
+        if ($(e.target).closest('#projects-table-body tr').length) return;
+        e.preventDefault();
+        showProjectContextMenu(e.clientX, e.clientY, null);
+    });
+
     setupProjectContextMenuHandlers();
+}
+
+function activateProjectCell($cell) {
+    if (!$cell || !$cell.length) return;
+    const id = $cell.data('id');
+    ProjectsState.activeCell = {
+        row: Number($cell.data('row')),
+        col: Number($cell.data('col'))
+    };
+    selectProjectRow(id, $cell.closest('tr'));
+    $('#projects-table-body .project-sheet-cell').removeClass('active-cell');
+    $cell.addClass('active-cell');
+}
+
+function selectProjectRow(id, $row) {
+    ProjectsState.selectedIds = id === '__new__' || id === undefined || id === null ? [] : [id];
+    $('#projects-table-body tr').removeClass('table-primary selected-row');
+    $row.addClass('table-primary selected-row');
+    updateToolbarState();
+}
+
+function handleProjectCellKeydown(e, $cell) {
+    if (ProjectsState.editingCell) return;
+
+    const key = e.key;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(key)) {
+        e.preventDefault();
+        if (key === 'Enter') {
+            beginProjectCellEdit($cell);
+            return;
+        }
+        moveProjectCellFocus($cell, key === 'Tab' ? (e.shiftKey ? 'ArrowLeft' : 'ArrowRight') : key);
+        return;
+    }
+
+    if (key === 'F2') {
+        e.preventDefault();
+        beginProjectCellEdit($cell);
+        return;
+    }
+
+    if ((key === 'Backspace' || key === 'Delete') && $cell.hasClass('editable')) {
+        e.preventDefault();
+        saveProjectCell($cell, '');
+        return;
+    }
+
+    if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && $cell.hasClass('editable')) {
+        e.preventDefault();
+        beginProjectCellEdit($cell, key);
+    }
+}
+
+function moveProjectCellFocus($cell, direction) {
+    const row = Number($cell.data('row'));
+    const col = Number($cell.data('col'));
+    let nextRow = row;
+    let nextCol = col;
+
+    if (direction === 'ArrowUp') nextRow -= 1;
+    if (direction === 'ArrowDown') nextRow += 1;
+    if (direction === 'ArrowLeft') nextCol -= 1;
+    if (direction === 'ArrowRight') nextCol += 1;
+
+    const $next = $(`#projects-table-body .project-sheet-cell[data-row="${nextRow}"][data-col="${nextCol}"]`);
+    if ($next.length) {
+        $next.focus();
+        activateProjectCell($next);
+    }
+}
+
+function beginProjectCellEdit($cell, seedValue = null) {
+    if (!$cell.hasClass('editable') || ProjectsState.editingCell) return;
+    if ($cell.data('draft') && !ProjectsState.quickAddStarted) {
+        showToast(t('info'), t('quick_add_double_click'), 'info');
+        return;
+    }
+
+    const column = getVisibleProjectColumns()[Number($cell.data('col'))];
+    if (!column || column.readOnly || !column.updateKey) return;
+
+    const originalValue = $cell.attr('data-raw-value') || '';
+    const editValue = seedValue !== null ? seedValue : originalValue;
+    ProjectsState.editingCell = $cell[0];
+    $cell.addClass('editing-cell');
+
+    const finish = async (commit, value) => {
+        if (ProjectsState.editingCell !== $cell[0]) return;
+        ProjectsState.editingCell = null;
+        $cell.removeClass('editing-cell');
+        if (commit) {
+            await saveProjectCell($cell, value);
+        } else {
+            renderProjectCellDisplay($cell, column, originalValue);
+        }
+        $cell.focus();
+    };
+
+    if (column.type === 'select') {
+        const options = getProjectColumnOptions(column, originalValue);
+        const selectHtml = options.map(option => {
+            const value = typeof option === 'object' ? option.value : option;
+            const label = typeof option === 'object' ? option.label : option;
+            return `<option value="${escapeHtml(String(value))}" ${String(value) === String(originalValue) ? 'selected' : ''}>${escapeHtml(String(label))}</option>`;
+        }).join('');
+        $cell.html(`<select class="project-cell-editor form-select form-select-sm">${selectHtml}</select>`);
+        const $select = $cell.find('select');
+        $select.focus();
+        $select.on('change blur', function() {
+            finish(true, $(this).val());
+        });
+        $select.on('keydown', function(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                finish(false);
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                finish(true, $(this).val());
+            }
+        });
+        return;
+    }
+
+    const inputType = column.type === 'number' ? 'number' : 'text';
+    $cell.html(`<input class="project-cell-editor form-control form-control-sm" type="${inputType}" value="${escapeHtml(String(editValue))}">`);
+    const $input = $cell.find('input');
+    $input.focus();
+    $input[0].select();
+    $input.on('blur', function() {
+        finish(true, $(this).val());
+    });
+    $input.on('keydown', function(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(false);
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            finish(true, $(this).val());
+        }
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const value = $(this).val();
+            finish(true, value).then(() => moveProjectCellFocus($cell, e.shiftKey ? 'ArrowLeft' : 'ArrowRight'));
+        }
+    });
+}
+
+function getProjectColumnOptions(column, currentValue) {
+    const base = PROJECT_SELECT_OPTIONS[column.optionsSource] || [];
+    const values = [...base];
+    const hasCurrentValue = values.some(option => String(typeof option === 'object' ? option.value : option) === String(currentValue));
+    const normalizedUrgency = column.optionsSource === 'urgency' ? normalizeProjectUrgency(currentValue) : null;
+    if (normalizedUrgency?.value && !values.some(option => String(typeof option === 'object' ? option.value : option) === normalizedUrgency.value)) {
+        values.unshift({ value: normalizedUrgency.value, label: normalizedUrgency.label });
+    } else if (currentValue && !hasCurrentValue && column.optionsSource !== 'urgency') {
+        values.unshift(currentValue);
+    }
+    return values;
+}
+
+async function handleProjectCellPaste(e, $cell) {
+    if (!$cell.hasClass('editable')) return;
+    const text = e.originalEvent.clipboardData.getData('text/plain');
+    if (!text) return;
+    e.preventDefault();
+
+    const rows = text.replace(/\r/g, '').split('\n').filter((row, index, all) => row.length > 0 || index < all.length - 1);
+    const matrix = rows.map(row => row.split('\t'));
+    await applyProjectPasteMatrix($cell, matrix);
+}
+
+async function applyProjectPasteMatrix($startCell, matrix) {
+    const columns = getVisibleProjectColumns();
+    const startRow = Number($startCell.data('row'));
+    const startCol = Number($startCell.data('col'));
+    const updatesById = new Map();
+    const touchedCells = [];
+
+    matrix.forEach((rowValues, rowOffset) => {
+        rowValues.forEach((value, colOffset) => {
+            const row = startRow + rowOffset;
+            const col = startCol + colOffset;
+            const column = columns[col];
+            const $target = $(`#projects-table-body .project-sheet-cell[data-row="${row}"][data-col="${col}"]`);
+            if (!$target.length || !column || column.readOnly || !column.updateKey) return;
+            if ($target.data('draft')) return;
+            const id = String($target.data('id'));
+            if (!updatesById.has(id)) updatesById.set(id, {});
+            updatesById.get(id)[column.updateKey] = value;
+            touchedCells.push({ $cell: $target, column, value, row });
+        });
+    });
+
+    if (updatesById.size === 0) return;
+    touchedCells.forEach(({ $cell }) => $cell.addClass('saving-cell'));
+
+    try {
+        for (const [id, payload] of updatesById.entries()) {
+            const result = await api.updateProject(id, payload);
+            if (!result || !result.success) {
+                throw new Error(result?.error || t('error'));
+            }
+            const rowIndex = ProjectsState.projects.findIndex(project => String(getProjectValue(project, ['Tracking ID', 'tracking_id'], '')) === String(id));
+            if (rowIndex >= 0) {
+                Object.assign(ProjectsState.projects[rowIndex], payload);
+            }
+        }
+        touchedCells.forEach(({ $cell, column, value }) => {
+            $cell.removeClass('saving-cell error-cell');
+            renderProjectCellDisplay($cell, column, value);
+        });
+    } catch (error) {
+        touchedCells.forEach(({ $cell }) => $cell.removeClass('saving-cell').addClass('error-cell'));
+        console.error('[Projects] Paste update error:', error);
+        showToast(t('error'), error.message || t('error'), 'error');
+    }
+}
+
+async function saveProjectCell($cell, value) {
+    const column = getVisibleProjectColumns()[Number($cell.data('col'))];
+    const id = String($cell.data('id'));
+    const oldValue = $cell.attr('data-raw-value') || '';
+    if ($cell.data('draft')) {
+        await saveQuickAddProjectCell($cell, column, value);
+        return;
+    }
+    if (!column || column.readOnly || !column.updateKey || value === oldValue) {
+        if (column) renderProjectCellDisplay($cell, column, oldValue);
+        return;
+    }
+
+    $cell.addClass('saving-cell').removeClass('error-cell');
+    try {
+        const payload = { [column.updateKey]: value };
+        const result = await api.updateProject(id, payload);
+        if (!result || !result.success) {
+            throw new Error(result?.error || t('error'));
+        }
+
+        const rowIndex = Number($cell.data('row'));
+        updateProjectRowData(rowIndex, column, value);
+        renderProjectCellDisplay($cell, column, value);
+        $cell.removeClass('saving-cell');
+    } catch (error) {
+        console.error('[Projects] Cell update error:', error);
+        $cell.removeClass('saving-cell').addClass('error-cell');
+        renderProjectCellDisplay($cell, column, oldValue);
+        showToast(t('error'), error.message || t('error'), 'error');
+    }
+}
+
+async function saveQuickAddProjectCell($cell, column, value) {
+    if (!column || column.readOnly || !column.updateKey) return;
+    if (!ProjectsState.quickAddStarted) {
+        showToast(t('info'), t('quick_add_double_click'), 'info');
+        renderProjectCellDisplay($cell, column, '');
+        return;
+    }
+
+    setProjectDraftValue(column, value);
+    renderProjectCellDisplay($cell, column, value);
+
+    const missing = getMissingQuickAddRequiredFields();
+    if (missing.length > 0) {
+        $cell.closest('tr').addClass('project-quick-add-incomplete');
+    } else {
+        $cell.closest('tr').removeClass('project-quick-add-incomplete');
+    }
+}
+
+async function saveQuickAddProject() {
+    if (!ProjectsState.quickAddStarted) {
+        startQuickAddProject();
+        return;
+    }
+
+    if (!hasQuickAddDraftData()) return;
+
+    const missing = getMissingQuickAddRequiredFields();
+    if (missing.length > 0) {
+        $('#projects-table-body .project-quick-add-row').addClass('project-quick-add-incomplete');
+        showToast(t('warning'), t('quick_add_missing_fields').replace('{fields}', missing.join(', ')), 'warning');
+        return;
+    }
+
+    const row = $('#projects-table-body .project-quick-add-row');
+    row.removeClass('project-quick-add-incomplete').addClass('saving-cell');
+    $('#projects-table-body .quick-add-cell').addClass('saving-cell').removeClass('error-cell');
+
+    try {
+        const result = await api.createProject(buildQuickAddProjectPayload());
+        if (!result || !result.success) {
+            throw new Error(result?.error || t('error'));
+        }
+
+        ProjectsState.quickAddDraft = {};
+        ProjectsState.quickAddStarted = false;
+        ProjectsState.quickAddPreviewId = null;
+        showToast(t('success'), t('toast_project_created'), 'success');
+        await loadProjects();
+    } catch (error) {
+        console.error('[Projects] Quick add error:', error);
+        row.removeClass('saving-cell');
+        $('#projects-table-body .quick-add-cell').removeClass('saving-cell').addClass('error-cell');
+        showToast(t('error'), error.message || t('error'), 'error');
+    }
+}
+
+function updateProjectRowData(rowIndex, column, value) {
+    const project = ProjectsState.projects[rowIndex];
+    if (!project) return;
+    project[column.updateKey] = value;
+    if (column.fields && column.fields[0]) {
+        project[column.fields[0]] = value;
+    }
+}
+
+function renderProjectCellDisplay($cell, column, rawValue) {
+    $cell.attr('data-raw-value', rawValue || '');
+    $cell.removeClass('cell-normal cell-urgent cell-very-urgent cell-pending cell-accepted')
+        .addClass(getProjectCellStateClass(column, rawValue));
+    $cell.html(formatProjectCellValue(column, rawValue, Number($cell.data('row'))));
 }
 
 /**
@@ -998,15 +1498,8 @@ function updateSelectedIds() {
     $('#select-all-projects').prop('checked', allChecked);
 }
 
-/**
- * Update toolbar button states
- */
 function updateToolbarState() {
-    const count = ProjectsState.selectedIds.length;
-    
-    $('#btn-edit-project').prop('disabled', count !== 1);
-    $('#btn-delete-project').prop('disabled', count === 0);
-    
+    // Row-specific context menu actions are enabled when the menu opens.
 }
 
 // ============================================
@@ -1297,9 +1790,9 @@ function updateProjectFormLabels() {
     // Urgency options
     const urgencySelect = $('#field-capbach');
     if (urgencySelect.length) {
-        urgencySelect.find('option').eq(0).text(t('urgency_normal_option'));
-        urgencySelect.find('option').eq(1).text(t('urgency_urgent_option'));
-        urgencySelect.find('option').eq(2).text(t('urgency_very_urgent_option'));
+        urgencySelect.find('option').eq(0).text('正常 - Bình thường');
+        urgencySelect.find('option').eq(1).text('紧急 - Khẩn cấp');
+        urgencySelect.find('option').eq(2).text('非常紧急 - Rất khẩn cấp');
     }
     
     // Modal buttons
@@ -1603,8 +2096,23 @@ function exportToExcel() {
     
     try {
         const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.json_to_sheet(ProjectsState.projects);
-        XLSX.utils.book_append_sheet(wb, ws, t('projects_title'));
+        const columns = getVisibleProjectColumns();
+        const data = [
+            columns.map(column => column.label),
+            columns.map(column => column.zhLabel || '')
+        ];
+
+        ProjectsState.projects.forEach((project, rowIndex) => {
+            data.push(columns.map(column => {
+                const value = getProjectValue(project, column.fields, '');
+                if (column.key === 'tracking_id') return value || rowIndex + 1;
+                return value;
+            }));
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        ws['!cols'] = columns.map(column => ({ wch: Math.max(8, Math.round(column.width / 8)) }));
+        XLSX.utils.book_append_sheet(wb, ws, '25年');
         XLSX.writeFile(wb, 'du_an_' + new Date().toISOString().slice(0, 10) + '.xlsx');
         
         showToast(t('success'), t('toast_export_success', { type: 'Excel' }), 'success');
@@ -1665,21 +2173,16 @@ function exportToCSV() {
  */
 function getUrgencyBadge(urgency) {
     if (!urgency) return '-';
+    const normalizedUrgency = normalizeProjectUrgency(urgency);
     
     const classes = {
         'normal': 'success',
         'urgent': 'warning',
         'very_urgent': 'danger'
     };
-    
-    const labels = {
-        'normal': t('urgency_normal'),
-        'urgent': t('urgency_urgent'),
-        'very_urgent': t('urgency_very_urgent')
-    };
-    
-    const cls = classes[urgency] || 'secondary';
-    const label = labels[urgency] || urgency;
+
+    const cls = classes[normalizedUrgency.value] || 'secondary';
+    const label = normalizedUrgency.label || urgency;
     
     return `<span class="badge bg-${cls}">${label}</span>`;
 }
@@ -1705,6 +2208,32 @@ function initColumnSelector() {
     body.html(html);
 }
 
+function loadProjectColumnVisibility() {
+    try {
+        const saved = localStorage.getItem(PROJECT_VISIBLE_COLUMNS_STORAGE_KEY);
+        if (!saved) return;
+
+        const parsed = JSON.parse(saved);
+        if (!parsed || typeof parsed !== 'object') return;
+
+        ProjectsState.columnsConfig.forEach(col => {
+            if (typeof parsed[col.key] === 'boolean') {
+                ProjectsState.visibleColumns[col.key] = parsed[col.key];
+            }
+        });
+    } catch (error) {
+        console.warn('[Projects] Cannot load column visibility:', error);
+    }
+}
+
+function saveProjectColumnVisibility() {
+    try {
+        localStorage.setItem(PROJECT_VISIBLE_COLUMNS_STORAGE_KEY, JSON.stringify(ProjectsState.visibleColumns));
+    } catch (error) {
+        console.warn('[Projects] Cannot save column visibility:', error);
+    }
+}
+
 /**
  * Toggle column selector popup
  */
@@ -1728,6 +2257,7 @@ function resetColumnVisibility() {
         $(this).prop('checked', config ? config.default : true);
     });
     
+    saveProjectColumnVisibility();
     renderProjectsTable();
 }
 
@@ -1740,6 +2270,7 @@ function applyColumnVisibility() {
         ProjectsState.visibleColumns[key] = $(this).is(':checked');
     });
     
+    saveProjectColumnVisibility();
     renderProjectsTable();
 }
 
@@ -1750,7 +2281,17 @@ function hideProjectContextMenu() {
 function showProjectContextMenu(x, y, rowId) {
     const menu = $('#project-row-context-menu');
     if (!menu.length) return;
-    menu.data('rowId', rowId).css({ left: x, top: y, display: 'block' });
+    const hasRow = rowId !== undefined && rowId !== null && rowId !== '__new__';
+    menu.data('rowId', rowId);
+    menu.find('.ctx-view, .ctx-edit, .ctx-delete').prop('disabled', !hasRow).toggleClass('disabled', !hasRow);
+
+    menu.css({ left: 0, top: 0, display: 'block' });
+    const menuEl = menu[0];
+    const menuWidth = menuEl.offsetWidth;
+    const menuHeight = menuEl.offsetHeight;
+    const left = Math.min(x, window.innerWidth - menuWidth - 8);
+    const top = Math.min(y, window.innerHeight - menuHeight - 8);
+    menu.css({ left: `${Math.max(8, left)}px`, top: `${Math.max(8, top)}px` });
 }
 
 function setupProjectContextMenuHandlers() {
@@ -1758,6 +2299,10 @@ function setupProjectContextMenuHandlers() {
     if (!menu.length) return;
 
     menu.off('click.ctxActions');
+    menu.on('click.ctxActions', '.ctx-add', function() {
+        hideProjectContextMenu();
+        showProjectModal();
+    });
     menu.on('click.ctxActions', '.ctx-view', function() {
         const id = menu.data('rowId');
         hideProjectContextMenu();
@@ -1775,6 +2320,37 @@ function setupProjectContextMenuHandlers() {
         ProjectsState.selectedIds = [id];
         showDeleteConfirmModal();
     });
+    menu.on('click.ctxActions', '.ctx-refresh', function() {
+        hideProjectContextMenu();
+        ProjectsState.autoScrollToBottomOnLoad = true;
+        loadProjects();
+    });
+    menu.on('click.ctxActions', '.ctx-columns', function(e) {
+        const menuOffset = menu.offset();
+        hideProjectContextMenu();
+        toggleColumnSelector();
+        const selector = $('#column-selector');
+        if (selector.length && selector.is(':visible')) {
+            const left = Math.min(e.clientX, window.innerWidth - selector.outerWidth() - 8);
+            const top = Math.min(e.clientY, window.innerHeight - selector.outerHeight() - 8);
+            selector.css({
+                position: 'fixed',
+                left: `${Math.max(8, left)}px`,
+                right: 'auto',
+                top: `${Math.max(8, top)}px`
+            });
+        } else if (menuOffset) {
+            selector.css({ position: '', left: '', right: '', top: '' });
+        }
+    });
+    menu.on('click.ctxActions', '.ctx-export-excel', function() {
+        hideProjectContextMenu();
+        exportToExcel();
+    });
+    menu.on('click.ctxActions', '.ctx-export-csv', function() {
+        hideProjectContextMenu();
+        exportToCSV();
+    });
 
     $(document).off('click.projectCtxMenu').on('click.projectCtxMenu', function(e) {
         if (!$(e.target).closest('#project-row-context-menu').length) {
@@ -1784,6 +2360,19 @@ function setupProjectContextMenuHandlers() {
     $(window).off('scroll.projectCtxMenu resize.projectCtxMenu').on('scroll.projectCtxMenu resize.projectCtxMenu', function() {
         hideProjectContextMenu();
     });
+}
+
+function updateProjectContextMenuI18n() {
+    const menu = $('#project-row-context-menu');
+    if (!menu.length) return;
+    menu.find('[data-menu-label="add"]').text(t('add'));
+    menu.find('[data-menu-label="view"]').text(t('quick_view'));
+    menu.find('[data-menu-label="edit"]').text(t('quick_edit'));
+    menu.find('[data-menu-label="delete"]').text(t('quick_delete'));
+    menu.find('[data-menu-label="refresh"]').text(t('refresh'));
+    menu.find('[data-menu-label="columns"]').text(t('btn_toggle_columns'));
+    menu.find('[data-menu-label="exportExcel"]').text(t('export_excel'));
+    menu.find('[data-menu-label="exportCsv"]').text(t('export_csv'));
 }
 
 // ============================================

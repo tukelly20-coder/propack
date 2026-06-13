@@ -10,7 +10,9 @@
 const TaoMaBanVeState = {
     codeHistory: [],
     currentPage: 1,
-    pageSize: 20,
+    pageSize: 100,
+    searchTerm: '',
+    contextMenuItem: null,
     totalRecords: 0,
     totalPages: 1,
     isLoading: false,
@@ -51,7 +53,7 @@ function renderTaomabanveContent() {
     const container = document.getElementById('taomabanve-container');
     
     container.innerHTML = `
-        <div class="row g-3">
+        <div class="row g-3 taomabanve-layout">
             <!-- Language Selector - Top Right -->
             <div class="col-12">
                 <div class="d-flex justify-content-end">
@@ -64,7 +66,7 @@ function renderTaomabanveContent() {
             
             <!-- Create Code Section - Left Column -->
             <div class="col-lg-4 col-md-5">
-                <div class="card h-100">
+                <div class="card">
                     <div class="card-header bg-primary text-white">
                         <h5 class="mb-0"><i class="bi bi-plus-circle"></i> <span data-i18n="create_code">Tạo Mã Bản Vẽ</span></h5>
                     </div>
@@ -119,6 +121,15 @@ function renderTaomabanveContent() {
                                         <div class="invalid-feedback" id="code-category-error"></div>
                                     </div>
                                 </div>
+
+                                <!-- Mã bản vẽ phương án -->
+                                <div class="col-12">
+                                    <div class="form-floating">
+                                        <input type="text" class="form-control" id="plan-code" maxlength="100"
+                                               placeholder="Mã bản vẽ phương án" data-i18n-placeholder="plan_code_placeholder">
+                                        <label for="plan-code"><span data-i18n="plan_code">Mã bản vẽ phương án</span></label>
+                                    </div>
+                                </div>
                             </div>
                             
                             <div class="mt-3">
@@ -147,7 +158,17 @@ function renderTaomabanveContent() {
                     <div class="card-header bg-secondary text-white">
                         <div class="d-flex justify-content-between align-items-center">
                             <h5 class="mb-0"><i class="bi bi-history"></i> <span data-i18n="history">Lịch Sử Tạo Mã</span></h5>
-                            <div>
+                            <div class="d-flex gap-2 align-items-center">
+                                <div class="input-group input-group-sm code-history-search">
+                                    <button class="btn btn-light" type="button" id="btn-apply-history-search" title="Search">
+                                        <i class="bi bi-search"></i>
+                                    </button>
+                                    <input type="search" class="form-control" id="code-history-search"
+                                           data-i18n-placeholder="search_history_placeholder" placeholder="Tìm kiếm...">
+                                    <button class="btn btn-outline-light" type="button" id="btn-clear-history-search" title="Clear">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
                                 <button class="btn btn-sm btn-light" id="btn-refresh-history">
                                     <i class="bi bi-arrow-clockwise"></i> <span data-i18n="refresh">Làm mới</span>
                                 </button>
@@ -190,10 +211,10 @@ function renderTaomabanveContent() {
                                         <th data-i18n="name">Tên</th>
                                         <th data-i18n="employee_code_th">Mã nhân viên</th>
                                         <th data-i18n="category_th">Hạng mục</th>
+                                        <th data-i18n="plan_code">Mã bản vẽ phương án</th>
                                         <th data-i18n="drawing_code">Mã bản vẽ</th>
                                         <th data-i18n="mother_code">Mã mẹ</th>
                                         <th data-i18n="time">Thời gian</th>
-                                        <th data-i18n="action">Thao tác</th>
                                     </tr>
                                 </thead>
                                 <tbody id="code-history-table-body">
@@ -210,10 +231,10 @@ function renderTaomabanveContent() {
                             </div>
                             <div class="col-auto">
                                 <select class="form-select form-select-sm" id="code-history-page-size" style="width: auto;">
-                                    <option value="10">10 / <span data-i18n="per_page">trang</span></option>
-                                    <option value="20" selected>20 / <span data-i18n="per_page">trang</span></option>
-                                    <option value="50">50 / <span data-i18n="per_page">trang</span></option>
-                                    <option value="100">100 / <span data-i18n="per_page">trang</span></option>
+                                    <option value="100" selected>100 / <span data-i18n="per_page">trang</span></option>
+                                    <option value="200">200 / <span data-i18n="per_page">trang</span></option>
+                                    <option value="500">500 / <span data-i18n="per_page">trang</span></option>
+                                    <option value="1000">1000 / <span data-i18n="per_page">trang</span></option>
                                 </select>
                             </div>
                             <div class="col-auto ms-auto">
@@ -227,6 +248,14 @@ function renderTaomabanveContent() {
                     </div>
                 </div>
             </div>
+        </div>
+        <div id="code-history-context-menu" class="code-history-context-menu d-none">
+            <button type="button" class="dropdown-item" id="ctx-copy-history-code">
+                <i class="bi bi-clipboard me-2"></i><span data-i18n="context_copy_code">Copy mã</span>
+            </button>
+            <button type="button" class="dropdown-item text-danger" id="ctx-delete-history-code">
+                <i class="bi bi-trash me-2"></i><span data-i18n="context_delete_code">Xóa mã</span>
+            </button>
         </div>
     `;
     
@@ -256,6 +285,31 @@ function setupTaomabanveEvents() {
     $('#btn-refresh-history').click(function() {
         loadCodeHistory();
     });
+
+    $('#code-history-search').on('input', debounceTaomabanve(function() {
+        applyHistorySearch($(this).val());
+    }, 300));
+
+    $('#code-history-search').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyHistorySearch($(this).val(), true);
+        }
+    });
+
+    $('#code-history-search').on('search', function() {
+        applyHistorySearch($(this).val(), true);
+    });
+
+    $('#btn-apply-history-search').click(function() {
+        applyHistorySearch($('#code-history-search').val(), true);
+    });
+
+    $('#btn-clear-history-search').click(function() {
+        $('#code-history-search').val('');
+        applyHistorySearch('', true);
+    });
+    $('#btn-clear-history-search').prop('disabled', true);
     
     // Export history button
     $('#btn-export-history').click(function() {
@@ -317,6 +371,36 @@ function setupTaomabanveEvents() {
         }).catch(() => {
             showToast(t_taomabanve('toast_error'), 'Không thể copy mã vào clipboard', 'error');
         });
+    });
+
+    $(document).off('contextmenu', '#code-history-table-body tr').on('contextmenu', '#code-history-table-body tr', function(e) {
+        e.preventDefault();
+        const item = $(this).data('historyItem');
+        if (!item || !item.code) return;
+        TaoMaBanVeState.contextMenuItem = item;
+        showCodeHistoryContextMenu(e.clientX, e.clientY, item);
+    });
+
+    $(document).off('click', '#ctx-copy-history-code').on('click', '#ctx-copy-history-code', function() {
+        const item = TaoMaBanVeState.contextMenuItem;
+        hideCodeHistoryContextMenu();
+        if (!item || !item.code) return;
+        navigator.clipboard.writeText(item.code).then(() => {
+            showToast(t_taomabanve('toast_success'), t_taomabanve('toast_code_copy'), 'success');
+        });
+    });
+
+    $(document).off('click', '#ctx-delete-history-code').on('click', '#ctx-delete-history-code', function() {
+        const item = TaoMaBanVeState.contextMenuItem;
+        hideCodeHistoryContextMenu();
+        if (!item || !item.code) return;
+        handleDeleteCodeHistory(item.code, item);
+    });
+
+    $(document).off('click.taomabanveContext keydown.taomabanveContext scroll.taomabanveContext').on('click.taomabanveContext keydown.taomabanveContext scroll.taomabanveContext', function(e) {
+        if (e.type === 'keydown' && e.key !== 'Escape') return;
+        if ($(e.target).closest('#code-history-context-menu').length) return;
+        hideCodeHistoryContextMenu();
     });
 
     // History pagination
@@ -395,6 +479,24 @@ function saveLastCategory(category) {
     }
 }
 
+function debounceTaomabanve(fn, delay) {
+    let timeoutId;
+    return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+function applyHistorySearch(rawValue, force = false) {
+    const nextTerm = (rawValue || '').trim();
+    if (!force && nextTerm === TaoMaBanVeState.searchTerm) return;
+
+    TaoMaBanVeState.searchTerm = nextTerm;
+    TaoMaBanVeState.currentPage = 1;
+    $('#btn-clear-history-search').prop('disabled', !nextTerm);
+    loadCodeHistory();
+}
+
 // ============================================
 // DATA LOADING
 // ============================================
@@ -411,7 +513,7 @@ async function loadCodeHistory() {
     TaoMaBanVeState.isLoading = true;
     
     try {
-        const result = await api.getCodeHistory(TaoMaBanVeState.currentPage, TaoMaBanVeState.pageSize);
+        const result = await api.getCodeHistory(TaoMaBanVeState.currentPage, TaoMaBanVeState.pageSize, TaoMaBanVeState.searchTerm);
         
         if (result && result.data && Array.isArray(result.data)) {
             TaoMaBanVeState.codeHistory = result.data;
@@ -445,8 +547,10 @@ function renderCodeHistoryTable() {
     const tbody = $('#code-history-table-body');
     
     if (TaoMaBanVeState.codeHistory.length === 0) {
-        tbody.html(createEmptyState(t_taomabanve('no_history'), 8));
+        const emptyText = TaoMaBanVeState.searchTerm ? t_taomabanve('no_results') : t_taomabanve('no_history');
+        tbody.html(createEmptyState(emptyText, 8));
         $('#code-history-page-info').text(t_taomabanve('page_info', { start: 0, end: 0, total: 0 }));
+        $('#code-history-pagination').html('');
         return;
     }
     
@@ -465,41 +569,53 @@ function renderCodeHistoryTable() {
         const categoryDisplay = getCategoryDisplayName(item.category);
         
         html += `
-            <tr>
-                <td>${index + 1}</td>
+            <tr class="code-history-row" title="${escapeHtml(t_taomabanve('right_click_hint'))}">
+                <td>${start + index}</td>
                 <td>${escapeHtml(item.name || '')}</td>
                 <td>${escapeHtml(item.employee || '')}</td>
                 <td>${escapeHtml(categoryDisplay)}</td>
+                <td>${item.plan_code ? '<code class="code-value plan-code-value">' + escapeHtml(item.plan_code) + '</code>' : '<span class="text-muted">-</span>'}</td>
                 <td><code class="code-value">${escapeHtml(item.code || '')}</code></td>
                 <td>${item.parent_code ? '<code class="parent-code text-success">' + escapeHtml(item.parent_code) + '</code>' : '<span class="text-muted">-</span>'}</td>
                 <td>${formatDateTime(item.time)}</td>
-                <td>
-                    <button class="btn btn-sm btn-outline-secondary btn-copy-history me-1" data-code="${escapeHtml(item.code || '')}" title="Copy">
-                        <i class="bi bi-clipboard"></i>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger btn-delete-history" data-code="${escapeHtml(item.code || '')}" title="Xóa">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
             </tr>
         `;
     });
     
     tbody.html(html);
+    $('#code-history-table-body tr.code-history-row').each(function(index) {
+        $(this).data('historyItem', TaoMaBanVeState.codeHistory[index]);
+    });
     renderCodeHistoryPagination();
-    
-    // Add click handlers
-    $('.btn-copy-history').click(function() {
-        const code = $(this).data('code');
-        navigator.clipboard.writeText(code).then(() => {
-            showToast(t_taomabanve('toast_success'), t_taomabanve('toast_code_copy'), 'success');
-        });
-    });
-    
-    $('.btn-delete-history').click(function() {
-        const code = $(this).data('code');
-        handleDeleteCodeHistory(code);
-    });
+}
+
+function showCodeHistoryContextMenu(x, y, item) {
+    const menu = $('#code-history-context-menu');
+    const deleteButton = $('#ctx-delete-history-code');
+    const canDelete = isCodeHistoryDeleteAllowed(item);
+
+    deleteButton.prop('disabled', !canDelete);
+    deleteButton.toggleClass('disabled', !canDelete);
+    deleteButton.attr('title', canDelete ? '' : t_taomabanve('delete_code_expired'));
+
+    menu.removeClass('d-none').css({ left: 0, top: 0 });
+    const menuEl = menu[0];
+    const menuWidth = menuEl.offsetWidth;
+    const menuHeight = menuEl.offsetHeight;
+    const left = Math.min(x, window.innerWidth - menuWidth - 8);
+    const top = Math.min(y, window.innerHeight - menuHeight - 8);
+    menu.css({ left: `${Math.max(8, left)}px`, top: `${Math.max(8, top)}px` });
+}
+
+function hideCodeHistoryContextMenu() {
+    $('#code-history-context-menu').addClass('d-none');
+}
+
+function isCodeHistoryDeleteAllowed(item) {
+    if (!item || !item.time) return false;
+    const createdAt = new Date(item.time);
+    if (Number.isNaN(createdAt.getTime())) return false;
+    return Date.now() - createdAt.getTime() <= 2 * 60 * 60 * 1000;
 }
 
 function renderCodeHistoryPagination() {
@@ -635,6 +751,7 @@ async function handleCreateCode(e) {
     const name = $('#code-name').val().trim();
     const employeeCode = $('#employee-code').val();
     const category = $('#code-category').val();
+    const planCode = $('#plan-code').val().trim();
     
     // Validate
     if (!employeeCode || employeeCode.length !== 3) {
@@ -658,6 +775,20 @@ async function handleCreateCode(e) {
         showToast(t_taomabanve('toast_error'), t_taomabanve('validation_category_required'), 'error');
         return;
     }
+
+    const categoryText = $('#code-category option:selected').text().trim();
+    const confirmMessage = [
+        t_taomabanve('confirm_create_code_title'),
+        '',
+        `${t_taomabanve('requester_name')}: ${name}`,
+        `${t_taomabanve('employee_code')}: ${employeeCode}`,
+        `${t_taomabanve('category')}: ${categoryText}`,
+        `${t_taomabanve('plan_code')}: ${planCode || '-'}`
+    ].join('\n');
+
+    if (!window.confirm(confirmMessage)) {
+        return;
+    }
     
     // Disable submit button
     const submitBtn = $('#btn-create-code-submit');
@@ -670,7 +801,7 @@ async function handleCreateCode(e) {
         // Save last used category
         saveLastCategory(category);
         
-        const result = await api.createCode(name, category, employeeCode);
+        const result = await api.createCode(name, category, employeeCode, planCode);
         
         if (result.success && result.code) {
             $('#generated-code').val(result.code);
@@ -704,8 +835,13 @@ async function handleCreateCode(e) {
  * Handle delete code history
  * @param {string} code - Code to delete
  */
-async function handleDeleteCodeHistory(code) {
+async function handleDeleteCodeHistory(code, item = null) {
     if (!code) return;
+
+    if (item && !isCodeHistoryDeleteAllowed(item)) {
+        showToast(t_taomabanve('toast_error'), t_taomabanve('delete_code_expired'), 'error');
+        return;
+    }
     
     const password = prompt(t_taomabanve('delete_code_confirm').replace('{code}', code));
     

@@ -107,6 +107,11 @@ const translations = {
         // ============================================
         projects_title: 'Dự án',
         add_project: 'Thêm mới',
+        quick_add_double_click: 'Bấm đúp để tạo ID mới',
+        quick_add_start_title: 'Bấm đúp để tạo ID mới rồi nhập thông tin',
+        quick_add_new_id: 'ID mới',
+        quick_add_save_title: 'Lưu dự án mới',
+        quick_add_missing_fields: 'Vui lòng nhập: {fields}',
         edit_project: 'Sửa',
         delete_project: 'Xóa',
         refresh_projects: 'Làm mới dữ liệu',
@@ -406,7 +411,11 @@ const translations = {
         employee_code_hint: 'Nhập ID nhân viên công trình 3 chữ số (vd: 001, 002, 003)',
         category: 'Hạng mục',
         select_category: '-- Chọn hạng mục --',
+        plan_code: 'Mã bản vẽ phương án',
+        plan_code_placeholder: 'Nhập mã bản vẽ phương án',
+        search_history_placeholder: 'Tìm kiếm lịch sử...',
         create_btn: 'Tạo Mã',
+        confirm_create_code_title: 'Xác nhận muốn tạo mã này:',
         
         // Categories
         cat_sjt: 'SJT散件图 - Bản vẽ tách chi tiết',
@@ -449,6 +458,9 @@ const translations = {
         action: 'Thao tác',
         history_copy: 'Copy',
         history_delete: 'Xóa',
+        context_copy_code: 'Copy mã',
+        context_delete_code: 'Xóa mã',
+        right_click_hint: 'Nhấp chuột phải để copy hoặc xóa mã',
         create_code: 'Tạo Mã Bản Vẽ',
         
         // Delete code
@@ -456,6 +468,7 @@ const translations = {
         delete_code_confirm: 'Nhập mật khẩu để xóa mã {code}:',
         delete_code_password: 'Mật khẩu',
         delete_code_wrong_password: 'Mật khẩu không đúng',
+        delete_code_expired: 'Chỉ được xóa mã trong vòng 2 giờ kể từ khi tạo',
         
         // Toast messages
         toast_code_created: 'Đã tạo mã: ',
@@ -617,6 +630,11 @@ const translations = {
         // ============================================
         projects_title: '大日程',
         add_project: '新建',
+        quick_add_double_click: '双击创建新ID',
+        quick_add_start_title: '双击创建新ID，然后填写信息',
+        quick_add_new_id: '新ID',
+        quick_add_save_title: '保存新项目',
+        quick_add_missing_fields: '请填写：{fields}',
         edit_project: '编辑',
         delete_project: '删除',
         refresh_projects: '刷新数据',
@@ -946,7 +964,11 @@ const translations = {
         employee_code_hint: '输入工程人员3位工号（如：001, 002, 003）',
         category: '类别',
         select_category: '-- 选择类别 --',
+        plan_code: '方案图号',
+        plan_code_placeholder: '输入方案图号',
+        search_history_placeholder: '搜索历史...',
         create_btn: '生成',
+        confirm_create_code_title: '确认要生成此编码:',
         
         // Categories
         cat_sjt: 'SJT散件图 - 散件图',
@@ -989,6 +1011,9 @@ const translations = {
         action: '操作',
         history_copy: '复制',
         history_delete: '删除',
+        context_copy_code: '复制编码',
+        context_delete_code: '删除编码',
+        right_click_hint: '右键复制或删除编码',
         create_code: '生成图纸编码',
         
         // Delete code
@@ -996,6 +1021,7 @@ const translations = {
         delete_code_confirm: '请输入密码以删除编码 {code}:',
         delete_code_password: '密码',
         delete_code_wrong_password: '密码错误',
+        delete_code_expired: '编码生成后仅允许在2小时内删除',
         
         // Toast messages
         toast_code_created: '已生成编码: ',

@@ -1359,6 +1359,7 @@ def api_codes_create():
     name = data.get('name', '').strip()
     category = data.get('category', '').strip()
     employee = data.get('employee', '').strip()
+    plan_code = data.get('plan_code', '').strip()
     
     if not name or not category or not employee:
         return jsonify({"success": False, "error": "Vui lòng nhập đầy đủ thông tin"}), 400
@@ -1376,6 +1377,7 @@ def api_codes_create():
             'name': name,
             'employee': employee,
             'category': category,
+            'plan_code': plan_code,
             'code': code,
             'time': __import__('datetime').datetime.now().isoformat(),
             'parent_code': ''
@@ -1391,6 +1393,8 @@ def api_codes_history():
     """Lấy lịch sử tạo mã"""
     page = int(request.args.get('page', 1))
     limit = int(request.args.get('limit', 100))
+    search = request.args.get('search', '').strip().lower()
+    normalized_search = ''.join(ch for ch in search if ch.isalnum())
     
     global history_version, cached_sorted_history
     current_version = len(history)
@@ -1398,8 +1402,23 @@ def api_codes_history():
         cached_sorted_history = sorted(history, key=lambda x: x.get('time', ''), reverse=True)
         history_version = current_version
     
+    filtered_history = cached_sorted_history
+    if search:
+        searchable_fields = ('name', 'employee', 'category', 'plan_code', 'code', 'parent_code', 'time')
+        filtered_history = [
+            item for item in cached_sorted_history
+            if any(
+                search in str(item.get(field, '')).lower()
+                or (
+                    normalized_search
+                    and normalized_search in ''.join(ch for ch in str(item.get(field, '')).lower() if ch.isalnum())
+                )
+                for field in searchable_fields
+            )
+        ]
+    
     offset = (page - 1) * limit
-    limited_history = cached_sorted_history[offset:offset + limit]
+    limited_history = filtered_history[offset:offset + limit]
 
     # Build lightweight stats from full history (not only current page)
     from datetime import datetime, timedelta
@@ -1409,9 +1428,9 @@ def api_codes_history():
 
     today_count = 0
     week_count = 0
-    latest_time = cached_sorted_history[0].get('time') if cached_sorted_history else None
+    latest_time = filtered_history[0].get('time') if filtered_history else None
 
-    for item in cached_sorted_history:
+    for item in filtered_history:
         ts = item.get('time')
         if not ts:
             continue
@@ -1427,11 +1446,11 @@ def api_codes_history():
     
     return jsonify({
         "data": limited_history,
-        "total": len(cached_sorted_history),
-        "total_pages": (len(cached_sorted_history) + limit - 1) // limit,
+        "total": len(filtered_history),
+        "total_pages": (len(filtered_history) + limit - 1) // limit,
         "page": page,
         "stats": {
-            "total": len(cached_sorted_history),
+            "total": len(filtered_history),
             "today": today_count,
             "week": week_count,
             "latest_time": latest_time
@@ -1456,6 +1475,8 @@ def api_codes_export():
 @app.route('/api/codes/history/<path:code>', methods=['DELETE'])
 def api_codes_history_delete(code):
     """Xóa bản ghi lịch sử"""
+    from datetime import datetime, timedelta
+
     data = request.get_json()
     if not data:
         return jsonify({"success": False, "error": "Vui lòng cung cấp mật khẩu"}), 400
@@ -1477,6 +1498,21 @@ def api_codes_history_delete(code):
     
     if not to_remove:
         return jsonify({"success": False, "error": "Mã không tồn tại trong lịch sử"}), 404
+
+    created_at_raw = to_remove.get('time', '')
+    try:
+        created_at = datetime.fromisoformat(created_at_raw)
+    except Exception:
+        return jsonify({
+            "success": False,
+            "error": "Không thể xóa mã không có thời gian tạo hợp lệ"
+        }), 400
+
+    if datetime.now() - created_at > timedelta(hours=2):
+        return jsonify({
+            "success": False,
+            "error": "Chỉ được xóa mã trong vòng 2 giờ kể từ khi tạo"
+        }), 403
     
     category = to_remove['category']
     employee = to_remove.get('employee', '')
