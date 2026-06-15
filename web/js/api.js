@@ -329,11 +329,100 @@ class APIClient {
     }
 
     /**
+     * Khóa một ô project trước khi chỉnh sửa
+     */
+    async lockProjectCell(id, fieldName) {
+        return this.request('POST', `/projects/${id}/locks`, { field_name: fieldName });
+    }
+
+    /**
+     * Mở khóa một ô project
+     */
+    async unlockProjectCell(id, fieldName) {
+        return this.request('DELETE', `/projects/${id}/locks`, { field_name: fieldName });
+    }
+
+    /**
+     * Lấy danh sách ô đang bị khóa
+     */
+    async getProjectLocks() {
+        return this.request('GET', '/projects/locks');
+    }
+
+    /**
+     * Mở stream realtime cho projects (SSE)
+     */
+    createProjectStream(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const url = query
+            ? `${this.baseUrl}/projects/stream?${query}`
+            : `${this.baseUrl}/projects/stream`;
+        return new EventSource(url);
+    }
+
+    /**
+     * Tra tài liệu kỹ thuật theo mã liệu/mã bản vẽ.
+     */
+    async getMaterialDocuments(code, params = {}) {
+        return this.request('GET', `/materials/${encodeURIComponent(code)}/documents`, null, params);
+    }
+
+    /**
+     * Liệt kê nội dung thư mục vật liệu qua server.
+     */
+    async getMaterialFolder(listUrl) {
+        return this.request('GET', listUrl.replace(/^\/api/, ''));
+    }
+
+    /**
+     * Lấy lịch sử chỉnh sửa của project hoặc một field.
+     */
+    async getProjectChangeLogs(id, params = {}) {
+        return this.request('GET', `/projects/${id}/changes`, null, params);
+    }
+
+    /**
+     * Hoàn tác một dòng lịch sử chỉnh sửa.
+     */
+    async revertProjectChange(changeId, data = {}) {
+        return this.request('POST', `/projects/changes/${changeId}/revert`, data);
+    }
+
+    /**
+     * Broadcast ô project user đang chọn.
+     */
+    async updateProjectCursor(cursorData) {
+        return this.request('POST', '/projects/cursor', cursorData);
+    }
+
+    /**
+     * Lấy bình luận của project hoặc field.
+     */
+    async getProjectComments(id, params = {}) {
+        return this.request('GET', `/projects/${id}/comments`, null, params);
+    }
+
+    /**
+     * Thêm bình luận cho project hoặc field.
+     */
+    async addProjectComment(id, commentData) {
+        return this.request('POST', `/projects/${id}/comments`, commentData);
+    }
+
+    /**
+     * Xóa mềm bình luận.
+     */
+    async deleteProjectComment(commentId) {
+        return this.request('DELETE', `/projects/comments/${commentId}`);
+    }
+
+    /**
      * Xóa dự án (có thể xóa nhiều)
      */
-    async deleteProjects(ids, role = 'admin') {
+    async deleteProjects(ids, role = '') {
         const idsString = Array.isArray(ids) ? ids.join(',') : ids;
-        return this.request('DELETE', `/projects/${idsString}?role=${role}`);
+        const suffix = role ? `?role=${encodeURIComponent(role)}` : '';
+        return this.request('DELETE', `/projects/${idsString}${suffix}`);
     }
 
     /**

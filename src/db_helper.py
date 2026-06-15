@@ -7,7 +7,7 @@ Bao gồm: Projects, Users, Customers management
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Union
 
 # Đường dẫn database
@@ -617,6 +617,60 @@ PROJECT_COLUMNS = [
     "accepted_at", "desired_solution_time"
 ]
 
+PROJECT_COLUMN_MAPPING = {
+    'Ngày': 'Created_Date',
+    'Ngày khởi tạo': 'Created_Date',
+    'Khách hàng': 'khach_hang',
+    'Nhân viên KD': 'nhan_vien_kinh_doanh',
+    'Nhân viên kinh doanh': 'nhan_vien_kinh_doanh',
+    'Tên sản phẩm': 'ten_san_pham',
+    'Quy cách': 'quy_cach',
+    '客户技术要求': 'khach_hang_yeu_cau_ky_thuat',
+    'Yêu cầu kỹ thuật KH': 'khach_hang_yeu_cau_ky_thuat',
+    'khach_hang_yeu_cau_ky_thuat': 'khach_hang_yeu_cau_ky_thuat',
+    'Người liên hệ\n(KH)': 'nguoi_lien_he_kh',
+    'Người liên hệ (KH)': 'nguoi_lien_he_kh',
+    'Số lượng': 'so_luong',
+    'Mã PO': 'ma_po',
+    'Mã bản vẽ': 'ma_ban_ve',
+    'Mã bản vẽ chính': 'ma_ban_ve',
+    'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'ma_ban_ve',
+    'Mã bản vẽ kỹ thuật': 'ma_ban_ve_ky_thuat',
+    'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
+    'Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
+    'Mã mẹ ': 'ma_me',
+    'Mã mẹ': 'ma_me',
+    'Mã thành phẩm (Mã mẹ)': 'ma_me',
+    'Loại sản phẩm': 'loai_san_pham',
+    'Hạng mục': 'loai_san_pham',
+    'Nhân viên thiết kế': 'nhan_vien_thiet_ke',
+    'Kỹ sư': 'nhan_vien_thiet_ke',
+    'Kỹ sư thiết kế': 'nhan_vien_thiet_ke',
+    'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
+    'Tình trạng': 'tinh_trang_hoan_thanh',
+    'Mức độ khẩn cấp': 'urgency_level',
+    'Tính cấp bách': 'urgency_level',
+    'Độ khẩn': 'urgency_level',
+    'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
+    'TG mong muốn': 'thoi_gian_mong_muon_ban_ve',
+    'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach',
+    'TG hoàn thành': 'thoi_gian_hoan_thanh_ke_hoach',
+    'sales_name': 'sales_name',
+    'user_id': 'user_id',
+    'User ID': 'user_id',
+    'sales_id': 'user_id',
+    'is_pending': 'is_pending',
+    'Trạng thái chờ': 'is_pending',
+    'accepted_by': 'accepted_by',
+    'Người nhận': 'accepted_by',
+    'accepted_at': 'accepted_at',
+    'Thời gian nhận': 'accepted_at',
+    'urgency_level': 'urgency_level',
+    'desired_solution_time': 'desired_solution_time',
+}
+
+LOCK_TIMEOUT_SECONDS = 30
+
 
 def _extract_customer_name(payload: Dict[str, Any]) -> str:
     """Lấy tên khách hàng từ payload theo các key có thể có."""
@@ -664,6 +718,172 @@ def _upsert_customer_name(cursor: sqlite3.Cursor, customer_name: str) -> None:
             'INSERT OR IGNORE INTO customers (name) VALUES (?)',
             (customer_name,)
         )
+
+
+def ensure_realtime_schema() -> bool:
+    """Bổ sung schema phục vụ realtime collaboration nếu DB cũ chưa có."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("PRAGMA table_info(projects)")
+        project_columns = {col[1] for col in cursor.fetchall()}
+        if 'version' not in project_columns:
+            cursor.execute('ALTER TABLE projects ADD COLUMN version INTEGER DEFAULT 1')
+        if 'updated_by' not in project_columns:
+            cursor.execute('ALTER TABLE projects ADD COLUMN updated_by TEXT')
+        if 'updated_at' not in project_columns:
+            cursor.execute('ALTER TABLE projects ADD COLUMN updated_at TEXT')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_cell_locks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracking_id INTEGER NOT NULL,
+                field_name TEXT NOT NULL,
+                locked_by TEXT NOT NULL,
+                locked_by_name TEXT,
+                locked_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                UNIQUE(tracking_id, field_name)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_change_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracking_id INTEGER NOT NULL,
+                field_name TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                changed_by TEXT,
+                changed_by_name TEXT,
+                changed_at TEXT NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS project_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tracking_id INTEGER NOT NULL,
+                field_name TEXT,
+                comment_text TEXT NOT NULL,
+                created_by TEXT,
+                created_by_name TEXT,
+                created_at TEXT NOT NULL,
+                deleted_at TEXT
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_cell_locks_expires ON project_cell_locks(expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_change_logs_tracking ON project_change_logs(tracking_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_project_comments_tracking ON project_comments(tracking_id)')
+        cursor.execute('UPDATE projects SET version = 1 WHERE version IS NULL')
+
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Error ensuring realtime schema: {e}")
+        return False
+
+
+def cleanup_expired_project_locks(cursor: sqlite3.Cursor) -> None:
+    cursor.execute('DELETE FROM project_cell_locks WHERE expires_at <= ?', (datetime.now().isoformat(),))
+
+
+def normalize_project_field_name(field_name: str) -> str:
+    field = str(field_name or '').strip()
+    return PROJECT_COLUMN_MAPPING.get(field, field)
+
+
+def get_project_version(tracking_id: int) -> Optional[int]:
+    ensure_realtime_schema()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT version FROM projects WHERE tracking_id = ?', (tracking_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return int(row['version']) if row and row['version'] is not None else None
+
+
+def get_active_project_locks() -> List[Dict[str, Any]]:
+    ensure_realtime_schema()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cleanup_expired_project_locks(cursor)
+    cursor.execute('''
+        SELECT tracking_id, field_name, locked_by, locked_by_name, locked_at, expires_at
+        FROM project_cell_locks
+        ORDER BY locked_at DESC
+    ''')
+    rows = [dict(row) for row in cursor.fetchall()]
+    conn.commit()
+    conn.close()
+    return rows
+
+
+def lock_project_cell(tracking_id: int, field_name: str, locked_by: str, locked_by_name: str = '') -> Dict[str, Any]:
+    ensure_realtime_schema()
+    db_field = normalize_project_field_name(field_name)
+    now = datetime.now()
+    expires_at = now + timedelta(seconds=LOCK_TIMEOUT_SECONDS)
+    conn = get_connection()
+    cursor = conn.cursor()
+    cleanup_expired_project_locks(cursor)
+
+    cursor.execute(
+        'SELECT * FROM project_cell_locks WHERE tracking_id = ? AND field_name = ?',
+        (tracking_id, db_field)
+    )
+    existing = cursor.fetchone()
+    if existing and str(existing['locked_by']) != str(locked_by):
+        conn.close()
+        return {
+            "success": False,
+            "error": "Ô này đang được người khác chỉnh sửa",
+            "lock": dict(existing)
+        }
+
+    cursor.execute('''
+        INSERT INTO project_cell_locks (tracking_id, field_name, locked_by, locked_by_name, locked_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tracking_id, field_name) DO UPDATE SET
+            locked_by = excluded.locked_by,
+            locked_by_name = excluded.locked_by_name,
+            locked_at = excluded.locked_at,
+            expires_at = excluded.expires_at
+    ''', (tracking_id, db_field, locked_by, locked_by_name, now.isoformat(), expires_at.isoformat()))
+    conn.commit()
+    conn.close()
+    return {
+        "success": True,
+        "lock": {
+            "tracking_id": tracking_id,
+            "field_name": db_field,
+            "locked_by": locked_by,
+            "locked_by_name": locked_by_name,
+            "locked_at": now.isoformat(),
+            "expires_at": expires_at.isoformat()
+        }
+    }
+
+
+def unlock_project_cell(tracking_id: int, field_name: str, locked_by: str = '') -> bool:
+    ensure_realtime_schema()
+    db_field = normalize_project_field_name(field_name)
+    conn = get_connection()
+    cursor = conn.cursor()
+    if locked_by:
+        cursor.execute(
+            'DELETE FROM project_cell_locks WHERE tracking_id = ? AND field_name = ? AND locked_by = ?',
+            (tracking_id, db_field, locked_by)
+        )
+    else:
+        cursor.execute(
+            'DELETE FROM project_cell_locks WHERE tracking_id = ? AND field_name = ?',
+            (tracking_id, db_field)
+        )
+    conn.commit()
+    changed = cursor.rowcount > 0
+    conn.close()
+    return changed
 
 
 def migrate_json_to_columns():
@@ -876,7 +1096,10 @@ def load_all():
                     "Thời gian nhận": record.get("accepted_at"),
                     "urgency_level": record.get("urgency_level"),
                     "Mức độ khẩn cấp": record.get("urgency_level"),
-                    "desired_solution_time": record.get("desired_solution_time")
+                    "desired_solution_time": record.get("desired_solution_time"),
+                    "version": record.get("version") or 1,
+                    "updated_by": record.get("updated_by"),
+                    "updated_at": record.get("updated_at")
                 }
                 data.append(old_format)
         else:
@@ -1116,63 +1339,23 @@ def update_record(tracking_id, new_data):
             set_clauses = []
             values = []
             
-            column_mapping = {
-                'Ngày': 'Created_Date',
-                'Ngày khởi tạo': 'Created_Date',
-                'Khách hàng': 'khach_hang',
-                'Nhân viên KD': 'nhan_vien_kinh_doanh',  # Thêm mapping cho frontend
-                'Nhân viên kinh doanh': 'nhan_vien_kinh_doanh',
-                'Tên sản phẩm': 'ten_san_pham',
-                'Quy cách': 'quy_cach',
-                '客户技术要求': 'khach_hang_yeu_cau_ky_thuat',
-                'Yêu cầu kỹ thuật KH': 'khach_hang_yeu_cau_ky_thuat',
-                'khach_hang_yeu_cau_ky_thuat': 'khach_hang_yeu_cau_ky_thuat',
-                'Người liên hệ\n(KH)': 'nguoi_lien_he_kh',
-                'Người liên hệ (KH)': 'nguoi_lien_he_kh',
-                'Số lượng': 'so_luong',
-                'Mã PO': 'ma_po',
-                'Mã bản vẽ': 'ma_ban_ve',
-                'Mã bản vẽ chính': 'ma_ban_ve',
-                'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'ma_ban_ve',
-                'Mã bản vẽ kỹ thuật': 'ma_ban_ve_ky_thuat',
-                'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
-                'Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
-                'Mã mẹ ': 'ma_me',
-                'Mã mẹ': 'ma_me',
-                'Mã thành phẩm (Mã mẹ)': 'ma_me',
-                'Loại sản phẩm': 'loai_san_pham',
-                'Hạng mục': 'loai_san_pham',
-                'Nhân viên thiết kế': 'nhan_vien_thiet_ke',
-                'Kỹ sư': 'nhan_vien_thiet_ke',
-                'Kỹ sư thiết kế': 'nhan_vien_thiet_ke',
-                'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
-                'Tình trạng': 'tinh_trang_hoan_thanh',
-                'Mức độ khẩn cấp': 'urgency_level',
-                'Tính cấp bách': 'urgency_level',
-                'Độ khẩn': 'urgency_level',
-                'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
-                'TG mong muốn': 'thoi_gian_mong_muon_ban_ve',
-                'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach',
-                'TG hoàn thành': 'thoi_gian_hoan_thanh_ke_hoach',
-                'sales_name': 'sales_name',
-                'user_id': 'user_id',
-                'User ID': 'user_id',
-                'sales_id': 'user_id',  # Map legacy sales_id to user_id
-                'is_pending': 'is_pending',
-                'Trạng thái chờ': 'is_pending',
-                'accepted_by': 'accepted_by',
-                'Người nhận': 'accepted_by',
-                'accepted_at': 'accepted_at',
-                'Thời gian nhận': 'accepted_at',
-                'urgency_level': 'urgency_level',
-                'Mức độ khẩn cấp': 'urgency_level',
-                'desired_solution_time': 'desired_solution_time'
-            }
-            
-            for old_key, col_name in column_mapping.items():
+            ensure_realtime_schema()
+
+            for old_key, col_name in PROJECT_COLUMN_MAPPING.items():
                 if old_key in new_data:
                     set_clauses.append(f"{col_name} = ?")
                     values.append(new_data[old_key])
+
+            if not set_clauses:
+                conn.close()
+                return False
+
+            set_clauses.append("version = COALESCE(version, 1) + 1")
+            set_clauses.append("updated_at = ?")
+            values.append(datetime.now().isoformat())
+            if 'updated_by' in columns:
+                set_clauses.append("updated_by = ?")
+                values.append(str(new_data.get('updated_by') or new_data.get('changed_by') or ''))
             
             values.append(tracking_id)
             
@@ -1206,6 +1389,370 @@ def update_record(tracking_id, new_data):
         print(f"[DB] Error updating record: {e}")
         import traceback
         traceback.print_exc()
+        return False
+
+
+def update_project_with_version(
+    tracking_id: int,
+    new_data: Dict[str, Any],
+    expected_version: Optional[int],
+    changed_by: str = '',
+    changed_by_name: str = ''
+) -> Dict[str, Any]:
+    """Update project với optimistic locking và ghi change log."""
+    ensure_realtime_schema()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cleanup_expired_project_locks(cursor)
+        cursor.execute('SELECT * FROM projects WHERE tracking_id = ?', (tracking_id,))
+        current = cursor.fetchone()
+        if not current:
+            conn.close()
+            return {"success": False, "error": "Không tìm thấy dự án", "status": 404}
+
+        current_dict = dict(current)
+        current_version = int(current_dict.get('version') or 1)
+        if expected_version is not None and int(expected_version) != current_version:
+            conn.close()
+            return {
+                "success": False,
+                "error": "Dữ liệu đã được người khác cập nhật. Vui lòng tải lại trước khi lưu.",
+                "code": "VERSION_CONFLICT",
+                "status": 409,
+                "current_version": current_version
+            }
+
+        db_updates = {}
+        for old_key, value in new_data.items():
+            db_col = PROJECT_COLUMN_MAPPING.get(old_key)
+            if db_col and db_col not in {'tracking_id', 'version', 'updated_at', 'updated_by'}:
+                db_updates[db_col] = value
+
+        if not db_updates:
+            conn.close()
+            return {"success": False, "error": "Không có trường hợp lệ để cập nhật", "status": 400}
+
+        for db_col in db_updates:
+            cursor.execute(
+                'SELECT * FROM project_cell_locks WHERE tracking_id = ? AND field_name = ?',
+                (tracking_id, db_col)
+            )
+            lock = cursor.fetchone()
+            if lock and changed_by and str(lock['locked_by']) != str(changed_by):
+                conn.close()
+                return {
+                    "success": False,
+                    "error": "Ô này đang được người khác chỉnh sửa",
+                    "code": "CELL_LOCKED",
+                    "status": 423,
+                    "lock": dict(lock)
+                }
+
+        now = datetime.now().isoformat()
+        set_clauses = [f"{db_col} = ?" for db_col in db_updates]
+        values = list(db_updates.values())
+        set_clauses.extend(["version = ?", "updated_at = ?", "updated_by = ?"])
+        new_version = current_version + 1
+        values.extend([new_version, now, str(changed_by or changed_by_name or '')])
+        values.append(tracking_id)
+        cursor.execute(
+            f"UPDATE projects SET {', '.join(set_clauses)} WHERE tracking_id = ?",
+            values
+        )
+
+        for db_col, new_value in db_updates.items():
+            old_value = current_dict.get(db_col)
+            if str(old_value or '') == str(new_value or ''):
+                continue
+            cursor.execute('''
+                INSERT INTO project_change_logs
+                    (tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                tracking_id,
+                db_col,
+                '' if old_value is None else str(old_value),
+                '' if new_value is None else str(new_value),
+                str(changed_by or ''),
+                str(changed_by_name or ''),
+                now
+            ))
+            if changed_by:
+                cursor.execute(
+                    'DELETE FROM project_cell_locks WHERE tracking_id = ? AND field_name = ? AND locked_by = ?',
+                    (tracking_id, db_col, str(changed_by))
+                )
+
+        customer_name = _extract_customer_name(new_data)
+        _upsert_customer_name(cursor, customer_name)
+
+        conn.commit()
+        conn.close()
+        invalidate_cache()
+        updated_record = get_record_by_id(tracking_id)
+        return {
+            "success": True,
+            "record": updated_record,
+            "version": new_version,
+            "changed_fields": list(db_updates.keys())
+        }
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"[DB] Error update_project_with_version: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "status": 500}
+
+
+def get_project_change_logs(tracking_id: int, field_name: str = '', limit: int = 100) -> List[Dict[str, Any]]:
+    """Lấy lịch sử chỉnh sửa của một project, có thể lọc theo field."""
+    ensure_realtime_schema()
+    db_field = normalize_project_field_name(field_name) if field_name else ''
+    safe_limit = max(1, min(int(limit or 100), 500))
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        if db_field:
+            cursor.execute('''
+                SELECT id, tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at
+                FROM project_change_logs
+                WHERE tracking_id = ? AND field_name = ?
+                ORDER BY changed_at DESC, id DESC
+                LIMIT ?
+            ''', (tracking_id, db_field, safe_limit))
+        else:
+            cursor.execute('''
+                SELECT id, tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at
+                FROM project_change_logs
+                WHERE tracking_id = ?
+                ORDER BY changed_at DESC, id DESC
+                LIMIT ?
+            ''', (tracking_id, safe_limit))
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[DB] Error reading project change logs: {e}")
+        return []
+
+
+def get_project_change_log(change_id: int) -> Optional[Dict[str, Any]]:
+    """Lấy một dòng audit log theo id."""
+    ensure_realtime_schema()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at
+            FROM project_change_logs
+            WHERE id = ?
+        ''', (change_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[DB] Error reading project change log: {e}")
+        return None
+
+
+def revert_project_change_log(
+    change_id: int,
+    expected_version: Optional[int],
+    changed_by: str = '',
+    changed_by_name: str = ''
+) -> Dict[str, Any]:
+    """Hoàn tác một thay đổi đã ghi trong project_change_logs."""
+    ensure_realtime_schema()
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        cleanup_expired_project_locks(cursor)
+        cursor.execute('''
+            SELECT id, tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at
+            FROM project_change_logs
+            WHERE id = ?
+        ''', (change_id,))
+        log = cursor.fetchone()
+        if not log:
+            conn.close()
+            return {"success": False, "error": "Không tìm thấy lịch sử chỉnh sửa", "status": 404}
+
+        log_dict = dict(log)
+        tracking_id = int(log_dict['tracking_id'])
+        db_col = normalize_project_field_name(log_dict.get('field_name'))
+        if db_col not in PROJECT_COLUMNS or db_col in {'tracking_id', 'version', 'updated_at', 'updated_by'}:
+            conn.close()
+            return {"success": False, "error": "Trường này không hỗ trợ hoàn tác", "status": 400}
+
+        cursor.execute('SELECT * FROM projects WHERE tracking_id = ?', (tracking_id,))
+        current = cursor.fetchone()
+        if not current:
+            conn.close()
+            return {"success": False, "error": "Không tìm thấy dự án", "status": 404}
+
+        current_dict = dict(current)
+        current_version = int(current_dict.get('version') or 1)
+        if expected_version is not None and int(expected_version) != current_version:
+            conn.close()
+            return {
+                "success": False,
+                "error": "Dữ liệu đã được người khác cập nhật. Vui lòng tải lại trước khi hoàn tác.",
+                "code": "VERSION_CONFLICT",
+                "status": 409,
+                "current_version": current_version
+            }
+
+        cursor.execute(
+            'SELECT * FROM project_cell_locks WHERE tracking_id = ? AND field_name = ?',
+            (tracking_id, db_col)
+        )
+        lock = cursor.fetchone()
+        if lock and changed_by and str(lock['locked_by']) != str(changed_by):
+            conn.close()
+            return {
+                "success": False,
+                "error": "Ô này đang được người khác chỉnh sửa",
+                "code": "CELL_LOCKED",
+                "status": 423,
+                "lock": dict(lock)
+            }
+
+        now = datetime.now().isoformat()
+        old_current_value = current_dict.get(db_col)
+        revert_value = log_dict.get('old_value') or ''
+        new_version = current_version + 1
+        cursor.execute(
+            f'UPDATE projects SET {db_col} = ?, version = ?, updated_at = ?, updated_by = ? WHERE tracking_id = ?',
+            (revert_value, new_version, now, str(changed_by or changed_by_name or ''), tracking_id)
+        )
+
+        if str(old_current_value or '') != str(revert_value or ''):
+            cursor.execute('''
+                INSERT INTO project_change_logs
+                    (tracking_id, field_name, old_value, new_value, changed_by, changed_by_name, changed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                tracking_id,
+                db_col,
+                '' if old_current_value is None else str(old_current_value),
+                '' if revert_value is None else str(revert_value),
+                str(changed_by or ''),
+                str(changed_by_name or ''),
+                now
+            ))
+
+        if changed_by:
+            cursor.execute(
+                'DELETE FROM project_cell_locks WHERE tracking_id = ? AND field_name = ? AND locked_by = ?',
+                (tracking_id, db_col, str(changed_by))
+            )
+
+        conn.commit()
+        conn.close()
+        invalidate_cache()
+        return {
+            "success": True,
+            "record": get_record_by_id(tracking_id),
+            "version": new_version,
+            "tracking_id": tracking_id,
+            "changed_fields": [db_col],
+            "reverted_change_id": change_id
+        }
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        print(f"[DB] Error revert_project_change_log: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "status": 500}
+
+
+def get_project_comments(tracking_id: int, field_name: str = '', include_resolved: bool = False) -> List[Dict[str, Any]]:
+    """Lấy bình luận của một project, có thể lọc theo field."""
+    ensure_realtime_schema()
+    db_field = normalize_project_field_name(field_name) if field_name else ''
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        where = ['tracking_id = ?']
+        params = [tracking_id]
+        if db_field:
+            where.append('field_name = ?')
+            params.append(db_field)
+        if not include_resolved:
+            where.append('deleted_at IS NULL')
+        cursor.execute(f'''
+            SELECT id, tracking_id, field_name, comment_text, created_by, created_by_name, created_at, deleted_at
+            FROM project_comments
+            WHERE {' AND '.join(where)}
+            ORDER BY created_at ASC, id ASC
+        ''', params)
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        print(f"[DB] Error reading project comments: {e}")
+        return []
+
+
+def add_project_comment(
+    tracking_id: int,
+    comment_text: str,
+    field_name: str = '',
+    created_by: str = '',
+    created_by_name: str = ''
+) -> Optional[Dict[str, Any]]:
+    """Thêm bình luận vào project/cell."""
+    ensure_realtime_schema()
+    text = str(comment_text or '').strip()
+    if not text:
+        return None
+    db_field = normalize_project_field_name(field_name) if field_name else ''
+    now = datetime.now().isoformat()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO project_comments
+                (tracking_id, field_name, comment_text, created_by, created_by_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (tracking_id, db_field, text, str(created_by or ''), str(created_by_name or ''), now))
+        comment_id = cursor.lastrowid
+        conn.commit()
+        cursor.execute('''
+            SELECT id, tracking_id, field_name, comment_text, created_by, created_by_name, created_at, deleted_at
+            FROM project_comments
+            WHERE id = ?
+        ''', (comment_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        print(f"[DB] Error adding project comment: {e}")
+        return None
+
+
+def delete_project_comment(comment_id: int, deleted_by: str = '') -> bool:
+    """Xóa mềm bình luận."""
+    ensure_realtime_schema()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE project_comments SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL',
+            (datetime.now().isoformat(), comment_id)
+        )
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        return success
+    except Exception as e:
+        print(f"[DB] Error deleting project comment: {e}")
         return False
 
 
@@ -1788,7 +2335,10 @@ def _convert_rows_to_format(rows):
             "accepted_by": record.get("accepted_by"),
             "Người nhận": record.get("accepted_by"),
             "accepted_at": record.get("accepted_at"),
-            "Thời gian nhận": record.get("accepted_at")
+            "Thời gian nhận": record.get("accepted_at"),
+            "version": record.get("version") or 1,
+            "updated_by": record.get("updated_by"),
+            "updated_at": record.get("updated_at")
         }
         data.append(old_format)
     
@@ -2052,7 +2602,7 @@ def get_record_by_tracking_id(tracking_id):
                     "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
                     "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
                     "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
-                    "Tính cấp bách": record.get("tinh_cap_bach"),
+                    "Tính cấp bách": record.get("urgency_level"),
                     "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
                     "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
                     "user_id": record.get("user_id"),
@@ -2065,7 +2615,10 @@ def get_record_by_tracking_id(tracking_id):
                     "Thời gian nhận": record.get("accepted_at"),
                     "urgency_level": record.get("urgency_level"),
                     "Mức độ khẩn cấp": record.get("urgency_level"),
-                    "desired_solution_time": record.get("desired_solution_time")
+                    "desired_solution_time": record.get("desired_solution_time"),
+                    "version": record.get("version") or 1,
+                    "updated_by": record.get("updated_by"),
+                    "updated_at": record.get("updated_at")
                 }
             return None
         else:

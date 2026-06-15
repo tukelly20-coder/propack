@@ -31,6 +31,15 @@ const ProjectsState = {
     virtualScrollFrame: null,
     activeCell: null,
     editingCell: null,
+    projectLocks: new Map(),
+    realtimeStream: null,
+    realtimeConnected: false,
+    realtimeReloadTimer: null,
+    onlineUsers: [],
+    remoteCursors: new Map(),
+    cursorPublishTimer: null,
+    activeChangeLogContext: null,
+    activeCommentContext: null,
     undoStack: [],
     columnFilters: {},
     activeFilterKey: null,
@@ -237,6 +246,7 @@ function initProjectsModule() {
     
     // Load data
     loadProjects();
+    startProjectsRealtime();
 }
 
 /**
@@ -281,6 +291,10 @@ function renderProjectsContent() {
                                 <i class="bi bi-x-lg"></i>
                             </button>
                         </div>
+                    </div>
+                    <div class="projects-presence" id="projects-presence" title="Người đang online">
+                        <span class="projects-presence-dot"></span>
+                        <span id="projects-presence-count">0</span>
                     </div>
                     <span class="projects-filter-count" id="projects-filter-count"></span>
                 </div>
@@ -382,6 +396,9 @@ function renderProjectsContent() {
                 <button type="button" class="project-context-item ctx-copy-cell"><span class="ctx-icon"><i class="bi bi-copy"></i></span><span data-menu-label="copyCell">${t('copy_cell')}</span><kbd>Ctrl+C</kbd></button>
                 <button type="button" class="project-context-item ctx-copy-row"><span class="ctx-icon"><i class="bi bi-table"></i></span><span data-menu-label="copyRow">${t('copy_row')}</span></button>
                 <button type="button" class="project-context-item ctx-filter-value"><span class="ctx-icon"><i class="bi bi-funnel"></i></span><span data-menu-label="filterValue">${t('filter_this_value')}</span></button>
+                <button type="button" class="project-context-item ctx-comments"><span class="ctx-icon is-primary"><i class="bi bi-chat-left-text"></i></span><span data-menu-label="comments">Bình luận</span></button>
+                <button type="button" class="project-context-item ctx-change-log"><span class="ctx-icon is-info"><i class="bi bi-clock-history"></i></span><span data-menu-label="changeLog">Lịch sử chỉnh sửa</span></button>
+                <button type="button" class="project-context-item ctx-material-docs"><span class="ctx-icon is-primary"><i class="bi bi-folder2-open"></i></span><span data-menu-label="materialDocs">Tài liệu mã liệu</span></button>
             </div>
             <div class="project-context-section">
                 <button type="button" class="project-context-item ctx-refresh"><span class="ctx-icon"><i class="bi bi-arrow-clockwise"></i></span><span data-menu-label="refresh">${t('refresh')}</span></button>
@@ -393,6 +410,53 @@ function renderProjectsContent() {
             </div>
             <div class="project-context-section is-danger-section">
                 <button type="button" class="project-context-item is-danger ctx-delete"><span class="ctx-icon is-danger"><i class="bi bi-trash"></i></span><span data-menu-label="delete">${t('quick_delete')}</span><kbd>Del</kbd></button>
+            </div>
+        </div>
+        <div class="modal fade" id="project-material-docs-modal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="project-material-docs-title">Tài liệu mã liệu</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="project-material-docs-body">
+                        <div class="text-muted">Đang tải...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="project-change-log-modal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="project-change-log-title">Lịch sử chỉnh sửa</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="project-change-log-body">
+                        <div class="text-muted">Đang tải...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="project-comments-modal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="project-comments-title">Bình luận</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="project-comments-body" class="project-comments-body">
+                            <div class="text-muted">Đang tải...</div>
+                        </div>
+                        <div class="project-comment-compose">
+                            <textarea class="form-control" id="project-comment-input" rows="3" maxlength="1000" placeholder="Nhập bình luận..."></textarea>
+                            <button type="button" class="btn btn-primary" id="btn-send-project-comment">
+                                <i class="bi bi-send"></i><span>Gửi</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -574,12 +638,35 @@ function setupProjectsEvents() {
     });
 
     $('#btn-add-project').click(function() {
+        if (!canCurrentUserCreateProject()) {
+            showToast(t('warning'), 'Bạn không có quyền tạo dự án.', 'warning');
+            return;
+        }
         showProjectModal();
     });
 
     $('#btn-undo-project').click(function() {
         undoLastProjectAction();
     });
+
+    $('#btn-send-project-comment').click(function() {
+        submitProjectComment();
+    });
+
+    $('#project-change-log-body')
+        .off('click.projectRevert')
+        .on('click.projectRevert', '.btn-revert-project-change', function() {
+            const changeId = Number($(this).data('changeId'));
+            if (changeId) revertProjectChange(changeId);
+        });
+
+    $('#project-material-docs-body')
+        .off('click.projectMaterialFolder')
+        .on('click.projectMaterialFolder', '.btn-open-material-folder', function() {
+            const listUrl = String($(this).data('listUrl') || '');
+            const folderName = String($(this).data('folderName') || '');
+            if (listUrl) loadProjectMaterialFolder(listUrl, folderName);
+        });
 
     $(document).off('change.projectDeadline').on('change.projectDeadline', '#field-ngay, #field-capbach', function() {
         updateProjectExpectedDrawingTime();
@@ -862,6 +949,279 @@ async function loadProjects(options = {}) {
     }
 }
 
+function getProjectsCurrentUser() {
+    try {
+        return JSON.parse(localStorage.getItem('current_user') || '{}') || {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function normalizeProjectRole(role) {
+    const normalized = String(role || '').trim().toLowerCase();
+    const aliases = {
+        it: 'admin',
+        administrator: 'admin',
+        eng: 'engineer',
+        'kỹ thuật': 'engineer',
+        'ky thuat': 'engineer',
+        'sản xuất': 'production',
+        'san xuat': 'production',
+        'kế hoạch': 'planner',
+        'ke hoach': 'planner'
+    };
+    return aliases[normalized] || normalized;
+}
+
+function getProjectCurrentRole() {
+    return normalizeProjectRole(getProjectsCurrentUser().role);
+}
+
+function canCurrentUserCreateProject() {
+    const role = getProjectCurrentRole();
+    return ['admin', 'planner', 'sales'].includes(role);
+}
+
+function canCurrentUserDeleteProject() {
+    return getProjectCurrentRole() === 'admin';
+}
+
+function canCurrentUserEditAnyProject() {
+    return ['admin', 'planner', 'sales', 'engineer'].includes(getProjectCurrentRole());
+}
+
+function canCurrentUserEditProjectColumn(column) {
+    if (!column || column.readOnly || !column.updateKey) return false;
+    const role = getProjectCurrentRole();
+    if (['admin', 'planner', 'sales', 'engineer'].includes(role)) return true;
+    if (role === 'production') return column.key === 'tinhtrang';
+    return false;
+}
+
+function getProjectsRealtimeUserId() {
+    const user = getProjectsCurrentUser();
+    return String(user.user_id || user.username || 'anonymous');
+}
+
+function getProjectLockKey(id, fieldName) {
+    return `${String(id)}:${String(fieldName || '')}`;
+}
+
+function setProjectLocks(locks = []) {
+    ProjectsState.projectLocks = new Map();
+    locks.forEach(lock => {
+        if (!lock) return;
+        ProjectsState.projectLocks.set(getProjectLockKey(lock.tracking_id, lock.field_name), lock);
+    });
+    applyProjectLocksToRenderedCells();
+}
+
+function upsertProjectLock(lock) {
+    if (!lock) return;
+    ProjectsState.projectLocks.set(getProjectLockKey(lock.tracking_id, lock.field_name), lock);
+    applyProjectLocksToRenderedCells();
+}
+
+function removeProjectLock(trackingId, fieldName) {
+    ProjectsState.projectLocks.delete(getProjectLockKey(trackingId, normalizeProjectUpdateField(fieldName)));
+    ProjectsState.projectLocks.delete(getProjectLockKey(trackingId, fieldName));
+    applyProjectLocksToRenderedCells();
+}
+
+function getProjectCellLock($cell, column = null) {
+    if (!$cell || !$cell.length || $cell.data('draft')) return null;
+    const id = String($cell.data('id') || '');
+    const updateKey = column?.updateKey || $cell.data('update-key') || '';
+    const fieldName = normalizeProjectUpdateField(updateKey);
+    return ProjectsState.projectLocks.get(getProjectLockKey(id, fieldName)) || null;
+}
+
+function isProjectCellLockedByOther($cell, column = null) {
+    const lock = getProjectCellLock($cell, column);
+    if (!lock) return false;
+    return String(lock.locked_by || '') !== getProjectsRealtimeUserId();
+}
+
+function applyProjectLocksToRenderedCells() {
+    $('#projects-table-body .project-sheet-cell').each(function() {
+        const $cell = $(this);
+        const column = getVisibleProjectColumns()[Number($cell.data('col'))];
+        const lock = getProjectCellLock($cell, column);
+        const lockedByOther = lock && String(lock.locked_by || '') !== getProjectsRealtimeUserId();
+        $cell.toggleClass('locked-cell', !!lock);
+        $cell.toggleClass('locked-by-other', !!lockedByOther);
+        if (lock) {
+            $cell.attr('title', `${lock.locked_by_name || lock.locked_by || ''} đang chỉnh sửa`);
+        } else {
+            $cell.removeAttr('title');
+        }
+    });
+    applyProjectRemoteCursorsToRenderedCells();
+}
+
+function getProjectCursorKey(cursor) {
+    return `${String(cursor.tracking_id || '')}:${String(cursor.field_name || '')}`;
+}
+
+function upsertProjectRemoteCursor(cursor) {
+    if (!cursor || String(cursor.user_id || '') === getProjectsRealtimeUserId()) return;
+    cursor.updated_at = Date.now();
+    ProjectsState.remoteCursors.set(String(cursor.user_id || cursor.user_name || 'unknown'), cursor);
+    applyProjectRemoteCursorsToRenderedCells();
+}
+
+function applyProjectRemoteCursorsToRenderedCells() {
+    const now = Date.now();
+    const ownUserId = getProjectsRealtimeUserId();
+    const activeCursors = [];
+    ProjectsState.remoteCursors.forEach((cursor, key) => {
+        if (!cursor || cursor.user_id === ownUserId || now - Number(cursor.updated_at || 0) > 30000) {
+            ProjectsState.remoteCursors.delete(key);
+        } else {
+            activeCursors.push(cursor);
+        }
+    });
+
+    $('#projects-table-body .project-sheet-cell')
+        .removeClass('remote-cursor-cell')
+        .removeAttr('data-remote-user');
+
+    activeCursors.forEach(cursor => {
+        const $cell = $(`#projects-table-body .project-sheet-cell[data-id="${CSS.escape(String(cursor.tracking_id || ''))}"][data-update-key]`)
+            .filter(function() {
+                return normalizeProjectUpdateField($(this).data('update-key')) === String(cursor.field_name || '');
+            })
+            .first();
+        if (!$cell.length) return;
+        $cell.addClass('remote-cursor-cell');
+        $cell.attr('data-remote-user', cursor.user_name || cursor.user_id || '');
+    });
+}
+
+function normalizeProjectUpdateField(fieldName) {
+    const map = {
+        'Ngày': 'Created_Date',
+        'Khách hàng': 'khach_hang',
+        'Nhân viên kinh doanh': 'nhan_vien_kinh_doanh',
+        'Tên sản phẩm': 'ten_san_pham',
+        'Quy cách': 'quy_cach',
+        '客户技术要求': 'khach_hang_yeu_cau_ky_thuat',
+        'Yêu cầu kỹ thuật KH': 'khach_hang_yeu_cau_ky_thuat',
+        'Người liên hệ (KH)': 'nguoi_lien_he_kh',
+        'Số lượng': 'so_luong',
+        'Mã PO': 'ma_po',
+        'Tính cấp bách': 'urgency_level',
+        'is_pending': 'is_pending',
+        'accepted_by': 'accepted_by',
+        'accepted_at': 'accepted_at',
+        'Mã bản vẽ phương án (mã trước khi đặt hàng)': 'ma_ban_ve',
+        'Mã bản vẽ kỹ thuật (sau khi đặt hàng)': 'ma_ban_ve_ky_thuat',
+        'Mã mẹ': 'ma_me',
+        'Loại sản phẩm': 'loai_san_pham',
+        'Nhân viên thiết kế': 'nhan_vien_thiet_ke',
+        'Tình trạng hoàn thành dự án': 'tinh_trang_hoan_thanh',
+        'Thời gian mong muốn có bản vẽ': 'thoi_gian_mong_muon_ban_ve',
+        'Thời gian hoàn thành kế hoạch': 'thoi_gian_hoan_thanh_ke_hoach'
+    };
+    return map[fieldName] || fieldName;
+}
+
+function startProjectsRealtime() {
+    if (ProjectsState.realtimeStream || typeof EventSource === 'undefined') return;
+    const user = getProjectsCurrentUser();
+    try {
+        ProjectsState.realtimeStream = api.createProjectStream({
+            user_id: user.user_id || '',
+            username: user.username || ''
+        });
+    } catch (error) {
+        console.warn('[Projects] Cannot open realtime stream:', error);
+        return;
+    }
+
+    ProjectsState.realtimeStream.onopen = function() {
+        ProjectsState.realtimeConnected = true;
+    };
+    ProjectsState.realtimeStream.onmessage = function(event) {
+        handleProjectRealtimeEvent(event);
+    };
+    ProjectsState.realtimeStream.addEventListener('project', handleProjectRealtimeEvent);
+    ProjectsState.realtimeStream.onerror = function() {
+        ProjectsState.realtimeConnected = false;
+    };
+}
+
+function handleProjectRealtimeEvent(event) {
+    let payload;
+    try {
+        payload = JSON.parse(event.data || '{}');
+    } catch (error) {
+        return;
+    }
+
+    if (Array.isArray(payload.locks)) {
+        setProjectLocks(payload.locks);
+    }
+    if (Array.isArray(payload.online_users)) {
+        updateProjectsPresence(payload.online_users);
+    }
+
+    if (payload.type === 'cell_locked') {
+        upsertProjectLock(payload.lock);
+        return;
+    }
+    if (payload.type === 'cell_unlocked') {
+        removeProjectLock(payload.tracking_id, payload.field_name);
+        return;
+    }
+    if (payload.type === 'cursor') {
+        upsertProjectRemoteCursor(payload.cursor);
+        return;
+    }
+    if (payload.type === 'comment_added' || payload.type === 'comment_deleted') {
+        refreshActiveProjectComments(payload);
+        return;
+    }
+    if (payload.type === 'project_updated' && payload.record) {
+        mergeRealtimeProjectRecord(payload.record);
+        return;
+    }
+    if (payload.type === 'project_created' || payload.type === 'project_deleted') {
+        scheduleProjectsRealtimeReload();
+    }
+}
+
+function updateProjectsPresence(users = []) {
+    ProjectsState.onlineUsers = users;
+    const count = users.length;
+    const label = users
+        .map(user => user.username || user.user_id)
+        .filter(Boolean)
+        .join(', ');
+    $('#projects-presence-count').text(String(count));
+    $('#projects-presence').attr('title', label ? `Online: ${label}` : 'Người đang online');
+}
+
+function mergeRealtimeProjectRecord(record) {
+    const id = getProjectId(record);
+    if (!id) return;
+    const index = ProjectsState.projects.findIndex(project => getProjectId(project) === String(id));
+    if (index >= 0) {
+        ProjectsState.projects[index] = { ...ProjectsState.projects[index], ...record };
+        renderProjectsTablePreservingViewport();
+    } else {
+        scheduleProjectsRealtimeReload();
+    }
+}
+
+function scheduleProjectsRealtimeReload() {
+    if (ProjectsState.realtimeReloadTimer) return;
+    ProjectsState.realtimeReloadTimer = setTimeout(() => {
+        ProjectsState.realtimeReloadTimer = null;
+        loadProjects({ preserveScroll: true });
+    }, 500);
+}
+
 function scrollProjectsToBottom() {
     const wrap = document.getElementById('projects-table-wrap');
     if (!wrap) return;
@@ -1003,10 +1363,11 @@ function renderProjectsVirtualRows(options = {}) {
         columns.forEach((column, colIndex) => {
             const rawValue = getProjectValue(project, column.fields, '');
             const displayValue = formatProjectCellValue(column, rawValue, rowIndex);
+            const canEdit = canCurrentUserEditProjectColumn(column);
             const selectionClasses = getSelectionRangeClasses(rowIndex, colIndex);
             const classes = [
                 'project-sheet-cell',
-                column.readOnly ? 'readonly' : 'editable',
+                canEdit ? 'editable' : 'readonly',
                 column.className || '',
                 getProjectCellStateClass(column, rawValue),
                 selectionClasses
@@ -1034,6 +1395,7 @@ function renderProjectsVirtualRows(options = {}) {
     }
     
     tbody.html(html);
+    applyProjectLocksToRenderedCells();
 }
 
 function getProjectBottomBlankRowCount() {
@@ -1100,7 +1462,7 @@ function renderQuickAddProjectRow(columns, rowIndex) {
 
     columns.forEach((column, colIndex) => {
         const rawValue = getProjectDraftValue(column);
-        const isReadonly = column.readOnly;
+        const isReadonly = column.readOnly || !canCurrentUserCreateProject();
         const displayValue = isReadonly
             ? renderQuickAddControl()
             : formatProjectCellValue(column, rawValue, rowIndex);
@@ -1134,6 +1496,9 @@ function renderQuickAddProjectRow(columns, rowIndex) {
 
 function renderQuickAddControl() {
     if (!ProjectsState.quickAddStarted) {
+        if (!canCurrentUserCreateProject()) {
+            return `<span class="quick-add-readonly">Chỉ xem</span>`;
+        }
         return `
             <button type="button" class="quick-add-start" title="${escapeHtml(t('quick_add_start_title'))}">
                 <span class="quick-add-plus">+</span>
@@ -1949,6 +2314,10 @@ function setupSpreadsheetHandlers() {
     tbody.off('dblclick.quickAddStart').on('dblclick.quickAddStart', '.quick-add-start, .project-quick-add-row .project-sheet-cell.readonly', function(e) {
         e.preventDefault();
         e.stopPropagation();
+        if (!canCurrentUserCreateProject()) {
+            showToast(t('warning'), 'Bạn không có quyền tạo dự án.', 'warning');
+            return;
+        }
         startQuickAddProject();
     });
 
@@ -2133,6 +2502,25 @@ function activateProjectCell($cell) {
     selectProjectRow(id, $cell.closest('tr'));
     $('#projects-table-body .project-sheet-cell').removeClass('active-cell');
     $cell.addClass('active-cell');
+    publishProjectCursor($cell);
+}
+
+function publishProjectCursor($cell) {
+    if (!$cell || !$cell.length || $cell.data('draft') || $cell.data('blank')) return;
+    const id = String($cell.data('id') || '');
+    if (!id || id === '__new__') return;
+    const column = getVisibleProjectColumns()[Number($cell.data('col'))];
+    if (!column) return;
+    clearTimeout(ProjectsState.cursorPublishTimer);
+    ProjectsState.cursorPublishTimer = setTimeout(() => {
+        api.updateProjectCursor({
+            tracking_id: id,
+            field_name: column.updateKey || column.fields?.[0] || column.key,
+            field_label: getProjectColumnDisplayName(column),
+            row: Number($cell.data('row')),
+            column: Number($cell.data('col'))
+        }).catch(error => console.warn('[Projects] Cursor publish failed:', error));
+    }, 120);
 }
 
 function selectProjectRow(id, $row) {
@@ -2164,6 +2552,10 @@ function handleProjectCellKeydown(e, $cell) {
 
     if ((key === 'Backspace' || key === 'Delete') && $cell.hasClass('editable')) {
         e.preventDefault();
+        if (isProjectCellLockedByOther($cell)) {
+            showToast(t('warning'), 'Ô này đang được người khác chỉnh sửa', 'warning');
+            return;
+        }
         saveProjectCell($cell, '');
         return;
     }
@@ -2214,7 +2606,7 @@ function focusProjectCell(row, col) {
     });
 }
 
-function beginProjectCellEdit($cell, seedValue = null) {
+async function beginProjectCellEdit($cell, seedValue = null) {
     if (!$cell.hasClass('editable') || ProjectsState.editingCell) return;
     if ($cell.data('draft') && !ProjectsState.quickAddStarted) {
         showToast(t('info'), t('quick_add_double_click'), 'info');
@@ -2223,6 +2615,22 @@ function beginProjectCellEdit($cell, seedValue = null) {
 
     const column = getVisibleProjectColumns()[Number($cell.data('col'))];
     if (!column || column.readOnly || !column.updateKey) return;
+    if (isProjectCellLockedByOther($cell, column)) {
+        showToast(t('warning'), 'Ô này đang được người khác chỉnh sửa', 'warning');
+        return;
+    }
+    if (!$cell.data('draft')) {
+        try {
+            const lockResult = await api.lockProjectCell(String($cell.data('id')), column.updateKey);
+            if (!lockResult || !lockResult.success) {
+                throw new Error(lockResult?.error || 'Không thể khóa ô để chỉnh sửa');
+            }
+            upsertProjectLock(lockResult.lock);
+        } catch (error) {
+            showToast(t('warning'), error.message || 'Ô này đang được người khác chỉnh sửa', 'warning');
+            return;
+        }
+    }
 
     const originalValue = $cell.attr('data-raw-value') || '';
     const editValue = seedValue !== null ? seedValue : originalValue;
@@ -2236,6 +2644,9 @@ function beginProjectCellEdit($cell, seedValue = null) {
         if (commit) {
             await saveProjectCell($cell, value);
         } else {
+            if (!$cell.data('draft')) {
+                api.unlockProjectCell(String($cell.data('id')), column.updateKey).catch(() => {});
+            }
             renderProjectCellDisplay($cell, column, originalValue);
         }
         $cell.focus();
@@ -2345,13 +2756,14 @@ async function applyProjectPasteMatrix($startCell, matrix) {
 
     try {
         for (const [id, payload] of updatesById.entries()) {
-            const result = await api.updateProject(id, payload);
+            const project = ProjectsState.projects.find(item => getProjectId(item) === String(id));
+            const result = await api.updateProject(id, { ...payload, version: project?.version || 1 });
             if (!result || !result.success) {
                 throw new Error(result?.error || t('error'));
             }
             const rowIndex = ProjectsState.projects.findIndex(project => String(getProjectValue(project, ['Tracking ID', 'tracking_id'], '')) === String(id));
             if (rowIndex >= 0) {
-                Object.assign(ProjectsState.projects[rowIndex], payload);
+                Object.assign(ProjectsState.projects[rowIndex], result.record || payload);
             }
         }
         pushProjectUndo({
@@ -2392,13 +2804,18 @@ async function saveProjectCell($cell, value) {
 
     $cell.addClass('saving-cell').removeClass('error-cell');
     try {
-        const payload = { [column.updateKey]: value };
+        const project = getProjectContextRow(id);
+        const payload = { [column.updateKey]: value, version: project?.version || 1 };
         const result = await api.updateProject(id, payload);
         if (!result || !result.success) {
             throw new Error(result?.error || t('error'));
         }
 
-        updateProjectRowDataById(id, column, value);
+        if (result.record) {
+            mergeRealtimeProjectRecord(result.record);
+        } else {
+            updateProjectRowDataById(id, column, value);
+        }
         pushProjectUndo({
             type: 'cell',
             label: t('undo_edit_cell'),
@@ -2410,11 +2827,13 @@ async function saveProjectCell($cell, value) {
         });
         renderProjectCellDisplay($cell, column, value);
         $cell.removeClass('saving-cell');
+        removeProjectLock(id, column.updateKey);
     } catch (error) {
         console.error('[Projects] Cell update error:', error);
         $cell.removeClass('saving-cell').addClass('error-cell');
         renderProjectCellDisplay($cell, column, oldValue);
         showToast(t('error'), error.message || t('error'), 'error');
+        api.unlockProjectCell(id, column.updateKey).catch(() => {});
     }
 }
 
@@ -2534,6 +2953,9 @@ function updateToolbarState() {
         .attr('title', undo ? `${undo.label || t('undo')} (Ctrl+Z)` : `${t('undo')} (Ctrl+Z)`)
         .find('span')
         .text(t('undo'));
+    $('#btn-add-project')
+        .prop('disabled', !canCurrentUserCreateProject())
+        .toggleClass('disabled', !canCurrentUserCreateProject());
 
     const displayCount = getDisplayProjects().length;
     const activeColumnFilters = Object.keys(ProjectsState.columnFilters).length;
@@ -3001,6 +3423,14 @@ async function viewProject(id) {
 async function saveProject() {
     const trackingId = $('#tracking-id').val();
     const isEditMode = !!trackingId;
+    if (isEditMode && !canCurrentUserEditAnyProject()) {
+        showToast(t('warning'), 'Bạn không có quyền chỉnh sửa toàn bộ dự án.', 'warning');
+        return;
+    }
+    if (!isEditMode && !canCurrentUserCreateProject()) {
+        showToast(t('warning'), 'Bạn không có quyền tạo dự án.', 'warning');
+        return;
+    }
     
     // Clear previous validation
     $('.is-invalid').removeClass('is-invalid');
@@ -3075,6 +3505,8 @@ async function saveProject() {
     // Add tracking ID if editing
     if (trackingId) {
         formData['tracking_id'] = trackingId;
+        const existingProject = ProjectsState.projects.find(project => getProjectId(project) === String(trackingId));
+        formData.version = existingProject?.version || 1;
     }
     
     showLoading(t('saving'));
@@ -3111,6 +3543,10 @@ async function saveProject() {
  * Show delete confirm modal
  */
 function showDeleteConfirmModal() {
+    if (!canCurrentUserDeleteProject()) {
+        showToast(t('warning'), 'Bạn không có quyền xóa dự án.', 'warning');
+        return;
+    }
     $('#delete-count-project').text(ProjectsState.selectedIds.length);
     
     const modal = new bootstrap.Modal('#confirm-delete-modal-project');
@@ -3121,6 +3557,10 @@ function showDeleteConfirmModal() {
  * Delete selected projects
  */
 async function deleteSelectedProjects() {
+    if (!canCurrentUserDeleteProject()) {
+        showToast(t('warning'), 'Bạn không có quyền xóa dự án.', 'warning');
+        return;
+    }
     const ids = [...ProjectsState.selectedIds];
     const idSet = new Set(ids.map(id => String(id)));
     const deletedRecords = ProjectsState.projects
@@ -3516,9 +3956,15 @@ function showProjectContextMenu(x, y, rowId, $cell = null) {
 
     menu.data('rowId', rowId);
     menu.data('cellMeta', cellMeta);
-    setProjectContextItemState(menu.find('.ctx-view, .ctx-edit, .ctx-delete, .ctx-copy-row'), hasRow);
+    setProjectContextItemState(menu.find('.ctx-view, .ctx-copy-row'), hasRow);
+    setProjectContextItemState(menu.find('.ctx-edit'), hasRow && canCurrentUserEditAnyProject());
+    setProjectContextItemState(menu.find('.ctx-add'), canCurrentUserCreateProject());
+    setProjectContextItemState(menu.find('.ctx-delete'), hasRow && canCurrentUserDeleteProject());
+    setProjectContextItemState(menu.find('.ctx-comments'), hasRow);
+    setProjectContextItemState(menu.find('.ctx-change-log'), hasRow);
     setProjectContextItemState(menu.find('.ctx-copy-cell'), !!cellMeta);
     setProjectContextItemState(menu.find('.ctx-filter-value'), !!cellMeta && hasCellValue);
+    setProjectContextItemState(menu.find('.ctx-material-docs'), isProjectMaterialCodeCell(cellMeta));
 
     const rowLabel = hasRow ? `#${rowId}` : t('project_table');
     const columnLabel = cellMeta?.columnLabel || '';
@@ -3551,6 +3997,14 @@ function getProjectContextCellMeta(rowId, $cell) {
         columnZhLabel: column?.zhLabel || '',
         rawValue: localizeMixedProjectLabel($cell.attr('data-raw-value') || $cell.text().trim())
     };
+}
+
+function isProjectMaterialCodeCell(cellMeta) {
+    if (!cellMeta) return false;
+    const key = String(cellMeta.key || '');
+    const value = String(cellMeta.rawValue || '').trim();
+    if (!value) return false;
+    return ['mabave', 'mabavkythuat', 'mame'].includes(key) || /^P[A-Z]{3,}/i.test(value) || /^10\d{6,}/.test(value);
 }
 
 function getProjectContextRow(rowId) {
@@ -3788,6 +4242,395 @@ function applyProjectContextFilter(cellMeta) {
     showToast(t('success'), t('filtered_column', { column: cellMeta.columnLabel }), 'success');
 }
 
+async function openProjectMaterialDocuments(cellMeta) {
+    if (!isProjectMaterialCodeCell(cellMeta)) return;
+    const code = String(cellMeta.rawValue || '').trim();
+    const modalEl = document.getElementById('project-material-docs-modal');
+    if (!modalEl) return;
+
+    $('#project-material-docs-title').text(`Tài liệu mã liệu: ${code}`);
+    $('#project-material-docs-body').html('<div class="text-muted">Đang tải...</div>');
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modal.show();
+
+    try {
+        const result = await api.getMaterialDocuments(code);
+        renderProjectMaterialDocuments(result);
+    } catch (error) {
+        $('#project-material-docs-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tìm thấy tài liệu')}</div>`);
+    }
+}
+
+function getMaterialDocumentIcon(type) {
+    if (type === 'pdf') return 'bi-file-earmark-pdf';
+    if (type === 'drawing') return 'bi-file-earmark-image';
+    if (type === 'bom') return 'bi-file-earmark-spreadsheet';
+    if (type === 'cad') return 'bi-rulers';
+    return 'bi-file-earmark';
+}
+
+function getMaterialDocumentTypeLabel(type) {
+    const labels = {
+        pdf: 'PDF',
+        drawing: 'Bản vẽ',
+        bom: 'BOM',
+        cad: 'CAD',
+        file: 'File'
+    };
+    return labels[type] || 'File';
+}
+
+function formatMaterialFileSize(size) {
+    const bytes = Number(size || 0);
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function escapeProjectAttr(value) {
+    return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderMaterialErpInfo(erpInfo) {
+    if (!erpInfo) return '';
+    const rows = erpInfo.rows || [];
+    if (!rows.length) {
+        return `
+            <div class="material-erp-panel">
+                <div class="material-section-title"><i class="bi bi-database"></i><span>ERP</span></div>
+                <div class="text-muted small">${escapeHtml(erpInfo.message || 'Không có thông tin ERP')}</div>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="material-erp-panel">
+            <div class="material-section-title">
+                <i class="bi bi-database"></i><span>ERP</span>
+                ${erpInfo.source ? `<small>${escapeHtml(erpInfo.source)}</small>` : ''}
+            </div>
+            <div class="material-erp-list">
+                ${rows.map(row => `
+                    <div class="material-erp-item">
+                        ${row.sheet ? `<div class="material-erp-sheet">${escapeHtml(row.sheet)}</div>` : ''}
+                        <div class="material-erp-grid">
+                            ${Object.entries(row.values || {}).map(([key, value]) => `
+                                <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function renderMaterialFolders(folders) {
+    if (!folders?.length) return '';
+    return `
+        <div class="material-folder-panel">
+            <div class="material-section-title"><i class="bi bi-folder2-open"></i><span>Thư mục vật liệu</span></div>
+            <div class="material-folder-list">
+                ${folders.map(folder => `
+                    <button type="button" class="material-folder-item btn-open-material-folder" data-list-url="${escapeProjectAttr(folder.list_url || '')}" data-folder-name="${escapeProjectAttr(folder.name || '')}" ${folder.exists ? '' : 'disabled'}>
+                        <i class="bi bi-folder2-open"></i>
+                        <span>${escapeHtml(folder.name || 'Thư mục')}</span>
+                        <small>${Number(folder.file_count || 0)} file</small>
+                    </button>
+                `).join('')}
+            </div>
+            <div id="material-folder-browser" class="material-folder-browser"></div>
+        </div>
+    `;
+}
+
+function renderProjectMaterialDocuments(result) {
+    const docs = result?.documents || [];
+    if (!docs.length) {
+        $('#project-material-docs-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(result?.message || 'Không tìm thấy tài liệu')}</div>`);
+        return;
+    }
+
+    const html = `
+        <div class="material-doc-summary">
+            <span>${escapeHtml(result.message || '')}</span>
+            ${result.resolved_code && result.resolved_code !== result.code ? `<span>Mã mẹ: ${escapeHtml(result.resolved_code)}</span>` : ''}
+        </div>
+        ${renderMaterialErpInfo(result.erp_info)}
+        ${renderMaterialFolders(result.folders || [])}
+        <div class="material-doc-list">
+            ${docs.map(doc => `
+                <div class="material-doc-item ${doc.exists ? '' : 'is-missing'}">
+                    <div class="material-doc-icon"><i class="bi ${getMaterialDocumentIcon(doc.type)}"></i></div>
+                    <div class="material-doc-main">
+                        <div class="material-doc-name">${escapeHtml(doc.name || '')}</div>
+                        <div class="material-doc-meta">${escapeHtml(getMaterialDocumentTypeLabel(doc.type))}${doc.folder_name ? ` · ${escapeHtml(doc.folder_name)}` : ''}${doc.exists ? '' : ' · Server không truy cập được file'}</div>
+                    </div>
+                    <div class="material-doc-actions">
+                        <a class="btn btn-sm btn-outline-primary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.view_url || '#')}" target="_blank" rel="noopener">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                        <a class="btn btn-sm btn-outline-secondary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.download_url || '#')}">
+                            <i class="bi bi-download"></i>
+                        </a>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    $('#project-material-docs-body').html(html);
+}
+
+async function loadProjectMaterialFolder(listUrl, folderName = '') {
+    const target = $('#material-folder-browser');
+    if (!target.length) return;
+    target.html('<div class="text-muted small">Đang tải thư mục...</div>');
+    try {
+        const result = await api.getMaterialFolder(listUrl);
+        const entries = result.entries || [];
+        if (!entries.length) {
+            target.html(`<div class="alert alert-info mb-0">Thư mục ${escapeHtml(folderName || result.folder_name || '')} không có file hiển thị.</div>`);
+            return;
+        }
+        const html = `
+            <div class="material-folder-browser-head">
+                <strong>${escapeHtml(result.folder_name || folderName || 'Thư mục')}</strong>
+                <span>${entries.length}${result.truncated ? ` / ${Number(result.total || entries.length)}` : ''} mục</span>
+            </div>
+            <div class="material-folder-entry-list">
+                ${entries.map(entry => `
+                    <div class="material-folder-entry">
+                        <i class="bi ${entry.is_dir ? 'bi-folder' : getMaterialDocumentIcon(entry.type)}"></i>
+                        <div class="material-folder-entry-main">
+                            <strong>${escapeHtml(entry.name || '')}</strong>
+                            <span>${escapeHtml(getMaterialDocumentTypeLabel(entry.type))}${entry.size ? ` · ${escapeHtml(formatMaterialFileSize(entry.size))}` : ''}${entry.modified_at ? ` · ${escapeHtml(formatProjectChangeTime(entry.modified_at))}` : ''}</span>
+                        </div>
+                        <div class="material-doc-actions">
+                            ${entry.is_dir ? `
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-folder" data-list-url="${escapeProjectAttr(entry.list_url || '')}" data-folder-name="${escapeProjectAttr(entry.name || '')}">
+                                    <i class="bi bi-folder2-open"></i>
+                                </button>
+                            ` : `
+                                <a class="btn btn-sm btn-outline-primary" href="${escapeHtml(entry.view_url || '#')}" target="_blank" rel="noopener">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                <a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(entry.download_url || '#')}">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                            `}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        target.html(html);
+    } catch (error) {
+        target.html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tải được thư mục')}</div>`);
+    }
+}
+
+function getProjectColumnByFieldName(fieldName) {
+    const normalized = normalizeProjectUpdateField(fieldName);
+    return PROJECT_SPREADSHEET_COLUMNS.find(column => normalizeProjectUpdateField(column.updateKey || column.fields?.[0] || column.key) === normalized) || null;
+}
+
+async function openProjectChangeLog(rowId, cellMeta = null) {
+    if (!rowId || rowId === '__new__') return;
+    const modalEl = document.getElementById('project-change-log-modal');
+    if (!modalEl) return;
+
+    const fieldName = cellMeta?.columnLabel || '';
+    const column = cellMeta?.key ? PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === cellMeta.key) : null;
+    ProjectsState.activeChangeLogContext = {
+        trackingId: rowId,
+        fieldName: column?.updateKey || '',
+        fieldLabel: fieldName
+    };
+    $('#project-change-log-title').text(fieldName ? `Lịch sử chỉnh sửa: #${rowId} · ${fieldName}` : `Lịch sử chỉnh sửa: #${rowId}`);
+    $('#project-change-log-body').html('<div class="text-muted">Đang tải...</div>');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    try {
+        const params = { limit: 100 };
+        if (column?.updateKey) {
+            params.field_name = column.updateKey;
+        }
+        const result = await api.getProjectChangeLogs(rowId, params);
+        renderProjectChangeLog(result.logs || []);
+    } catch (error) {
+        $('#project-change-log-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tải được lịch sử')}</div>`);
+    }
+}
+
+function formatProjectChangeTime(value) {
+    if (!value) return '';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(parsed.getDate())}/${pad(parsed.getMonth() + 1)}/${parsed.getFullYear()} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+function renderProjectChangeLog(logs) {
+    if (!logs.length) {
+        $('#project-change-log-body').html('<div class="alert alert-info mb-0">Chưa có lịch sử chỉnh sửa cho mục này.</div>');
+        return;
+    }
+
+    const html = `
+        <div class="project-change-log-list">
+            ${logs.map(log => {
+                const column = getProjectColumnByFieldName(log.field_name);
+                const canRevert = column && canCurrentUserEditProjectColumn(column);
+                return `
+                <div class="project-change-log-item">
+                    <div class="project-change-log-head">
+                        <strong>${escapeHtml(log.changed_by_name || log.changed_by || 'Không rõ')}</strong>
+                        <span>${escapeHtml(formatProjectChangeTime(log.changed_at))}</span>
+                    </div>
+                    <div class="project-change-log-field">${escapeHtml(log.field_name || '')}</div>
+                    <div class="project-change-log-values">
+                        <div><span>Từ</span><p>${escapeHtml(log.old_value || '') || '&nbsp;'}</p></div>
+                        <i class="bi bi-arrow-right"></i>
+                        <div><span>Sang</span><p>${escapeHtml(log.new_value || '') || '&nbsp;'}</p></div>
+                    </div>
+                    ${canRevert ? `
+                        <div class="project-change-log-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary btn-revert-project-change" data-change-id="${Number(log.id) || 0}">
+                                <i class="bi bi-arrow-counterclockwise"></i> Hoàn tác
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `; }).join('')}
+        </div>
+    `;
+    $('#project-change-log-body').html(html);
+}
+
+async function reloadActiveProjectChangeLog() {
+    const context = ProjectsState.activeChangeLogContext;
+    if (!context) return;
+    try {
+        const params = { limit: 100 };
+        if (context.fieldName) params.field_name = context.fieldName;
+        const result = await api.getProjectChangeLogs(context.trackingId, params);
+        renderProjectChangeLog(result.logs || []);
+    } catch (error) {
+        $('#project-change-log-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tải được lịch sử')}</div>`);
+    }
+}
+
+async function revertProjectChange(changeId) {
+    const context = ProjectsState.activeChangeLogContext;
+    if (!context) return;
+    const project = getProjectContextRow(context.trackingId);
+    const payload = {
+        version: project?.version || 1
+    };
+    const $button = $(`#project-change-log-body .btn-revert-project-change[data-change-id="${changeId}"]`);
+    $button.prop('disabled', true).addClass('disabled');
+    try {
+        const result = await api.revertProjectChange(changeId, payload);
+        if (result?.record) {
+            mergeRealtimeProjectRecord(result.record);
+        }
+        await reloadActiveProjectChangeLog();
+        showToast(t('success'), 'Đã hoàn tác thay đổi', 'success');
+    } catch (error) {
+        showToast(t('error'), error.message || 'Không hoàn tác được thay đổi', 'error');
+    } finally {
+        $button.prop('disabled', false).removeClass('disabled');
+    }
+}
+
+async function openProjectComments(rowId, cellMeta = null) {
+    if (!rowId || rowId === '__new__') return;
+    const modalEl = document.getElementById('project-comments-modal');
+    if (!modalEl) return;
+
+    const column = cellMeta?.key ? PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === cellMeta.key) : null;
+    const fieldName = column?.updateKey || '';
+    ProjectsState.activeCommentContext = {
+        trackingId: rowId,
+        fieldName,
+        fieldLabel: cellMeta?.columnLabel || ''
+    };
+    $('#project-comments-title').text(fieldName ? `Bình luận: #${rowId} · ${cellMeta.columnLabel}` : `Bình luận: #${rowId}`);
+    $('#project-comments-body').html('<div class="text-muted">Đang tải...</div>');
+    $('#project-comment-input').val('');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    await loadProjectComments();
+}
+
+async function loadProjectComments() {
+    const context = ProjectsState.activeCommentContext;
+    if (!context) return;
+    try {
+        const params = {};
+        if (context.fieldName) params.field_name = context.fieldName;
+        const result = await api.getProjectComments(context.trackingId, params);
+        renderProjectComments(result.comments || []);
+    } catch (error) {
+        $('#project-comments-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tải được bình luận')}</div>`);
+    }
+}
+
+function renderProjectComments(comments) {
+    if (!comments.length) {
+        $('#project-comments-body').html('<div class="alert alert-info mb-0">Chưa có bình luận.</div>');
+        return;
+    }
+    const html = `
+        <div class="project-comment-list">
+            ${comments.map(comment => `
+                <div class="project-comment-item">
+                    <div class="project-comment-head">
+                        <strong>${escapeHtml(comment.created_by_name || comment.created_by || 'Không rõ')}</strong>
+                        <span>${escapeHtml(formatProjectChangeTime(comment.created_at))}</span>
+                    </div>
+                    ${comment.field_name ? `<div class="project-comment-field">${escapeHtml(comment.field_name)}</div>` : ''}
+                    <div class="project-comment-text">${escapeHtml(comment.comment_text || '')}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    $('#project-comments-body').html(html);
+}
+
+async function submitProjectComment() {
+    const context = ProjectsState.activeCommentContext;
+    if (!context) return;
+    const text = $('#project-comment-input').val().trim();
+    if (!text) {
+        showToast(t('warning'), 'Bình luận không được để trống', 'warning');
+        return;
+    }
+    $('#btn-send-project-comment').prop('disabled', true);
+    try {
+        await api.addProjectComment(context.trackingId, {
+            comment_text: text,
+            field_name: context.fieldName || ''
+        });
+        $('#project-comment-input').val('');
+        await loadProjectComments();
+    } catch (error) {
+        showToast(t('error'), error.message || 'Không gửi được bình luận', 'error');
+    } finally {
+        $('#btn-send-project-comment').prop('disabled', false);
+    }
+}
+
+function refreshActiveProjectComments(payload) {
+    const context = ProjectsState.activeCommentContext;
+    if (!context) return;
+    const affectedId = String(payload.tracking_id || payload.comment?.tracking_id || '');
+    if (affectedId && affectedId === String(context.trackingId)) {
+        loadProjectComments();
+    }
+}
+
 function setupProjectContextMenuHandlers() {
     const menu = $('#project-row-context-menu');
     if (!menu.length) return;
@@ -3830,6 +4673,23 @@ function setupProjectContextMenuHandlers() {
     menu.on('click.ctxActions', '.ctx-filter-value', function() {
         const cellMeta = menu.data('cellMeta');
         applyProjectContextFilter(cellMeta);
+    });
+    menu.on('click.ctxActions', '.ctx-comments', function() {
+        const id = menu.data('rowId');
+        const cellMeta = menu.data('cellMeta');
+        hideProjectContextMenu();
+        openProjectComments(id, cellMeta);
+    });
+    menu.on('click.ctxActions', '.ctx-change-log', function() {
+        const id = menu.data('rowId');
+        const cellMeta = menu.data('cellMeta');
+        hideProjectContextMenu();
+        openProjectChangeLog(id, cellMeta);
+    });
+    menu.on('click.ctxActions', '.ctx-material-docs', function() {
+        const cellMeta = menu.data('cellMeta');
+        hideProjectContextMenu();
+        openProjectMaterialDocuments(cellMeta);
     });
     menu.on('click.ctxActions', '.ctx-refresh', function() {
         hideProjectContextMenu();

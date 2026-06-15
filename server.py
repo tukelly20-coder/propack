@@ -19,7 +19,9 @@ import queue
 import uuid
 import logging
 import shutil
-from flask import Flask, request, jsonify, send_from_directory, make_response, session, Response, stream_with_context
+import mimetypes
+from datetime import datetime
+from flask import Flask, request, jsonify, send_from_directory, send_file, make_response, session, Response, stream_with_context
 from flask_cors import CORS
 
 # ========================================================================
@@ -155,7 +157,11 @@ from src.db_helper import (
     get_pending_notices, get_pending_count, accept_job, add_sales_record,
     get_projects_by_user, get_accepted_projects_by_engineer,
     get_all_notices_for_engineer, get_all_customers,
-    get_parent_code_cache, get_parent_code_cache_many, save_parent_code_cache
+    get_parent_code_cache, get_parent_code_cache_many, save_parent_code_cache,
+    ensure_realtime_schema, lock_project_cell, unlock_project_cell,
+    get_active_project_locks, update_project_with_version, get_project_change_logs, get_project_change_log,
+    revert_project_change_log, get_project_comments, add_project_comment, delete_project_comment,
+    normalize_project_field_name
 )
 
 # Import Tool Open core
@@ -186,6 +192,16 @@ history_version = 0
 notice_subscribers = {}
 notice_subscribers_lock = threading.Lock()
 notice_event_seq = 0
+
+# Realtime project collaboration stream state (SSE)
+project_subscribers = {}
+project_subscribers_lock = threading.Lock()
+project_event_seq = 0
+
+# Token tạm để browser tải/xem file vật liệu qua server thay vì mở UNC trực tiếp.
+material_file_tokens = {}
+material_file_tokens_lock = threading.Lock()
+MATERIAL_FILE_TOKEN_TTL = 15 * 60
 
 # Load data on startup
 STORAGE_PATH = 'used_codes.json'
@@ -576,6 +592,7 @@ def find_parent_codes_batch(codes: list):
 # Initialize database
 init_db()
 migrate_to_v2()
+ensure_realtime_schema()
 ensure_default_users()
 
 # ========================================================================
@@ -744,6 +761,83 @@ def is_admin_user(user):
     return role == 'admin' or username == 'administrator'
 
 
+def normalize_project_role(role_value):
+    role = str(role_value or '').strip().lower()
+    aliases = {
+        'it': 'admin',
+        'administrator': 'admin',
+        'eng': 'engineer',
+        'ky thuat': 'engineer',
+        'kỹ thuật': 'engineer',
+        'san xuat': 'production',
+        'sản xuất': 'production',
+        'ke hoach': 'planner',
+        'kế hoạch': 'planner'
+    }
+    return aliases.get(role, role)
+
+
+def get_project_user_from_request():
+    """Trả user nếu có bearer token; None nghĩa là request legacy chưa xác thực."""
+    user, error = get_user_from_bearer_token()
+    if error == "no_token":
+        return None
+    return user or {}
+
+
+def get_project_update_fields(payload):
+    fields = []
+    for key in (payload or {}).keys():
+        if key in {'version', 'expected_version', 'changed_by', 'changed_by_name'}:
+            continue
+        field_name = normalize_project_field_name(key)
+        if field_name:
+            fields.append(field_name)
+    return fields
+
+
+def can_user_update_project(user, payload):
+    """Policy Projects theo plan: admin/planner full, production chỉ cập nhật trạng thái sản xuất, viewer chỉ xem."""
+    if user is None:
+        return True, None
+
+    role = normalize_project_role(user.get('role'))
+    username = str(user.get('username', '')).strip().lower()
+    if role == 'admin' or username == 'administrator':
+        return True, None
+    if role in {'planner', 'sales', 'engineer'}:
+        return True, None
+    if role == 'production':
+        allowed_fields = {'tinh_trang_hoan_thanh'}
+        requested = set(get_project_update_fields(payload))
+        if requested and requested.issubset(allowed_fields):
+            return True, None
+        return False, "Production chỉ được cập nhật trạng thái sản xuất."
+    if role == 'viewer':
+        return False, "Viewer chỉ có quyền xem dữ liệu."
+    return False, "Bạn không có quyền chỉnh sửa dự án."
+
+
+def can_user_create_project(user):
+    if user is None:
+        return True, None
+    role = normalize_project_role(user.get('role'))
+    username = str(user.get('username', '')).strip().lower()
+    if role in {'admin', 'planner', 'sales'} or username == 'administrator':
+        return True, None
+    if role == 'production':
+        return False, "Production không có quyền tạo dự án."
+    if role == 'viewer':
+        return False, "Viewer chỉ có quyền xem dữ liệu."
+    return False, "Bạn không có quyền tạo dự án."
+
+
+def can_user_delete_project(user, fallback_role=''):
+    if user is None:
+        return normalize_project_role(fallback_role) == 'admin'
+    return is_admin_user(user)
+
+
 def normalize_notice_role(role_value):
     """Chuẩn hóa role để lọc đúng subscriber nhận realtime notice."""
     role = str(role_value or '').strip().lower()
@@ -814,6 +908,237 @@ def publish_notice_event(event_type, message='', target_roles=None, record=None,
 def format_sse(event_name, payload):
     """Serialize SSE event."""
     return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def publish_project_event(event_type, message='', tracking_id=None, field_name=None, record=None, lock=None, extra=None):
+    """Phát event realtime cho các client đang mở bảng projects."""
+    global project_event_seq
+
+    with project_subscribers_lock:
+        project_event_seq += 1
+        event_id = project_event_seq
+        subscribers_snapshot = list(project_subscribers.items())
+
+    payload = {
+        "event_id": event_id,
+        "type": event_type,
+        "message": message or '',
+        "tracking_id": tracking_id,
+        "field_name": field_name,
+        "timestamp": int(time.time())
+    }
+    if record:
+        payload["record"] = record
+    if lock:
+        payload["lock"] = lock
+    if extra and isinstance(extra, dict):
+        payload.update(extra)
+
+    stale_subscribers = []
+    for client_id, client in subscribers_snapshot:
+        try:
+            client['queue'].put_nowait(payload)
+        except Exception:
+            stale_subscribers.append(client_id)
+
+    if stale_subscribers:
+        with project_subscribers_lock:
+            for client_id in stale_subscribers:
+                project_subscribers.pop(client_id, None)
+
+
+def get_project_online_users():
+    """Danh sách user đang mở bảng projects, gộp trùng theo user_id/username."""
+    with project_subscribers_lock:
+        users = {}
+        for client in project_subscribers.values():
+            key = str(client.get('user_id') or client.get('username') or '').strip() or 'anonymous'
+            users[key] = {
+                "user_id": client.get('user_id') or key,
+                "username": client.get('username') or key,
+                "connected_at": client.get('connected_at')
+            }
+        return list(users.values())
+
+
+def classify_material_file(path):
+    """Phân loại file vật liệu để UI biết nên hiển thị/mở thế nào."""
+    ext = os.path.splitext(str(path or ''))[1].lower()
+    if ext == '.pdf':
+        return 'pdf'
+    if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}:
+        return 'drawing'
+    if ext in {'.xls', '.xlsx', '.xlsm', '.csv'}:
+        return 'bom'
+    if ext in {'.dwg', '.dxf'}:
+        return 'cad'
+    return 'file'
+
+
+def create_material_file_token(path, token_type='file'):
+    """Tạo token tạm cho file/folder để không lộ UNC path trong URL browser."""
+    token = secrets.token_urlsafe(24)
+    with material_file_tokens_lock:
+        now = time.time()
+        expired = [
+            item_token for item_token, item in material_file_tokens.items()
+            if now - float(item.get('created_at', 0) or 0) > MATERIAL_FILE_TOKEN_TTL
+        ]
+        for item_token in expired:
+            material_file_tokens.pop(item_token, None)
+        material_file_tokens[token] = {
+            "path": path,
+            "type": token_type,
+            "created_at": now
+        }
+    return token
+
+
+def get_material_path_from_token(token, expected_type='file'):
+    with material_file_tokens_lock:
+        item = material_file_tokens.get(token)
+        if not item:
+            return None
+        if time.time() - float(item.get('created_at', 0) or 0) > MATERIAL_FILE_TOKEN_TTL:
+            material_file_tokens.pop(token, None)
+            return None
+        if expected_type and item.get('type', 'file') != expected_type:
+            return None
+        return item.get('path')
+
+
+def get_material_file_path_from_token(token):
+    return get_material_path_from_token(token, expected_type='file')
+
+
+def sanitize_material_value(value):
+    """Chuẩn hóa giá trị từ Excel để JSON không chứa NaN/NaT."""
+    if value is None:
+        return ''
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return ''
+    except Exception:
+        pass
+    text = str(value).strip()
+    return '' if text.lower() in {'nan', 'nat'} else text
+
+
+def get_material_erp_info(code, resolved_code=None, matches=None):
+    """Lấy metadata ERP/inventory từ file Excel cache nếu khả dụng."""
+    info = {
+        "available": False,
+        "source": "",
+        "code": code,
+        "resolved_code": resolved_code or code,
+        "rows": []
+    }
+    try:
+        excel_data = get_excel_data()
+        if not excel_data:
+            info["message"] = "Chưa tải được dữ liệu ERP/Excel"
+            return info
+
+        info["source"] = excel_data.get('source', '')
+        search_values = {
+            str(code or '').upper().strip(),
+            str(resolved_code or code or '').upper().strip()
+        }
+        for match in matches or []:
+            search_values.add(str(match.get('cEngineerFigNo') or '').upper().strip())
+            search_values.add(str(match.get('cInvCode') or '').upper().strip())
+        search_values = {value for value in search_values if value}
+
+        preferred_columns = [
+            'cInvCode', 'cInvName', 'cInvStd', 'cEngineerFigNo', 'cInvCCode',
+            'cComUnitName', 'cInvDefine1', 'cInvDefine2', 'cInvDefine3',
+            'cInvDefine4', 'cInvDefine5', 'cInvDefine6', 'cInvDefine7',
+            'cInvDefine8', 'cInvDefine9', 'cInvDefine10'
+        ]
+        rows = []
+        seen = set()
+        for sheet_name, df in excel_data.get('sheets', []):
+            if not {'cInvCode', 'cEngineerFigNo'}.intersection(df.columns):
+                continue
+            mask = None
+            for column in ('cInvCode', 'cEngineerFigNo'):
+                if column not in df.columns:
+                    continue
+                column_mask = df[column].astype(str).str.upper().str.strip().isin(search_values)
+                mask = column_mask if mask is None else (mask | column_mask)
+            if mask is None or not mask.any():
+                continue
+
+            for _, row in df.loc[mask].head(20).iterrows():
+                row_key = (
+                    sheet_name,
+                    sanitize_material_value(row.get('cEngineerFigNo')),
+                    sanitize_material_value(row.get('cInvCode'))
+                )
+                if row_key in seen:
+                    continue
+                seen.add(row_key)
+                values = {}
+                for column in preferred_columns:
+                    if column in df.columns:
+                        cell_value = sanitize_material_value(row.get(column))
+                        if cell_value:
+                            values[column] = cell_value
+                if values:
+                    rows.append({"sheet": sheet_name, "values": values})
+
+        info["rows"] = rows
+        info["available"] = bool(rows)
+        if not rows:
+            info["message"] = "Không tìm thấy dòng ERP/Excel tương ứng"
+        return info
+    except Exception as e:
+        info["message"] = str(e)
+        return info
+
+
+def build_material_documents_payload(code, urls, resolved_code=None, matches=None):
+    """Build payload tài liệu với URL xem/tải qua API server."""
+    documents = []
+    folders_map = {}
+    for raw_path in urls or []:
+        normalized_path = material_core.normalize_unc_path(raw_path) if TOOL_OPEN_AVAILABLE else str(raw_path)
+        token = create_material_file_token(normalized_path)
+        exists = os.path.exists(normalized_path)
+        folder = os.path.dirname(normalized_path)
+        filename = os.path.basename(normalized_path)
+        doc_type = classify_material_file(normalized_path)
+        documents.append({
+            "name": filename,
+            "type": doc_type,
+            "exists": exists,
+            "folder_name": os.path.basename(folder),
+            "view_url": f"/api/materials/file/{token}",
+            "download_url": f"/api/materials/file/{token}?download=1"
+        })
+        if folder and folder not in folders_map:
+            folder_token = create_material_file_token(folder, token_type='folder')
+            folders_map[folder] = {
+                "name": os.path.basename(folder),
+                "exists": os.path.isdir(folder),
+                "file_count": 0,
+                "list_url": f"/api/materials/folder/{folder_token}"
+            }
+        if folder:
+            folders_map[folder]["file_count"] += 1
+
+    folders = sorted(folders_map.values(), key=lambda item: item.get("name", ""))
+    return {
+        "success": bool(documents),
+        "code": code,
+        "resolved_code": resolved_code or code,
+        "documents": documents,
+        "folders": folders,
+        "erp_info": get_material_erp_info(code, resolved_code=resolved_code, matches=matches),
+        "matches": matches or [],
+        "message": f"Tìm thấy {len(documents)} tài liệu" if documents else f"Không tìm thấy tài liệu cho mã: {code}"
+    }
 
 # ========================================================================
 # Helper Functions (copied from server.py)
@@ -1289,6 +1614,116 @@ def tool_search():
         return jsonify({"type": "error", "message": str(e)})
 
 
+@app.route('/api/materials/<path:code>/documents', methods=['GET'])
+def api_material_documents(code):
+    """Tra tài liệu theo mã liệu/mã bản vẽ và trả file URLs qua API server."""
+    if not TOOL_OPEN_AVAILABLE:
+        return jsonify({"success": False, "message": "Tool Open not available", "documents": []}), 503
+
+    clean_code = str(code or '').strip().strip('"').strip("'")
+    if not clean_code:
+        return jsonify({"success": False, "message": "Mã không được để trống", "documents": []}), 400
+
+    try:
+        if material_core.is_engineer_fig_no(clean_code):
+            matches = material_core.find_cinvcode_from_excel(clean_code, return_all=True)
+            if not matches:
+                return jsonify({
+                    "success": False,
+                    "code": clean_code,
+                    "documents": [],
+                    "matches": [],
+                    "message": f"Không tìm thấy mã mẹ cho: {clean_code}"
+                }), 404
+
+            if len(matches) > 1 and not request.args.get('cinv_code'):
+                return jsonify({
+                    "success": False,
+                    "code": clean_code,
+                    "documents": [],
+                    "matches": matches,
+                    "message": f"Tìm thấy {len(matches)} mã mẹ, cần chọn một mã"
+                }), 409
+
+            resolved_code = request.args.get('cinv_code') or matches[0]['cInvCode']
+            urls = material_core.query_material(resolved_code)
+            payload = build_material_documents_payload(clean_code, urls, resolved_code=resolved_code, matches=matches)
+            return jsonify(payload), 200 if payload["success"] else 404
+
+        urls = material_core.query_material(clean_code)
+        payload = build_material_documents_payload(clean_code, urls, resolved_code=clean_code)
+        return jsonify(payload), 200 if payload["success"] else 404
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "documents": []}), 500
+
+
+@app.route('/api/materials/file/<token>', methods=['GET'])
+def api_material_file(token):
+    """Trả file vật liệu qua server để browser không truy cập trực tiếp ổ mạng."""
+    path = get_material_file_path_from_token(token)
+    if not path:
+        return jsonify({"success": False, "message": "File token không hợp lệ hoặc đã hết hạn"}), 404
+
+    normalized_path = material_core.normalize_unc_path(path) if TOOL_OPEN_AVAILABLE else path
+    if not os.path.exists(normalized_path) or not os.path.isfile(normalized_path):
+        return jsonify({"success": False, "message": "File không tồn tại hoặc server không truy cập được"}), 404
+
+    mimetype = mimetypes.guess_type(normalized_path)[0] or 'application/octet-stream'
+    return send_file(
+        normalized_path,
+        mimetype=mimetype,
+        as_attachment=request.args.get('download') == '1',
+        download_name=os.path.basename(normalized_path)
+    )
+
+
+@app.route('/api/materials/folder/<token>', methods=['GET'])
+def api_material_folder(token):
+    """Liệt kê nội dung thư mục vật liệu qua API server."""
+    path = get_material_path_from_token(token, expected_type='folder')
+    if not path:
+        return jsonify({"success": False, "message": "Folder token không hợp lệ hoặc đã hết hạn"}), 404
+
+    normalized_path = material_core.normalize_unc_path(path) if TOOL_OPEN_AVAILABLE else path
+    if not os.path.isdir(normalized_path):
+        return jsonify({"success": False, "message": "Thư mục không tồn tại hoặc server không truy cập được"}), 404
+
+    try:
+        entries = []
+        with os.scandir(normalized_path) as iterator:
+            for entry in iterator:
+                try:
+                    is_dir = entry.is_dir()
+                    item = {
+                        "name": entry.name,
+                        "type": "folder" if is_dir else classify_material_file(entry.path),
+                        "is_dir": is_dir,
+                        "size": 0 if is_dir else entry.stat().st_size,
+                        "modified_at": datetime.fromtimestamp(entry.stat().st_mtime).isoformat()
+                    }
+                    if is_dir:
+                        child_token = create_material_file_token(entry.path, token_type='folder')
+                        item["list_url"] = f"/api/materials/folder/{child_token}"
+                    else:
+                        file_token = create_material_file_token(entry.path)
+                        item["view_url"] = f"/api/materials/file/{file_token}"
+                        item["download_url"] = f"/api/materials/file/{file_token}?download=1"
+                    entries.append(item)
+                except OSError:
+                    continue
+
+        entries.sort(key=lambda item: (not item.get("is_dir"), item.get("name", "").lower()))
+        return jsonify({
+            "success": True,
+            "folder_name": os.path.basename(normalized_path),
+            "entries": entries[:300],
+            "total": len(entries),
+            "truncated": len(entries) > 300
+        })
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
+
+
 # ========================================================================
 # Static Files & Web UI
 # ========================================================================
@@ -1592,6 +2027,10 @@ def api_projects():
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "Dữ liệu không hợp lệ"}), 400
+
+        allowed, error = can_user_create_project(get_project_user_from_request())
+        if not allowed:
+            return jsonify({"success": False, "error": error}), 403
         
         # Auto-set is_pending = 'yes' for new projects
         data['is_pending'] = 'yes'
@@ -1605,9 +2044,210 @@ def api_projects():
                 record=new_record,
                 tracking_id=new_record.get('Tracking ID')
             )
+            publish_project_event(
+                'project_created',
+                message=f"Dự án #{new_record.get('Tracking ID')} mới được tạo",
+                tracking_id=new_record.get('Tracking ID'),
+                record=new_record
+            )
             return jsonify({"success": True, "record": new_record}), 201
         else:
             return jsonify({"success": False, "error": "Lỗi khi thêm dự án"}), 400
+
+
+@app.route('/api/projects/stream', methods=['GET'])
+def api_projects_stream():
+    """SSE stream cho bảng projects realtime collaboration."""
+    username = request.args.get('username', '')
+    user_id = request.args.get('user_id', '')
+
+    client_id = uuid.uuid4().hex
+    client_queue = queue.Queue(maxsize=100)
+
+    with project_subscribers_lock:
+        project_subscribers[client_id] = {
+            "queue": client_queue,
+            "username": username,
+            "user_id": user_id,
+            "connected_at": time.time()
+        }
+
+    client_queue.put({
+        "event_id": f"connected-{int(time.time())}",
+        "type": "connected",
+        "message": "project-stream-connected",
+        "locks": get_active_project_locks(),
+        "online_users": get_project_online_users(),
+        "timestamp": int(time.time())
+    })
+    publish_project_event('presence', extra={"online_users": get_project_online_users()})
+
+    def event_stream():
+        try:
+            while True:
+                try:
+                    payload = client_queue.get(timeout=20)
+                    yield format_sse('project', payload)
+                except queue.Empty:
+                    yield format_sse('ping', {"timestamp": int(time.time())})
+        except GeneratorExit:
+            pass
+        finally:
+            with project_subscribers_lock:
+                project_subscribers.pop(client_id, None)
+            publish_project_event('presence', extra={"online_users": get_project_online_users()})
+
+    response = Response(stream_with_context(event_stream()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Connection'] = 'keep-alive'
+    return response
+
+
+@app.route('/api/projects/locks', methods=['GET'])
+def api_project_locks():
+    return jsonify({"success": True, "locks": get_active_project_locks()})
+
+
+@app.route('/api/projects/cursor', methods=['POST'])
+def api_project_cursor():
+    """Broadcast ô project user đang chọn/chỉnh cho các client khác."""
+    user, _ = get_user_from_bearer_token()
+    data = request.get_json(silent=True) or {}
+    tracking_id = data.get('tracking_id')
+    field_name = data.get('field_name') or data.get('field') or ''
+    row = data.get('row')
+    column = data.get('column')
+
+    if tracking_id in (None, '') and row in (None, ''):
+        return jsonify({"success": False, "error": "Thiếu tracking_id hoặc row"}), 400
+
+    user_id = str(data.get('user_id') or (user or {}).get('user_id') or (user or {}).get('username') or 'anonymous')
+    user_name = str(data.get('user_name') or (user or {}).get('full_name') or (user or {}).get('username') or user_id)
+    payload = {
+        "user_id": user_id,
+        "user_name": user_name,
+        "tracking_id": tracking_id,
+        "field_name": normalize_project_field_name(field_name) if field_name else '',
+        "field_label": data.get('field_label') or '',
+        "row": row,
+        "column": column
+    }
+    publish_project_event('cursor', tracking_id=tracking_id, field_name=payload["field_name"], extra={"cursor": payload})
+    return jsonify({"success": True})
+
+
+@app.route('/api/projects/<int:tracking_id>/locks', methods=['POST', 'DELETE'])
+def api_project_cell_lock(tracking_id):
+    user, _ = get_user_from_bearer_token()
+    data = request.get_json(silent=True) or {}
+    field_name = data.get('field_name') or data.get('field') or ''
+    if not field_name:
+        return jsonify({"success": False, "error": "Thiếu field_name"}), 400
+
+    allowed, error = can_user_update_project(get_project_user_from_request(), {field_name: ''})
+    if not allowed:
+        return jsonify({"success": False, "error": error}), 403
+
+    user_id = str(data.get('user_id') or (user or {}).get('user_id') or (user or {}).get('username') or 'anonymous')
+    user_name = str(data.get('user_name') or (user or {}).get('full_name') or (user or {}).get('username') or user_id)
+
+    if request.method == 'POST':
+        result = lock_project_cell(tracking_id, field_name, user_id, user_name)
+        status = 200 if result.get('success') else 423
+        if result.get('success'):
+            publish_project_event('cell_locked', tracking_id=tracking_id, field_name=field_name, lock=result.get('lock'))
+        return jsonify(result), status
+
+    unlocked = unlock_project_cell(tracking_id, field_name, user_id)
+    if unlocked:
+        publish_project_event('cell_unlocked', tracking_id=tracking_id, field_name=field_name, extra={
+            "locked_by": user_id
+        })
+    return jsonify({"success": True, "unlocked": unlocked})
+
+
+@app.route('/api/projects/<int:tracking_id>/changes', methods=['GET'])
+def api_project_change_logs(tracking_id):
+    """Lấy nhật ký thay đổi của một project hoặc một field."""
+    field_name = request.args.get('field_name') or request.args.get('field') or ''
+    limit = request.args.get('limit', 100)
+    try:
+        logs = get_project_change_logs(tracking_id, field_name=field_name, limit=int(limit))
+        return jsonify({"success": True, "logs": logs, "total": len(logs)})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "logs": []}), 500
+
+
+@app.route('/api/projects/changes/<int:change_id>/revert', methods=['POST'])
+def api_project_change_revert(change_id):
+    """Hoàn tác một thay đổi từ audit log."""
+    data = request.get_json(silent=True) or {}
+    change_log = get_project_change_log(change_id)
+    if not change_log:
+        return jsonify({"success": False, "error": "Không tìm thấy lịch sử chỉnh sửa"}), 404
+    field_name = change_log.get('field_name') or ''
+
+    request_user = get_project_user_from_request()
+    allowed, error = can_user_update_project(request_user, {field_name: ''})
+    if not allowed:
+        return jsonify({"success": False, "error": error}), 403
+
+    user = request_user or {}
+    expected_version = data.get('expected_version', data.get('version'))
+    changed_by = str(user.get('user_id') or user.get('username') or data.get('changed_by') or 'anonymous')
+    changed_by_name = str(user.get('full_name') or user.get('username') or data.get('changed_by_name') or changed_by)
+    result = revert_project_change_log(change_id, expected_version, changed_by, changed_by_name)
+    status = int(result.pop('status', 200 if result.get('success') else 400))
+    if result.get('success'):
+        publish_project_event(
+            'project_updated',
+            tracking_id=result.get('tracking_id'),
+            record=result.get('record'),
+            extra={
+                "version": result.get('version'),
+                "changed_fields": result.get('changed_fields', []),
+                "reverted_change_id": result.get('reverted_change_id')
+            }
+        )
+    return jsonify(result), status
+
+
+@app.route('/api/projects/<int:tracking_id>/comments', methods=['GET', 'POST'])
+def api_project_comments(tracking_id):
+    """Đọc/thêm bình luận cho project hoặc field."""
+    if request.method == 'GET':
+        field_name = request.args.get('field_name') or request.args.get('field') or ''
+        include_resolved = request.args.get('include_resolved') == '1'
+        comments = get_project_comments(tracking_id, field_name=field_name, include_resolved=include_resolved)
+        return jsonify({"success": True, "comments": comments, "total": len(comments)})
+
+    data = request.get_json(silent=True) or {}
+    text = data.get('comment_text') or data.get('text') or ''
+    if not str(text).strip():
+        return jsonify({"success": False, "error": "Bình luận không được để trống"}), 400
+
+    user = get_project_user_from_request()
+    user_id = str((user or {}).get('user_id') or (user or {}).get('username') or data.get('created_by') or 'anonymous')
+    user_name = str((user or {}).get('full_name') or (user or {}).get('username') or data.get('created_by_name') or user_id)
+    field_name = data.get('field_name') or data.get('field') or ''
+    comment = add_project_comment(tracking_id, text, field_name=field_name, created_by=user_id, created_by_name=user_name)
+    if not comment:
+        return jsonify({"success": False, "error": "Không thể thêm bình luận"}), 400
+
+    publish_project_event('comment_added', tracking_id=tracking_id, field_name=comment.get('field_name'), extra={"comment": comment})
+    return jsonify({"success": True, "comment": comment}), 201
+
+
+@app.route('/api/projects/comments/<int:comment_id>', methods=['DELETE'])
+def api_project_comment_delete(comment_id):
+    """Xóa mềm bình luận."""
+    user = get_project_user_from_request()
+    success = delete_project_comment(comment_id, deleted_by=str((user or {}).get('user_id') or ''))
+    if not success:
+        return jsonify({"success": False, "error": "Không tìm thấy bình luận hoặc đã xóa"}), 404
+    publish_project_event('comment_deleted', extra={"comment_id": comment_id})
+    return jsonify({"success": True})
 
 
 @app.route('/api/projects/<int:tracking_id>', methods=['GET', 'PUT', 'DELETE'])
@@ -1624,25 +2264,48 @@ def api_project_detail(tracking_id):
         data = request.get_json()
         if not data:
             return jsonify({"success": False, "error": "Dữ liệu không hợp lệ"}), 400
+
+        request_user = get_project_user_from_request()
+        allowed, error = can_user_update_project(request_user, data)
+        if not allowed:
+            return jsonify({"success": False, "error": error}), 403
+
+        if 'version' in data or 'expected_version' in data:
+            user = request_user
+            expected_version = data.pop('expected_version', data.pop('version', None))
+            changed_by = str((user or {}).get('user_id') or (user or {}).get('username') or data.pop('changed_by', '') or 'anonymous')
+            changed_by_name = str((user or {}).get('full_name') or (user or {}).get('username') or data.pop('changed_by_name', '') or changed_by)
+            result = update_project_with_version(tracking_id, data, expected_version, changed_by, changed_by_name)
+            status = int(result.pop('status', 200 if result.get('success') else 400))
+            if result.get('success'):
+                publish_project_event(
+                    'project_updated',
+                    tracking_id=tracking_id,
+                    record=result.get('record'),
+                    extra={"version": result.get('version'), "changed_fields": result.get('changed_fields', [])}
+                )
+            return jsonify(result), status
         
         success = update_record(tracking_id, data)
         if success:
+            publish_project_event('project_updated', tracking_id=tracking_id, record=get_record_by_id(tracking_id))
             return jsonify({"success": True})
         else:
             return jsonify({"success": False, "error": "Lỗi khi cập nhật dự án"}), 400
     
     elif request.method == 'DELETE':
         # Check admin role
-        auth_header = request.headers.get('Authorization', '')
-        role = request.args.get('role', 'admin')
+        role = request.args.get('role', '')
         
-        if role != 'admin':
+        if not can_user_delete_project(get_project_user_from_request(), role):
             return jsonify({
                 "success": False,
                 "error": "Bạn không có quyền xóa dự án. Chỉ Admin mới được phép thực hiện thao tác này."
             }), 403
         
         deleted_count = delete_records([tracking_id])
+        if deleted_count:
+            publish_project_event('project_deleted', tracking_id=tracking_id)
         return jsonify({"success": True, "deleted_count": deleted_count})
 
 
