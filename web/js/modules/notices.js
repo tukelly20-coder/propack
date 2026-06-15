@@ -550,12 +550,8 @@ async function loadNotices() {
         let result = [];
         if ((normalizedRole === 'engineer' || normalizedRole === 'eng') && NoticesState.currentUserName) {
             result = await getAllNoticesForEngineer(NoticesState.currentUserName);
-        } else if (normalizedRole === 'admin') {
-            // Admin xem toàn bộ công việc pending, không lọc theo user_id
-            result = await getPendingNotices();
-        } else if (NoticesState.currentUserId) {
-            result = await getPendingNotices(NoticesState.currentUserId);
         } else {
+            // Thông báo cần hiển thị toàn bộ dự án 待接收, không lọc theo user tạo.
             result = await getPendingNotices();
         }
         
@@ -884,6 +880,8 @@ async function viewNotice(id) {
             ['Kỹ sư', getNoticeValue(notice, ['Nhân viên thiết kế', 'Người nhận'], getPendingReceiverText())],
             ['Độ khẩn', getNoticeUrgencyLabel(getNormalizedNoticeUrgency(notice))],
             ['Trạng thái', getNoticeStatusLabel(getNormalizedNoticeStatus(notice))],
+            ['接收人', getNoticeValue(notice, ['Người nhận', 'accepted_by'], '-')],
+            ['接收方案时间', getNoticeValue(notice, ['Thời gian nhận', 'accepted_at'], '-')],
             ['Ngày', getNoticeValue(notice, ['Ngày'], '-')],
             ['TG mong muốn', getNoticeValue(notice, ['Thời gian mong muốn có bản vẽ'], '-')],
             ['TG hoàn thành', getNoticeValue(notice, ['Thời gian hoàn thành kế hoạch'], '-')]
@@ -1407,7 +1405,7 @@ function getStatusBadge(status) {
     };
     
     const labels = {
-        'pending': 'Chờ duyệt',
+        'pending': '待接收 / Chờ nhận',
         'accepted': 'Đã nhận',
         'in_progress': 'Đang làm',
         'completed': 'Hoàn thành'
@@ -1421,7 +1419,7 @@ function getStatusBadge(status) {
 
 function getNoticeStatusLabel(status) {
     const labels = {
-        pending: 'Chờ duyệt',
+        pending: '待接收 / Chờ nhận',
         accepted: 'Đã nhận',
         in_progress: 'Đang làm',
         completed: 'Hoàn thành'

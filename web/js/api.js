@@ -128,11 +128,7 @@ class APIClient {
                     localStorage.setItem('auth_token', result.token);
                     localStorage.setItem('current_user', JSON.stringify(result.user));
                     
-                    // Store token expiration time
-                    if (result.expires_in) {
-                        const expirationTime = Date.now() + (result.expires_in * 1000);
-                        localStorage.setItem('token_expiration', expirationTime.toString());
-                    }
+                    localStorage.removeItem('token_expiration');
                 }
                 
                 return result;
@@ -221,19 +217,6 @@ class APIClient {
             return { authenticated: false, user: null, reason: 'no_token' };
         }
         
-        // Check local expiration first
-        const expirationStr = localStorage.getItem('token_expiration');
-        if (expirationStr) {
-            const expirationTime = parseInt(expirationStr);
-            if (Date.now() >= expirationTime) {
-                // Token expired locally
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('current_user');
-                localStorage.removeItem('token_expiration');
-                return { authenticated: false, user: null, reason: 'expired' };
-            }
-        }
-        
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
@@ -253,11 +236,7 @@ class APIClient {
                 // Update localStorage with latest user data
                 localStorage.setItem('current_user', JSON.stringify(result.user));
                 
-                // Update expiration time
-                if (result.expires_in) {
-                    const expirationTime = Date.now() + (result.expires_in * 1000);
-                    localStorage.setItem('token_expiration', expirationTime.toString());
-                }
+                localStorage.removeItem('token_expiration');
                 
                 // Check if token is expiring soon
                 if (result.expiring_soon) {
@@ -304,25 +283,14 @@ class APIClient {
      * Kiểm tra token sắp hết hạn không
      */
     isTokenExpiringSoon() {
-        const expirationStr = localStorage.getItem('token_expiration');
-        if (!expirationStr) return false;
-        
-        const expirationTime = parseInt(expirationStr);
-        const fiveMinutes = 5 * 60 * 1000;
-        
-        return (expirationTime - Date.now()) < fiveMinutes;
+        return false;
     }
 
     /**
      * Lấy thời gian còn lại của token (seconds)
      */
     getTokenTimeRemaining() {
-        const expirationStr = localStorage.getItem('token_expiration');
-        if (!expirationStr) return 0;
-        
-        const expirationTime = parseInt(expirationStr);
-        const remaining = Math.floor((expirationTime - Date.now()) / 1000);
-        return Math.max(0, remaining);
+        return Infinity;
     }
 
     /**
@@ -366,6 +334,13 @@ class APIClient {
     async deleteProjects(ids, role = 'admin') {
         const idsString = Array.isArray(ids) ? ids.join(',') : ids;
         return this.request('DELETE', `/projects/${idsString}?role=${role}`);
+    }
+
+    /**
+     * Khôi phục dự án đã xóa từ snapshot undo
+     */
+    async restoreProjects(records) {
+        return this.request('POST', '/projects/restore', { records });
     }
 
     /**
@@ -656,8 +631,8 @@ class APIClient {
 const api = new APIClient();
 
 // Export standalone functions for easy access
-async function login(username, password) {
-    return api.login(username, password);
+async function login(username, password, persist = true) {
+    return api.login(username, password, persist);
 }
 
 async function logout() {

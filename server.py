@@ -18,6 +18,7 @@ import time
 import queue
 import uuid
 import logging
+import shutil
 from flask import Flask, request, jsonify, send_from_directory, make_response, session, Response, stream_with_context
 from flask_cors import CORS
 
@@ -143,7 +144,7 @@ CORS(app, resources={
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.db_helper import (
     init_db, migrate_to_v2,
-    load_all, save_all, add_record, update_record, delete_records,
+    load_all, save_all, add_record, update_record, delete_records, restore_records,
     search_data as db_search_data,
     filter_data as db_filter_data,
     get_paged_data_sql,
@@ -153,11 +154,12 @@ from src.db_helper import (
     assign_default_permissions, set_user_permissions,
     get_pending_notices, get_pending_count, accept_job, add_sales_record,
     get_projects_by_user, get_accepted_projects_by_engineer,
-    get_all_notices_for_engineer, get_all_customers
+    get_all_notices_for_engineer, get_all_customers,
+    get_parent_code_cache, get_parent_code_cache_many, save_parent_code_cache
 )
 
 # Import Tool Open core
-tool_open_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Tool open")
+tool_open_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools", "open")
 sys.path.insert(0, tool_open_dir)
 material_core = None
 TOOL_OPEN_AVAILABLE = False
@@ -169,9 +171,9 @@ try:
         sys.modules["material_core"] = material_core
         spec.loader.exec_module(material_core)
         TOOL_OPEN_AVAILABLE = True
-        safe_print("[Unified] Tool Open core loaded successfully")
+        LOGGER.info("[Unified] Tool Open core loaded successfully")
 except Exception as e:
-    safe_print(f"[Unified] Tool Open core load failed: {e}")
+    LOGGER.info(f"[Unified] Tool Open core load failed: {e}")
 
 # ========================================================================
 # Global state
@@ -240,77 +242,294 @@ used_codes, history = load_data()
 
 # Excel configuration for parent code lookup
 EXCEL_PATH = r"\\192.168.2.165\越南vp共享文件夹\09-工程图纸 Bản vẽ Kỹ Thuật Công Trình\存货档案库.xlsx"
+SSHFS_EXCEL_PATH = os.getenv(
+    'MATERIAL_EXCEL_SSHFS_PATH',
+    r"Y:\越南vp共享文件夹\09-工程图纸 Bản vẽ Kỹ Thuật Công Trình\存货档案库.xlsx"
+)
+SSHFS_EXCEL_CACHE_PATH = os.getenv(
+    'MATERIAL_EXCEL_SSHFS_CACHE_PATH',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'misc', 'fallback_excel', 'sshfs_inventory_cache.xlsx')
+)
+FALLBACK_EXCEL_URL = os.getenv(
+    'MATERIAL_EXCEL_FALLBACK_URL',
+    'https://gofile.me/7R631/ZDEPKMcgh'
+)
+FALLBACK_EXCEL_PATH = os.getenv(
+    'MATERIAL_EXCEL_FALLBACK_PATH',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'misc', 'fallback_excel', 'inventory_web_fallback.xlsx')
+)
 
 # Cache for Excel data
 CACHED_EXCEL_DATA = None
+EXCEL_LOAD_SOURCE = None
+
+def _format_parent_code_value(value):
+    """Chuẩn hóa parent code đọc từ Excel."""
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text or text.lower() == 'nan':
+        return None
+
+    try:
+        if '.' in text:
+            return str(int(float(text)))
+    except Exception:
+        pass
+
+    return text
+
+def _download_fallback_excel():
+    """Tải file Excel fallback từ web và lưu cục bộ nếu nội dung hợp lệ."""
+    if not FALLBACK_EXCEL_URL:
+        return None
+
+    try:
+        os.makedirs(os.path.dirname(FALLBACK_EXCEL_PATH), exist_ok=True)
+        safe_print(f"[Excel] Downloading fallback Excel: {FALLBACK_EXCEL_URL}")
+
+        content = None
+        content_type = ''
+        for attempt in range(1, 4):
+            response = requests.get(FALLBACK_EXCEL_URL, allow_redirects=True, timeout=60)
+            response.raise_for_status()
+            content = response.content
+            content_type = (response.headers.get('content-type') or '').lower()
+            if content.startswith(b'PK'):
+                break
+            safe_print(f"[Excel] Fallback URL returned non-xlsx content on attempt {attempt} (content-type={content_type})")
+            if attempt < 3:
+                time.sleep(5)
+
+        if not content or not content.startswith(b'PK'):
+            safe_print(f"[Excel] Fallback URL did not return an .xlsx file (content-type={content_type})")
+            return None
+
+        tmp_path = FALLBACK_EXCEL_PATH + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(content)
+        os.replace(tmp_path, FALLBACK_EXCEL_PATH)
+
+        safe_print(f"[Excel] Fallback Excel saved: {FALLBACK_EXCEL_PATH}")
+        return FALLBACK_EXCEL_PATH
+    except Exception as e:
+        safe_print(f"[Excel] Error downloading fallback Excel: {e}")
+        return None
+
+def _sync_sshfs_excel_cache():
+    """Copy SSHFS Excel to a local cache before pandas opens it."""
+    source_path = SSHFS_EXCEL_PATH.replace('/', '\\')
+
+    try:
+        if os.path.exists(source_path):
+            os.makedirs(os.path.dirname(SSHFS_EXCEL_CACHE_PATH), exist_ok=True)
+
+            should_copy = not os.path.exists(SSHFS_EXCEL_CACHE_PATH)
+            if not should_copy:
+                source_stat = os.stat(source_path)
+                cache_stat = os.stat(SSHFS_EXCEL_CACHE_PATH)
+                should_copy = (
+                    int(source_stat.st_mtime) > int(cache_stat.st_mtime)
+                    or source_stat.st_size != cache_stat.st_size
+                )
+
+            if should_copy:
+                safe_print(f"[Excel] Copying SSHFS Excel to local cache: {source_path}")
+                tmp_path = SSHFS_EXCEL_CACHE_PATH + '.tmp'
+                shutil.copy2(source_path, tmp_path)
+                os.replace(tmp_path, SSHFS_EXCEL_CACHE_PATH)
+                safe_print(f"[Excel] SSHFS Excel cache updated: {SSHFS_EXCEL_CACHE_PATH}")
+            else:
+                safe_print(f"[Excel] SSHFS Excel cache is up to date: {SSHFS_EXCEL_CACHE_PATH}")
+
+            return SSHFS_EXCEL_CACHE_PATH
+
+        if os.path.exists(SSHFS_EXCEL_CACHE_PATH):
+            safe_print(f"[Excel] SSHFS source unavailable, using existing local cache: {SSHFS_EXCEL_CACHE_PATH}")
+            return SSHFS_EXCEL_CACHE_PATH
+
+        safe_print(f"[Excel] SSHFS Excel unavailable: {source_path}")
+        return None
+    except Exception as e:
+        safe_print(f"[Excel] Error syncing SSHFS Excel cache: {e}")
+        if os.path.exists(SSHFS_EXCEL_CACHE_PATH):
+            safe_print(f"[Excel] Using existing SSHFS local cache after sync error: {SSHFS_EXCEL_CACHE_PATH}")
+            return SSHFS_EXCEL_CACHE_PATH
+        return None
+
+def _get_excel_candidates():
+    """Trả về danh sách nguồn Excel theo thứ tự ưu tiên."""
+    candidates = []
+
+    sshfs_cache_path = _sync_sshfs_excel_cache()
+    if sshfs_cache_path:
+        candidates.append(('sshfs-cache', sshfs_cache_path))
+
+    excel_path = EXCEL_PATH.replace('/', '\\')
+    if not excel_path.startswith('\\\\'):
+        excel_path = '\\\\' + excel_path.lstrip('\\')
+    candidates.append(('internal', excel_path))
+
+    if os.path.exists(FALLBACK_EXCEL_PATH):
+        candidates.append(('fallback-cache', FALLBACK_EXCEL_PATH))
+    else:
+        downloaded_path = _download_fallback_excel()
+        if downloaded_path:
+            candidates.append(('fallback-web', downloaded_path))
+
+    return candidates
 
 def get_excel_data():
     """Đọc dữ liệu Excel vào memory (chỉ tải 1 lần)."""
-    global CACHED_EXCEL_DATA
+    global CACHED_EXCEL_DATA, EXCEL_LOAD_SOURCE
     
     if CACHED_EXCEL_DATA is not None:
         return CACHED_EXCEL_DATA
     
     try:
         import pandas as pd
-        import os
-        
-        excel_path = EXCEL_PATH.replace('/', '\\')
-        if not excel_path.startswith('\\\\'):
-            excel_path = '\\\\' + excel_path.lstrip('\\')
-        
-        safe_print(f"[Excel] Loading Excel into memory: {excel_path}")
-        
-        xls = pd.ExcelFile(excel_path)
-        data = []
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(excel_path, sheet_name=sheet_name)
-            if 'cEngineerFigNo' in df.columns and 'cInvCode' in df.columns:
-                # Pre-process: convert to string and uppercase for faster lookup
-                df['cEngineerFigNo'] = df['cEngineerFigNo'].astype(str).str.upper().str.strip()
-                df['cInvCode'] = df['cInvCode'].astype(str).str.strip()
-                data.append((sheet_name, df))
-        
-        safe_print(f"[Excel] Loaded {len(data)} sheets with data")
-        CACHED_EXCEL_DATA = data
-        return CACHED_EXCEL_DATA
     except Exception as e:
-        safe_print(f"[Excel] Error loading Excel: {e}")
+        safe_print(f"[Excel] pandas not available: {e}")
         return None
 
-def find_cinvcode_from_excel(engineer_fig_no: str):
-    """Tìm cInvCode tương ứng với cEngineerFigNo trong file Excel."""
+    for source, excel_path in _get_excel_candidates():
+        try:
+            if source == 'internal' and not os.path.exists(excel_path):
+                safe_print(f"[Excel] Internal Excel unavailable: {excel_path}")
+                continue
+
+            safe_print(f"[Excel] Loading Excel into memory ({source}): {excel_path}")
+
+            xls = pd.ExcelFile(excel_path)
+            data = []
+            exact_index = {}
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(excel_path, sheet_name=sheet_name)
+                if 'cEngineerFigNo' in df.columns and 'cInvCode' in df.columns:
+                    df['cEngineerFigNo'] = df['cEngineerFigNo'].astype(str).str.upper().str.strip()
+                    df['cInvCode'] = df['cInvCode'].astype(str).str.strip()
+                    data.append((sheet_name, df))
+
+                    for _, row in df[['cEngineerFigNo', 'cInvCode']].dropna().iterrows():
+                        engineer_code = str(row['cEngineerFigNo']).strip()
+                        parent_code = _format_parent_code_value(row['cInvCode'])
+                        if engineer_code and engineer_code.lower() != 'nan' and parent_code and engineer_code not in exact_index:
+                            exact_index[engineer_code] = parent_code
+
+            if data:
+                safe_print(f"[Excel] Loaded {len(data)} sheets with data from {source}")
+                CACHED_EXCEL_DATA = {
+                    'source': source,
+                    'path': excel_path,
+                    'sheets': data,
+                    'exact_index': exact_index
+                }
+                EXCEL_LOAD_SOURCE = source
+                return CACHED_EXCEL_DATA
+
+            safe_print(f"[Excel] No valid sheets found in {source}: {excel_path}")
+        except Exception as e:
+            safe_print(f"[Excel] Error loading {source} Excel: {e}")
+
+    return None
+
+def _find_cinvcode_from_excel_source(engineer_fig_no: str):
+    """Tìm cInvCode trong dữ liệu Excel đã tải."""
     excel_data = get_excel_data()
     if not excel_data:
         return None
     
     search_code = str(engineer_fig_no).upper().strip()
-    
-    # Try exact match first
-    for sheet_name, df in excel_data:
-        try:
-            mask = df['cEngineerFigNo'] == search_code
-            if mask.any():
-                matches = df.loc[mask, 'cInvCode']
-                for m in matches:
-                    if m and m != 'nan' and m.strip():
-                        return str(int(float(m))) if '.' in m else m
-        except Exception as e:
-            continue
+    exact_index = excel_data.get('exact_index', {})
+    if search_code in exact_index:
+        return exact_index[search_code]
     
     # Try partial match (startswith)
-    for sheet_name, df in excel_data:
+    for sheet_name, df in excel_data.get('sheets', []):
         try:
             mask = df['cEngineerFigNo'].str.startswith(search_code)
             if mask.any():
                 matches = df.loc[mask, 'cInvCode']
                 for m in matches:
-                    if m and m != 'nan' and m.strip():
-                        return str(int(float(m))) if '.' in m else m
+                    parent_code = _format_parent_code_value(m)
+                    if parent_code:
+                        return parent_code
         except Exception as e:
             continue
     
     return None
+
+def _normalize_parent_lookup_code_local(code: str) -> str:
+    """Chuẩn hóa mã bản vẽ để tra parent_code trong used_codes history."""
+    return str(code or '').upper().strip()
+
+def _get_parent_codes_from_history(codes: list):
+    """Lấy parent_code đã lưu trong used_codes.json/history."""
+    normalized_to_original = {}
+    for code in codes:
+        lookup_code = _normalize_parent_lookup_code_local(code)
+        if lookup_code:
+            normalized_to_original[lookup_code] = code
+
+    if not normalized_to_original:
+        return {}
+
+    results = {}
+    for item in history:
+        lookup_code = _normalize_parent_lookup_code_local(item.get('code', ''))
+        if lookup_code in normalized_to_original:
+            parent_code = str(item.get('parent_code') or '').strip()
+            if parent_code:
+                results[normalized_to_original[lookup_code]] = parent_code
+
+    return results
+
+def _save_parent_codes_to_history(parent_codes: dict):
+    """Ghi parent_code tìm được vào used_codes.json để lần sau không cần check Excel."""
+    if not parent_codes:
+        return False
+
+    normalized_parent_codes = {
+        _normalize_parent_lookup_code_local(code): str(parent_code).strip()
+        for code, parent_code in parent_codes.items()
+        if _normalize_parent_lookup_code_local(code) and str(parent_code or '').strip()
+    }
+    if not normalized_parent_codes:
+        return False
+
+    changed = False
+    for item in history:
+        lookup_code = _normalize_parent_lookup_code_local(item.get('code', ''))
+        parent_code = normalized_parent_codes.get(lookup_code)
+        if parent_code and item.get('parent_code') != parent_code:
+            item['parent_code'] = parent_code
+            changed = True
+
+    if changed:
+        save_data_data(used_codes, history)
+    return changed
+
+def find_cinvcode_from_excel(engineer_fig_no: str):
+    """Tìm cInvCode tương ứng với cEngineerFigNo, ưu tiên used_codes.json rồi cache."""
+    search_code = str(engineer_fig_no or '').upper().strip()
+    if not search_code:
+        return None
+
+    history_parent_codes = _get_parent_codes_from_history([search_code])
+    if search_code in history_parent_codes:
+        return history_parent_codes[search_code]
+
+    cached_parent_code = get_parent_code_cache(search_code)
+    if cached_parent_code:
+        _save_parent_codes_to_history({search_code: cached_parent_code})
+        return cached_parent_code
+
+    parent_code = _find_cinvcode_from_excel_source(search_code)
+    if parent_code:
+        save_parent_code_cache(search_code, parent_code, EXCEL_LOAD_SOURCE or 'excel')
+        _save_parent_codes_to_history({search_code: parent_code})
+    return parent_code
 
 def find_parent_codes_batch(codes: list):
     """Tìm parent codes cho nhiều mã cùng lúc.
@@ -322,16 +541,35 @@ def find_parent_codes_batch(codes: list):
         Dict mapping {code: parent_code}
     """
     results = {}
-    
-    # Pre-load Excel if not already loaded
-    excel_data = get_excel_data()
-    if not excel_data:
+
+    clean_codes = [str(code).strip() for code in codes if str(code).strip()]
+    history_results = _get_parent_codes_from_history(clean_codes)
+    results.update(history_results)
+
+    missing_codes = [code for code in clean_codes if code not in history_results]
+    if not missing_codes:
+        return results
+
+    cached_results = get_parent_code_cache_many(missing_codes)
+    results.update(cached_results)
+    _save_parent_codes_to_history(cached_results)
+
+    missing_codes = [code for code in missing_codes if code not in cached_results]
+    if not missing_codes:
         return results
     
-    for code in codes:
-        parent_code = find_cinvcode_from_excel(code)
+    # Pre-load Excel only when DB cache does not already have every code.
+    if not get_excel_data():
+        return results
+
+    for code in missing_codes:
+        parent_code = _find_cinvcode_from_excel_source(code)
         if parent_code:
             results[code] = parent_code
+            save_parent_code_cache(code, parent_code, EXCEL_LOAD_SOURCE or 'excel')
+
+    excel_results = {code: results[code] for code in missing_codes if code in results}
+    _save_parent_codes_to_history(excel_results)
     
     return results
 
@@ -346,9 +584,80 @@ ensure_default_users()
 import secrets
 import time
 
-sessions = {}
 sessions_lock = threading.Lock()
-SESSION_TIMEOUT = 3600 * 24  # 24 hours
+SESSION_TIMEOUT = None  # None = web login sessions never expire automatically
+SESSION_STORAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web_sessions.json')
+
+
+def _sanitize_session_user(user_info):
+    """Return a copy of user data that is safe to keep in session storage."""
+    user = (user_info or {}).copy()
+    user.pop('passwords', None)
+    user.pop('password', None)
+    return user
+
+
+def _prune_expired_sessions_unlocked():
+    now = time.time()
+    expired_tokens = [
+        token
+        for token, session_data in sessions.items()
+        if SESSION_TIMEOUT is not None
+        and now - float(session_data.get('created_at', 0) or 0) > SESSION_TIMEOUT
+    ]
+    for token in expired_tokens:
+        sessions.pop(token, None)
+    return bool(expired_tokens)
+
+
+def _save_sessions_unlocked():
+    try:
+        _prune_expired_sessions_unlocked()
+        tmp_path = SESSION_STORAGE_PATH + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(sessions, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, SESSION_STORAGE_PATH)
+    except Exception as e:
+        safe_print(f"[Session] Failed to save sessions: {e}")
+
+
+def _load_sessions():
+    try:
+        if not os.path.exists(SESSION_STORAGE_PATH):
+            return {}
+        with open(SESSION_STORAGE_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+
+        now = time.time()
+        loaded_sessions = {}
+        for token, session_data in data.items():
+            if not isinstance(token, str) or not isinstance(session_data, dict):
+                continue
+            try:
+                created_at = float(session_data.get('created_at', 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if SESSION_TIMEOUT is not None and now - created_at > SESSION_TIMEOUT:
+                continue
+            user = _sanitize_session_user(session_data.get('user', {}))
+            if not user:
+                continue
+            loaded_sessions[token] = {
+                'user': user,
+                'created_at': created_at,
+                'ip': session_data.get('ip', '')
+            }
+        return loaded_sessions
+    except Exception as e:
+        safe_print(f"[Session] Failed to load sessions: {e}")
+        return {}
+
+
+sessions = _load_sessions()
+if sessions:
+    safe_print(f"[Session] Loaded {len(sessions)} persisted web session(s)")
 
 # Rate limiting for login
 LOGIN_RATE_LIMIT = 5
@@ -359,6 +668,38 @@ login_attempts_lock = threading.Lock()
 def generate_token():
     """Tạo token ngẫu nhiên"""
     return secrets.token_hex(32)
+
+
+def create_web_session(token, user_info, client_ip):
+    with sessions_lock:
+        sessions[token] = {
+            'user': _sanitize_session_user(user_info),
+            'created_at': time.time(),
+            'ip': client_ip
+        }
+        _save_sessions_unlocked()
+
+
+def get_web_session(token):
+    with sessions_lock:
+        session_data = sessions.get(token)
+        if not session_data:
+            return None, "invalid_token"
+
+        created_at = float(session_data.get('created_at', 0) or 0)
+        if SESSION_TIMEOUT is not None and (time.time() - created_at) > SESSION_TIMEOUT:
+            sessions.pop(token, None)
+            _save_sessions_unlocked()
+            return None, "expired"
+
+        return session_data, None
+
+
+def remove_web_session(token):
+    with sessions_lock:
+        if token in sessions:
+            sessions.pop(token, None)
+            _save_sessions_unlocked()
 
 def check_rate_limit(ip):
     """Kiểm tra rate limit cho IP"""
@@ -388,17 +729,11 @@ def get_user_from_bearer_token():
         return None, "no_token"
 
     token = auth_header[7:]
-    with sessions_lock:
-        session_data = sessions.get(token)
-        if not session_data:
-            return None, "invalid_token"
+    session_data, error = get_web_session(token)
+    if error:
+        return None, error
 
-        created_at = session_data.get('created_at', 0)
-        if (time.time() - created_at) > SESSION_TIMEOUT:
-            del sessions[token]
-            return None, "expired"
-
-        return session_data.get('user', {}), None
+    return session_data.get('user', {}), None
 
 def is_admin_user(user):
     """Kiểm tra user có quyền admin không."""
@@ -870,12 +1205,26 @@ def tool_status():
     try:
         excel_path = material_core.normalize_unc_path(material_core.EXCEL_PATH)
         excel_exists = os.path.exists(excel_path)
+        sshfs_exists = os.path.exists(SSHFS_EXCEL_PATH)
+        sshfs_cache_exists = os.path.exists(SSHFS_EXCEL_CACHE_PATH)
+        fallback_exists = os.path.exists(FALLBACK_EXCEL_PATH)
+        fallback_available = sshfs_exists or sshfs_cache_exists or fallback_exists or bool(FALLBACK_EXCEL_URL)
+        usable = excel_exists or fallback_available
         
         return jsonify({
-            "status": "ready" if excel_exists else "error",
-            "message": "Sẵn sàng" if excel_exists else "Không thể kết nối Excel",
+            "status": "ready" if usable else "error",
+            "message": "Sẵn sàng" if excel_exists else (
+                "Excel nội bộ lỗi, sẽ dùng fallback" if fallback_available else "Không thể kết nối Excel"
+            ),
             "excel_path": excel_path,
-            "excel_exists": excel_exists
+            "excel_exists": excel_exists,
+            "sshfs_excel_path": SSHFS_EXCEL_PATH,
+            "sshfs_excel_exists": sshfs_exists,
+            "sshfs_excel_cache_path": SSHFS_EXCEL_CACHE_PATH,
+            "sshfs_excel_cache_exists": sshfs_cache_exists,
+            "fallback_excel_url": FALLBACK_EXCEL_URL,
+            "fallback_excel_path": FALLBACK_EXCEL_PATH,
+            "fallback_excel_exists": fallback_exists
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
@@ -952,7 +1301,7 @@ def favicon():
         possible_paths = [
             os.path.join(os.path.dirname(os.path.abspath(__file__)), 'favicon.ico'),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web', 'favicon.ico'),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Tool open', 'favicon.ico'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', 'open', 'favicon.ico'),
         ]
         
         for favicon_path in possible_paths:
@@ -1048,17 +1397,10 @@ def api_login():
             
             # Create session token
             token = generate_token()
-            with sessions_lock:
-                sessions[token] = {
-                    'user': user_info,
-                    'created_at': time.time(),
-                    'ip': client_ip
-                }
+            create_web_session(token, user_info, client_ip)
             
             # Remove password from response
-            user_info_copy = user_info.copy()
-            if 'passwords' in user_info_copy:
-                del user_info_copy['passwords']
+            user_info_copy = _sanitize_session_user(user_info)
             
             return jsonify({
                 "success": True,
@@ -1077,9 +1419,7 @@ def api_logout():
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            if token in sessions:
-                del sessions[token]
+        remove_web_session(token)
     
     return jsonify({"success": True, "message": "Đăng xuất thành công"})
 
@@ -1092,29 +1432,24 @@ def api_me():
         return jsonify({"authenticated": False, "user": None, "reason": "no_token"})
     
     token = auth_header[7:]
-    with sessions_lock:
-        session_data = sessions.get(token)
-        if not session_data:
-            return jsonify({"authenticated": False, "user": None, "reason": "invalid_token"})
-        
-        # Check expiration
+    session_data, error = get_web_session(token)
+    if error:
+        return jsonify({"authenticated": False, "user": None, "reason": error})
+    
+    if SESSION_TIMEOUT is None:
+        remaining = None
+        is_expiring_soon = False
+    else:
         created_at = session_data.get('created_at', 0)
-        elapsed = time.time() - created_at
-        remaining = SESSION_TIMEOUT - elapsed
-        
-        if remaining <= 0:
-            del sessions[token]
-            return jsonify({"authenticated": False, "user": None, "reason": "expired"})
-        
-        # Check if close to expiration (< 5 minutes)
+        remaining = SESSION_TIMEOUT - (time.time() - created_at)
         is_expiring_soon = remaining < 300
-        
-        return jsonify({
-            "authenticated": True,
-            "user": session_data.get('user'),
-            "expires_in": int(remaining),
-            "expiring_soon": is_expiring_soon
-        })
+    
+    return jsonify({
+        "authenticated": True,
+        "user": session_data.get('user'),
+        "expires_in": int(remaining) if remaining is not None else None,
+        "expiring_soon": is_expiring_soon
+    })
 
 
 @app.route('/api/profile', methods=['PUT'])
@@ -1125,10 +1460,9 @@ def api_profile_update():
         return jsonify({"success": False, "error": "Chưa đăng nhập"}), 401
     
     token = auth_header[7:]
-    with sessions_lock:
-        session_data = sessions.get(token)
-        if not session_data:
-            return jsonify({"success": False, "error": "Token không hợp lệ"}), 401
+    session_data, error = get_web_session(token)
+    if error:
+        return jsonify({"success": False, "error": "Token không hợp lệ"}), 401
     
     # Get user from session
     current_user = session_data.get('user', {})
@@ -1168,7 +1502,9 @@ def api_profile_update():
         if 'phone' in profile_data:
             current_user['phone'] = profile_data['phone']
         with sessions_lock:
-            sessions[token]['user'] = current_user
+            if token in sessions:
+                sessions[token]['user'] = _sanitize_session_user(current_user)
+                _save_sessions_unlocked()
         
         return jsonify({
             "success": True,
@@ -1187,10 +1523,9 @@ def api_profile_change_password():
         return jsonify({"success": False, "error": "Chưa đăng nhập"}), 401
     
     token = auth_header[7:]
-    with sessions_lock:
-        session_data = sessions.get(token)
-        if not session_data:
-            return jsonify({"success": False, "error": "Token không hợp lệ"}), 401
+    session_data, error = get_web_session(token)
+    if error:
+        return jsonify({"success": False, "error": "Token không hợp lệ"}), 401
     
     # Get user from session
     current_user = session_data.get('user', {})
@@ -1309,6 +1644,15 @@ def api_project_detail(tracking_id):
         
         deleted_count = delete_records([tracking_id])
         return jsonify({"success": True, "deleted_count": deleted_count})
+
+
+@app.route('/api/projects/restore', methods=['POST'])
+def api_projects_restore():
+    """Khôi phục dự án đã xóa từ snapshot undo ở frontend."""
+    data = request.get_json() or {}
+    records = data.get('records') or []
+    restored_count = restore_records(records)
+    return jsonify({"success": restored_count > 0, "restored_count": restored_count})
 
 
 @app.route('/api/projects/search', methods=['POST'])
@@ -1546,10 +1890,9 @@ def api_logs():
     auth_header = request.headers.get('Authorization', '')
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            session_data = sessions.get(token)
-            if session_data:
-                username = session_data.get('user', {}).get('username', 'anonymous')
+        session_data, _ = get_web_session(token)
+        if session_data:
+            username = session_data.get('user', {}).get('username', 'anonymous')
     
     # Create log file
     import datetime
@@ -2770,11 +3113,10 @@ def gemini_chat():
     user_info_str = ''
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            session_data = sessions.get(token)
-            if session_data:
-                user = session_data.get('user', {})
-                user_info_str = f"""
+        session_data, _ = get_web_session(token)
+        if session_data:
+            user = session_data.get('user', {})
+            user_info_str = f"""
 ## THÔNG TIN USER HIỆN TẠI
 - Username: {user.get('username', 'unknown')}
 - Role: {user.get('role', 'unknown')}
@@ -2910,11 +3252,10 @@ def gemini_chat_stream():
     user_info_str = ''
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            session_data = sessions.get(token)
-            if session_data:
-                user = session_data.get('user', {})
-                user_info_str = f"""
+        session_data, _ = get_web_session(token)
+        if session_data:
+            user = session_data.get('user', {})
+            user_info_str = f"""
 ## THÔNG TIN USER HIỆN TẠI
 - Username: {user.get('username', 'unknown')}
 - Role: {user.get('role', 'unknown')}
@@ -3072,11 +3413,10 @@ def ollama_chat_stream():
     user_info_str = ''
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            session_data = sessions.get(token)
-            if session_data:
-                user = session_data.get('user', {})
-                user_info_str = f"""
+        session_data, _ = get_web_session(token)
+        if session_data:
+            user = session_data.get('user', {})
+            user_info_str = f"""
 ## THÔNG TIN USER HIỆN TẠI
 - Username: {user.get('username', 'unknown')}
 - Role: {user.get('role', 'unknown')}
@@ -3250,11 +3590,10 @@ def openrouter_chat_stream():
     user_info_str = ''
     if auth_header.startswith('Bearer '):
         token = auth_header[7:]
-        with sessions_lock:
-            session_data = sessions.get(token)
-            if session_data:
-                user = session_data.get('user', {})
-                user_info_str = f"""
+        session_data, _ = get_web_session(token)
+        if session_data:
+            user = session_data.get('user', {})
+            user_info_str = f"""
 ## THÔNG TIN USER HIỆN TẠI
 - Username: {user.get('username', 'unknown')}
 - Role: {user.get('role', 'unknown')}

@@ -41,6 +41,14 @@ ENV/
 # Logs
 *.log
 
+# Local web authentication sessions
+web_sessions.json
+web_sessions.json.tmp
+
+# Local Excel fallback/cache files
+misc/fallback_excel/*.xlsx
+misc/fallback_excel/*.tmp
+
 # OS
 .DS_Store
 Thumbs.db

@@ -116,9 +116,16 @@ const translations = {
         delete_project: 'Xóa',
         refresh_projects: 'Làm mới dữ liệu',
         toggle_columns: 'Chọn cột hiển thị',
-        btn_toggle_columns: 'Chọn cột',
+        btn_toggle_columns: 'Cài đặt cột',
         export_excel: 'Xuất Excel',
         export_csv: 'Xuất CSV',
+        undo: 'Hoàn tác',
+        undo_paste_data: 'Hoàn tác dán dữ liệu',
+        undo_edit_cell: 'Hoàn tác sửa ô',
+        undo_delete_rows: 'Hoàn tác xóa {count} dòng',
+        undo_success: 'Đã hoàn tác',
+        rows_count: '{count} dòng',
+        rows_count_filtered: '{display}/{total} dòng',
         
         // Filters
         filter_status: 'Lọc theo trạng thái',
@@ -131,8 +138,17 @@ const translations = {
         urgency_normal: 'Bình thường',
         urgency_urgent: 'Khẩn cấp',
         urgency_very_urgent: 'Rất khẩn',
+        filter_only_this: 'Chỉ lọc mục này',
         search_projects: 'Tìm kiếm...',
         clear_search: 'Xóa tìm kiếm',
+        column_filter_title: 'Lọc cột',
+        filter_column_title: 'Lọc: {column}',
+        search_in_column: 'Tìm trong cột...',
+        select_all: 'Chọn tất cả',
+        clear_filter: 'Bỏ lọc',
+        empty_value: '(Trống)',
+        no_filter_values: 'Không có giá trị',
+        click_to_view: 'Bấm để xem',
         
         // Table headers
         stt: 'STT',
@@ -143,6 +159,7 @@ const translations = {
         col_nhanvienkd: 'Nhân viên KD',
         col_tensanpham: 'Tên sản phẩm',
         col_quycach: 'Quy cách',
+        col_yeucaukythuat: 'Yêu cầu kỹ thuật KH',
         col_lienhe_kh: 'Người liên hệ (KH)',
         col_soluong: 'Số lượng',
         col_mapo: 'Mã PO',
@@ -162,6 +179,8 @@ const translations = {
         
         // Column selector
         column_selector_title: 'Chọn cột hiển thị',
+        column_selector_hint: 'Kéo để đổi vị trí cột',
+        column_drag_hint: 'Kéo để sắp xếp',
         column_reset: 'Mặc định',
         column_apply: 'Áp dụng',
         
@@ -169,12 +188,21 @@ const translations = {
         add_project_title: 'Thêm dự án mới',
         edit_project_title: 'Sửa dự án',
         view_project_title: 'Chi tiết dự án',
+        detail_progress: 'Tiến trình',
+        detail_stage_created: 'Đã tạo',
+        detail_stage_accepted: 'Đã nhận',
+        detail_stage_in_progress: 'Đang xử lý',
+        detail_stage_completed: 'Hoàn thành',
+        detail_extra_data: 'Dữ liệu bổ sung',
+        detail_empty: 'Chưa có dữ liệu',
         
         // Form fields - Basic info
         form_ngay_khoitao: 'Ngày khởi tạo',
         form_khachhang: 'Khách hàng',
         form_khachhang_required: 'Khách hàng *',
         select_customer: '-- Chọn khách hàng --',
+        new_customer_placeholder: 'Hoặc nhập khách hàng mới',
+        enter_customer_placeholder: 'Nhập khách hàng',
         liveSearch_placeholder: 'Tìm kiếm khách hàng...',
         form_nhanvienkd: 'Nhân viên kinh doanh',
         
@@ -182,6 +210,7 @@ const translations = {
         form_tensanpham: 'Tên sản phẩm',
         form_tensanpham_required: 'Tên sản phẩm *',
         form_quycach: 'Quy cách',
+        form_khachhang_yeucau_kythuat: 'Yêu cầu kỹ thuật khách hàng',
         form_lienhe_kh: 'Người liên hệ (KH)',
         form_soluong: 'Số lượng',
         form_mapo: 'Mã PO',
@@ -219,6 +248,9 @@ const translations = {
         form_capbach: 'Tính cấp bách',
         form_tg_mongmuon: 'Thời gian mong muốn có bản vẽ',
         form_tg_hoanthanh: 'Thời gian hoàn thành kế hoạch',
+        deadline_normal_note: 'Tự động: 3 ngày làm việc (Thứ 2 đến Thứ 7)',
+        deadline_urgent_note: 'Tự động: 2 ngày làm việc (Thứ 2 đến Thứ 7)',
+        deadline_very_urgent_note: 'Tự động: trong ngày tạo dự án',
         
         // Urgency options
         urgency_normal_option: 'Bình thường',
@@ -230,6 +262,17 @@ const translations = {
         quick_edit: 'Sửa',
         quick_delete: 'Xóa',
         quick_accept: 'Nhận việc',
+        context_choose_action: 'Chọn thao tác',
+        project_label: 'Dự án',
+        project_table: 'Bảng dự án',
+        empty_cell: 'Ô trống',
+        no_row_selected: 'Không có dòng được chọn',
+        copy_cell: 'Sao chép ô',
+        copy_row: 'Sao chép dòng',
+        filter_this_value: 'Lọc theo giá trị này',
+        copied_cell: 'Đã sao chép ô',
+        copied_row: 'Đã sao chép dòng',
+        filtered_column: 'Đã lọc {column}',
         
         // Toast messages
         toast_project_created: 'Tạo dự án thành công',
@@ -242,6 +285,7 @@ const translations = {
         validation_khachhang_required: 'Vui lòng nhập tên khách hàng',
         validation_tensanpham_required: 'Vui lòng nhập tên sản phẩm',
         validation_lienhe_required: 'Vui lòng nhập người liên hệ',
+        validation_quantity_number: 'Số lượng phải là số',
         validation_invalid_page: 'Vui lòng nhập trang từ 1 đến {max}',
         
         // ============================================
@@ -254,13 +298,13 @@ const translations = {
         
         // Stats
         stat_total: 'Tổng',
-        stat_pending: 'Chờ duyệt',
+        stat_pending: 'Chờ nhận',
         stat_accepted: 'Đã nhận',
         stat_urgent: 'Khẩn',
         auto_refresh_note: 'Tự động cập nhật mỗi 30 giây',
         
         // Status options
-        status_pending_option: 'Chờ duyệt',
+        status_pending_option: 'Chờ nhận',
         status_accepted: 'Đã nhận',
         status_in_progress: 'Đang làm',
         status_completed_option: 'Hoàn thành',
@@ -639,9 +683,16 @@ const translations = {
         delete_project: '删除',
         refresh_projects: '刷新数据',
         toggle_columns: '选择显示列',
-        btn_toggle_columns: '列',
+        btn_toggle_columns: '列设置',
         export_excel: '导出Excel',
         export_csv: '导出CSV',
+        undo: '撤销',
+        undo_paste_data: '撤销粘贴数据',
+        undo_edit_cell: '撤销单元格编辑',
+        undo_delete_rows: '撤销删除 {count} 行',
+        undo_success: '已撤销',
+        rows_count: '{count} 行',
+        rows_count_filtered: '{display}/{total} 行',
         
         // Filters
         filter_status: '按状态筛选',
@@ -654,8 +705,18 @@ const translations = {
         urgency_normal: '正常',
         urgency_urgent: '紧急',
         urgency_very_urgent: '非常紧急',
+        filter_only_this: '仅筛选此项',
+        search_projects: '搜索... (Ctrl+F)',
         search_placeholder: '搜索...',
         clear_search: '清除搜索',
+        column_filter_title: '列筛选',
+        filter_column_title: '筛选：{column}',
+        search_in_column: '在列中搜索...',
+        select_all: '全选',
+        clear_filter: '清除筛选',
+        empty_value: '(空)',
+        no_filter_values: '没有可选值',
+        click_to_view: '点击查看',
         
         // Table headers
         stt: '序号',
@@ -666,6 +727,7 @@ const translations = {
         col_nhanvienkd: '业务员',
         col_tensanpham: '产品名称',
         col_quycach: '规格',
+        col_yeucaukythuat: '客户技术要求',
         col_lienhe_kh: '客户联系人',
         col_soluong: '数量',
         col_mapo: 'PO号',
@@ -688,7 +750,7 @@ const translations = {
         btn_edit: '编辑',
         btn_delete: '删除',
         btn_refresh: '刷新数据',
-        btn_toggle_columns: '列',
+        btn_toggle_columns: '列设置',
         btn_export: '导出',
         
         // Search
@@ -704,6 +766,8 @@ const translations = {
         
         // Column selector
         column_selector_title: '选择显示列',
+        column_selector_hint: '拖动可调整列的位置',
+        column_drag_hint: '拖动排序',
         column_reset: '默认',
         column_apply: '应用',
         
@@ -711,12 +775,21 @@ const translations = {
         add_project_title: '新建项目',
         edit_project_title: '编辑项目',
         view_project_title: '项目详情',
+        detail_progress: '进度',
+        detail_stage_created: '已创建',
+        detail_stage_accepted: '已接收',
+        detail_stage_in_progress: '处理中',
+        detail_stage_completed: '已完成',
+        detail_extra_data: '补充数据',
+        detail_empty: '暂无数据',
         
         // Form fields - Basic info
         form_ngay_khoitao: '创建日期',
         form_khachhang: '客户公司名称',
         form_khachhang_required: '客户 *',
         select_customer: '-- 选择客户 --',
+        new_customer_placeholder: '或输入新客户',
+        enter_customer_placeholder: '输入客户',
         liveSearch_placeholder: '搜索客户...',
         form_nhanvienkd: '业务员',
         
@@ -724,6 +797,7 @@ const translations = {
         form_tensanpham: '产品名称',
         form_tensanpham_required: '产品名称 *',
         form_quycach: '规格',
+        form_khachhang_yeucau_kythuat: '客户技术要求',
         form_lienhe_kh: '联系人(客户)',
         form_soluong: '数量',
         form_mapo: 'PO号',
@@ -757,6 +831,9 @@ const translations = {
         form_capbach: '紧急程度',
         form_tg_mongmuon: '期望收到图纸时间',
         form_tg_hoanthanh: '计划完成时间',
+        deadline_normal_note: '自动设置：3 个工作日（周一至周六）',
+        deadline_urgent_note: '自动设置：2 个工作日（周一至周六）',
+        deadline_very_urgent_note: '自动设置：当天完成',
         
         // Urgency options
         urgency_normal_option: '普通',
@@ -768,6 +845,17 @@ const translations = {
         quick_edit: '编辑',
         quick_delete: '删除',
         quick_accept: '接受任务',
+        context_choose_action: '选择操作',
+        project_label: '项目',
+        project_table: '项目表',
+        empty_cell: '空单元格',
+        no_row_selected: '未选择行',
+        copy_cell: '复制单元格',
+        copy_row: '复制行',
+        filter_this_value: '按此值筛选',
+        copied_cell: '已复制单元格',
+        copied_row: '已复制行',
+        filtered_column: '已筛选 {column}',
         
         // Toast messages
         toast_project_created: '创建项目成功',
@@ -779,7 +867,8 @@ const translations = {
         // Validation
         validation_khachhang_required: '请输入客户名称',
         validation_tensanpham_required: '请输入产品名称',
-        validation_lienhe_required: 'Vui lòng nhập người liên hệ',
+        validation_lienhe_required: '请输入联系人',
+        validation_quantity_number: '数量必须是数字',
         validation_invalid_page: '请输入1到{max}之间的页码',
         
         // ============================================
@@ -792,14 +881,14 @@ const translations = {
         
         // Stats
         stat_total: '合计',
-        stat_pending: '待审批',
+        stat_pending: '待接收',
         stat_accepted: '已接收',
         stat_urgent: '加急',
         auto_refresh_note: '每30秒自动刷新',
         no_notices: '暂无通知',
         
         // Status options
-        status_pending_option: '待审批',
+        status_pending_option: '待接收',
         status_accepted: '已接收',
         status_in_progress: '进行中',
         status_completed_option: '已完成',

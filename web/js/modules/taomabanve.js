@@ -16,6 +16,7 @@ const TaoMaBanVeState = {
     totalRecords: 0,
     totalPages: 1,
     isLoading: false,
+    parentLookupRequestId: 0,
     currentLang: localStorage.getItem('language') || 'vi'
 };
 
@@ -507,6 +508,7 @@ function applyHistorySearch(rawValue, force = false) {
 async function loadCodeHistory() {
     console.log('[TaoMaBanVe] Loading code history...');
     
+    const requestId = ++TaoMaBanVeState.parentLookupRequestId;
     const tbody = $('#code-history-table-body');
     tbody.html('<tr><td colspan="8" class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div> ' + t_taomabanve('loading') + '</td></tr>');
     
@@ -520,11 +522,9 @@ async function loadCodeHistory() {
             TaoMaBanVeState.totalRecords = result.total || result.data.length || 0;
             TaoMaBanVeState.totalPages = result.total_pages || Math.max(1, Math.ceil(TaoMaBanVeState.totalRecords / TaoMaBanVeState.pageSize));
             
-            // Load parent codes for all history items
-            TaoMaBanVeState.codeHistory = await loadParentCodesForHistory(TaoMaBanVeState.codeHistory);
-            
             calculateAndDisplayStats(result.stats, result.data);
             renderCodeHistoryTable();
+            loadParentCodesForVisibleHistory(requestId);
         } else {
             TaoMaBanVeState.codeHistory = [];
             TaoMaBanVeState.totalRecords = 0;
@@ -576,7 +576,7 @@ function renderCodeHistoryTable() {
                 <td>${escapeHtml(categoryDisplay)}</td>
                 <td>${item.plan_code ? '<code class="code-value plan-code-value">' + escapeHtml(item.plan_code) + '</code>' : '<span class="text-muted">-</span>'}</td>
                 <td><code class="code-value">${escapeHtml(item.code || '')}</code></td>
-                <td>${item.parent_code ? '<code class="parent-code text-success">' + escapeHtml(item.parent_code) + '</code>' : '<span class="text-muted">-</span>'}</td>
+                <td class="parent-code-cell" data-history-index="${index}">${renderParentCodeCell(item)}</td>
                 <td>${formatDateTime(item.time)}</td>
             </tr>
         `;
@@ -587,6 +587,47 @@ function renderCodeHistoryTable() {
         $(this).data('historyItem', TaoMaBanVeState.codeHistory[index]);
     });
     renderCodeHistoryPagination();
+}
+
+function needsParentCodeLookup(item) {
+    return Boolean(item && item.code && !item.parent_code && !String(item.code).startsWith('10'));
+}
+
+function renderParentCodeCell(item) {
+    if (item.parent_code) {
+        return '<code class="parent-code text-success">' + escapeHtml(item.parent_code) + '</code>';
+    }
+    if (needsParentCodeLookup(item) && !item.parent_lookup_done) {
+        return '<span class="text-muted parent-code-pending">...</span>';
+    }
+    return '<span class="text-muted">-</span>';
+}
+
+async function loadParentCodesForVisibleHistory(requestId) {
+    const historySnapshot = TaoMaBanVeState.codeHistory.map(item => ({ ...item }));
+    const updatedData = await loadParentCodesForHistory(historySnapshot);
+
+    if (requestId !== TaoMaBanVeState.parentLookupRequestId) {
+        return;
+    }
+
+    updatedData.forEach((updatedItem, index) => {
+        const currentItem = TaoMaBanVeState.codeHistory[index];
+        if (!currentItem || currentItem.code !== updatedItem.code) return;
+
+        if (needsParentCodeLookup(currentItem)) {
+            currentItem.parent_lookup_done = true;
+        }
+        if (updatedItem.parent_code) {
+            currentItem.parent_code = updatedItem.parent_code;
+        }
+        const cell = $(`#code-history-table-body .parent-code-cell[data-history-index="${index}"]`);
+        cell.html(renderParentCodeCell(currentItem));
+    });
+
+    $('#code-history-table-body tr.code-history-row').each(function(index) {
+        $(this).data('historyItem', TaoMaBanVeState.codeHistory[index]);
+    });
 }
 
 function showCodeHistoryContextMenu(x, y, item) {

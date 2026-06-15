@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any, Union
 
 # Đường dẫn database
 DB_PATH = 'DB.db'
+MAX_PROJECT_PAGE_LIMIT = 5000
 
 # In-memory cache for load_all
 _data_cache = None
@@ -96,6 +97,7 @@ def init_db_v2():
             nhan_vien_kinh_doanh VARCHAR(100),
             ten_san_pham VARCHAR(200),
             quy_cach TEXT,
+            khach_hang_yeu_cau_ky_thuat TEXT,
             nguoi_lien_he_kh VARCHAR(100),
             so_luong INTEGER,
             ma_po VARCHAR(50),
@@ -161,6 +163,7 @@ def migrate_ngay_to_created_date():
                 nhan_vien_kinh_doanh VARCHAR(100),
                 ten_san_pham VARCHAR(200),
                 quy_cach TEXT,
+                khach_hang_yeu_cau_ky_thuat TEXT,
                 nguoi_lien_he_kh VARCHAR(100),
                 so_luong INTEGER,
                 ma_po VARCHAR(50),
@@ -443,6 +446,11 @@ def migrate_to_v2():
         cursor.execute('ALTER TABLE projects ADD COLUMN urgency_level VARCHAR(20)')
     except sqlite3.OperationalError:
         pass
+
+    try:
+        cursor.execute('ALTER TABLE projects ADD COLUMN khach_hang_yeu_cau_ky_thuat TEXT')
+    except sqlite3.OperationalError:
+        pass
     
     try:
         cursor.execute('ALTER TABLE projects ADD COLUMN desired_solution_time TEXT')
@@ -455,6 +463,17 @@ def migrate_to_v2():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_permissions_user_id ON user_permissions(user_id)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_projects_pending ON projects(is_pending)')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS parent_code_cache (
+            engineer_fig_no TEXT PRIMARY KEY,
+            parent_code TEXT NOT NULL,
+            source TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_parent_code_cache_parent ON parent_code_cache(parent_code)')
     
     conn.commit()
     conn.close()
@@ -476,6 +495,90 @@ def get_connection():
     return conn
 
 
+def normalize_parent_lookup_code(code: str) -> str:
+    """Chuẩn hóa mã bản vẽ trước khi tra cache mã mẹ."""
+    return str(code or '').upper().strip()
+
+
+def get_parent_code_cache(code: str) -> Optional[str]:
+    """Lấy mã mẹ đã cache trong database."""
+    lookup_code = normalize_parent_lookup_code(code)
+    if not lookup_code:
+        return None
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT parent_code FROM parent_code_cache WHERE engineer_fig_no = ?',
+            (lookup_code,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return row['parent_code'] if row else None
+    except Exception as e:
+        print(f"[DB] Error reading parent_code_cache: {e}")
+        return None
+
+
+def get_parent_code_cache_many(codes: List[str]) -> Dict[str, str]:
+    """Lấy nhiều mã mẹ đã cache, trả về mapping theo input code gốc."""
+    normalized_to_original = {}
+    for code in codes:
+        lookup_code = normalize_parent_lookup_code(code)
+        if lookup_code:
+            normalized_to_original[lookup_code] = code
+
+    if not normalized_to_original:
+        return {}
+
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        placeholders = ', '.join(['?' for _ in normalized_to_original])
+        cursor.execute(
+            f'SELECT engineer_fig_no, parent_code FROM parent_code_cache WHERE engineer_fig_no IN ({placeholders})',
+            list(normalized_to_original.keys())
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return {
+            normalized_to_original[row['engineer_fig_no']]: row['parent_code']
+            for row in rows
+        }
+    except Exception as e:
+        print(f"[DB] Error reading parent_code_cache batch: {e}")
+        return {}
+
+
+def save_parent_code_cache(code: str, parent_code: str, source: str = 'excel') -> bool:
+    """Lưu mã mẹ đã tìm thấy để lần sau không cần quét Excel nữa."""
+    lookup_code = normalize_parent_lookup_code(code)
+    clean_parent = str(parent_code or '').strip()
+    if not lookup_code or not clean_parent:
+        return False
+
+    try:
+        now = datetime.now().isoformat()
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO parent_code_cache
+                (engineer_fig_no, parent_code, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(engineer_fig_no) DO UPDATE SET
+                parent_code = excluded.parent_code,
+                source = excluded.source,
+                updated_at = excluded.updated_at
+        ''', (lookup_code, clean_parent, source, now, now))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Error saving parent_code_cache: {e}")
+        return False
+
+
 # Mapping từ JSON keys sang database columns
 JSON_TO_COLUMN_MAP = {
     "Tracking ID": "tracking_id",
@@ -485,6 +588,8 @@ JSON_TO_COLUMN_MAP = {
     "Nhân viên KD": "nhan_vien_kinh_doanh",  # Thêm mapping cho frontend
     "Tên sản phẩm": "ten_san_pham",
     "Quy cách": "quy_cach",
+    "客户技术要求": "khach_hang_yeu_cau_ky_thuat",
+    "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
     "Người liên hệ\n(KH)": "nguoi_lien_he_kh",
     "Người liên hệ (KH)": "nguoi_lien_he_kh",
     "Số lượng": "so_luong",
@@ -503,7 +608,7 @@ JSON_TO_COLUMN_MAP = {
 # Database columns cho projects (normalized)
 PROJECT_COLUMNS = [
     "tracking_id", "Created_Date", "khach_hang", "nhan_vien_kinh_doanh",
-    "ten_san_pham", "quy_cach", "nguoi_lien_he_kh", "so_luong",
+    "ten_san_pham", "quy_cach", "khach_hang_yeu_cau_ky_thuat", "nguoi_lien_he_kh", "so_luong",
     "ma_po", "ma_ban_ve", "ma_ban_ve_ky_thuat", "ma_me",
     "loai_san_pham", "nhan_vien_thiet_ke", "tinh_trang_hoan_thanh",
     "urgency_level",
@@ -599,6 +704,7 @@ def migrate_json_to_columns():
                 nhan_vien_kinh_doanh VARCHAR(100),
                 ten_san_pham VARCHAR(200),
                 quy_cach TEXT,
+                khach_hang_yeu_cau_ky_thuat TEXT,
                 nguoi_lien_he_kh VARCHAR(100),
                 so_luong INTEGER,
                 ma_po VARCHAR(50),
@@ -738,6 +844,8 @@ def load_all():
                     "Nhân viên kinh doanh": sales_name_value,
                     "Tên sản phẩm": record.get("ten_san_pham"),
                     "Quy cách": record.get("quy_cach"),
+                    "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                    "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                     "Số lượng": record.get("so_luong"),
@@ -844,6 +952,7 @@ def save_all(data):
                 nhan_vien_kd,  # Sử dụng biến đã xử lý
                 record.get('Tên sản phẩm'),
                 record.get('Quy cách'),
+                record.get('客户技术要求') or record.get('Yêu cầu kỹ thuật KH'),
                 nguoi_lien_he,
                 record.get('Số lượng'),
                 record.get('Mã PO'),
@@ -853,6 +962,7 @@ def save_all(data):
                 record.get('Loại sản phẩm'),
                 record.get('Nhân viên thiết kế'),
                 record.get('Tình trạng hoàn thành dự án'),
+                record.get('Tính cấp bách') or record.get('Mức độ khẩn cấp') or record.get('Độ khẩn'),
                 record.get('Thời gian mong muốn có bản vẽ'),
                 record.get('Thời gian hoàn thành kế hoạch'),
                 None, None, 'no', None, None, None
@@ -932,6 +1042,7 @@ def add_record(record):
             nhan_vien_kd,                                         # nhan_vien_kinh_doanh
             record.get('Tên sản phẩm'),                            # ten_san_pham
             record.get('Quy cách'),                                # quy_cách
+            record.get('客户技术要求') or record.get('Yêu cầu kỹ thuật KH'),  # khach_hang_yeu_cau_ky_thuat
             nguoi_lien_he,                                        # nguoi_lien_he_kh
             record.get('Số lượng'),                                # so_luong
             record.get('Mã PO'),                                   # ma_po
@@ -1013,6 +1124,9 @@ def update_record(tracking_id, new_data):
                 'Nhân viên kinh doanh': 'nhan_vien_kinh_doanh',
                 'Tên sản phẩm': 'ten_san_pham',
                 'Quy cách': 'quy_cach',
+                '客户技术要求': 'khach_hang_yeu_cau_ky_thuat',
+                'Yêu cầu kỹ thuật KH': 'khach_hang_yeu_cau_ky_thuat',
+                'khach_hang_yeu_cau_ky_thuat': 'khach_hang_yeu_cau_ky_thuat',
                 'Người liên hệ\n(KH)': 'nguoi_lien_he_kh',
                 'Người liên hệ (KH)': 'nguoi_lien_he_kh',
                 'Số lượng': 'so_luong',
@@ -1129,6 +1243,87 @@ def delete_records(tracking_ids):
         return 0
 
 
+def restore_records(records):
+    """
+    Khôi phục các bản ghi đã xóa, giữ lại tracking_id cũ để undo đúng dòng.
+    Args:
+        records: list[dict]
+    Returns:
+        int: số bản ghi đã khôi phục
+    """
+    if not records:
+        return 0
+
+    def first_value(record, *keys):
+        for key in keys:
+            value = record.get(key)
+            if value is not None:
+                return value
+        return None
+
+    restored = 0
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        placeholders = ', '.join(['?' for _ in PROJECT_COLUMNS])
+        insert_cols = ', '.join(PROJECT_COLUMNS)
+
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+
+            tracking_id = first_value(record, 'tracking_id', 'Tracking ID')
+            if tracking_id in (None, ''):
+                continue
+
+            values = [
+                tracking_id,
+                first_value(record, 'Created_Date', 'Ngày', 'ngay'),
+                first_value(record, 'khach_hang', 'Khách hàng', 'khachhang'),
+                first_value(record, 'nhan_vien_kinh_doanh', 'Nhân viên KD', 'Nhân viên kinh doanh', 'nhanvienkd'),
+                first_value(record, 'ten_san_pham', 'Tên sản phẩm', 'tensanpham'),
+                first_value(record, 'quy_cach', 'Quy cách', 'quycach'),
+                first_value(record, 'khach_hang_yeu_cau_ky_thuat', '客户技术要求', 'Yêu cầu kỹ thuật KH', 'yeucaukythuat'),
+                first_value(record, 'nguoi_lien_he_kh', 'Người liên hệ (KH)', 'Người liên hệ\n(KH)', 'lienhe'),
+                first_value(record, 'so_luong', 'Số lượng', 'soluong'),
+                first_value(record, 'ma_po', 'Mã PO', 'mapo'),
+                first_value(record, 'ma_ban_ve', 'Mã bản vẽ', 'Mã bản vẽ phương án', 'Mã bản vẽ phương án (mã trước khi đặt hàng)', 'mabave'),
+                first_value(record, 'ma_ban_ve_ky_thuat', 'Mã bản vẽ kỹ thuật', 'Mã bản vẽ kỹ thuật (sau khi đặt hàng)', 'mabavkythuat'),
+                first_value(record, 'ma_me', 'Mã mẹ', 'Mã mẹ ', 'mame'),
+                first_value(record, 'loai_san_pham', 'Loại sản phẩm', 'loaisanpham'),
+                first_value(record, 'nhan_vien_thiet_ke', 'Nhân viên thiết kế', 'Kỹ sư thiết kế', 'nhanvienthietke'),
+                first_value(record, 'tinh_trang_hoan_thanh', 'Tình trạng hoàn thành dự án', 'Tình trạng', 'tinhtrang'),
+                first_value(record, 'urgency_level', 'Tính cấp bách', 'Mức độ khẩn cấp', 'Độ khẩn', 'dokhan'),
+                first_value(record, 'thoi_gian_mong_muon_ban_ve', 'Thời gian mong muốn có bản vẽ', 'TG mong muốn', 'tg_mongmuon'),
+                first_value(record, 'thoi_gian_hoan_thanh_ke_hoach', 'Thời gian hoàn thành kế hoạch', 'TG hoàn thành', 'tg_hoanthanh'),
+                first_value(record, 'sales_name'),
+                first_value(record, 'user_id', 'sales_id'),
+                first_value(record, 'is_pending', 'Trạng thái chờ', 'trangthai'),
+                first_value(record, 'accepted_by', 'Người nhận', 'nguoinhan'),
+                first_value(record, 'accepted_at', 'Thời gian nhận', 'tg_tiepnhan'),
+                first_value(record, 'desired_solution_time')
+            ]
+
+            cursor.execute(
+                f"INSERT OR REPLACE INTO projects ({insert_cols}) VALUES ({placeholders})",
+                values
+            )
+            _upsert_customer_name(cursor, _extract_customer_name(record))
+            restored += 1
+
+        conn.commit()
+        conn.close()
+        invalidate_cache()
+        print(f"[DB] Restored {restored} records")
+        return restored
+
+    except Exception as e:
+        print(f"[DB] Error restoring records: {e}")
+        import traceback
+        traceback.print_exc()
+        return restored
+
+
 def reindex_tracking_id():
     """
     Đánh lại Tracking ID cho tất cả bản ghi (bắt đầu từ 1)
@@ -1164,6 +1359,7 @@ def reindex_tracking_id():
                 record.get('Nhân viên kinh doanh'),
                 record.get('Tên sản phẩm'),
                 record.get('Quy cách'),
+                record.get('客户技术要求') or record.get('Yêu cầu kỹ thuật KH'),
                 nguoi_lien_he,
                 record.get('Số lượng'),
                 record.get('Mã PO'),
@@ -1173,6 +1369,7 @@ def reindex_tracking_id():
                 record.get('Loại sản phẩm'),
                 record.get('Nhân viên thiết kế'),
                 record.get('Tình trạng hoàn thành dự án'),
+                record.get('Tính cấp bách') or record.get('Mức độ khẩn cấp') or record.get('Độ khẩn'),
                 record.get('Thời gian mong muốn có bản vẽ'),
                 record.get('Thời gian hoàn thành kế hoạch'),
                 None, None, 'no', None, None, None
@@ -1286,13 +1483,13 @@ def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_o
             return get_paged_data(filtered, page, limit, sort_by, sort_order)
         
         # Validate limit
-        limit = min(limit, 500)
+        limit = min(limit, MAX_PROJECT_PAGE_LIMIT)
         offset = (page - 1) * limit
         
         # Build search query with SQL LIKE
         # Tìm kiếm trên nhiều cột quan trọng
         search_columns = [
-            "khach_hang", "ten_san_pham", "quy_cach", "ma_po", 
+            "khach_hang", "ten_san_pham", "quy_cach", "khach_hang_yeu_cau_ky_thuat", "ma_po", 
             "ma_ban_ve", "ma_ban_ve_ky_thuat", "ma_me",
             "nhan_vien_kinh_doanh", "nhan_vien_thiet_ke",
             "loai_san_pham", "tinh_trang_hoan_thanh"
@@ -1328,6 +1525,8 @@ def search_data_sql(search_text, page=1, limit=50, sort_by="Tracking ID", sort_o
             "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
             "Tên sản phẩm": "ten_san_pham",
             "Quy cách": "quy_cach",
+            "客户技术要求": "khach_hang_yeu_cau_ky_thuat",
+            "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
             "Số lượng": "so_luong",
             "Mã PO": "ma_po",
             "Mã bản vẽ": "ma_ban_ve",
@@ -1407,7 +1606,7 @@ def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sor
             return get_paged_data(filtered, page, limit, sort_by, sort_order)
         
         # Validate limit
-        limit = min(limit, 500)
+        limit = min(limit, MAX_PROJECT_PAGE_LIMIT)
         offset = (page - 1) * limit
         
         # Build WHERE clauses from filters
@@ -1416,6 +1615,9 @@ def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sor
             "Khách hàng": "khach_hang",
             "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
             "Tên sản phẩm": "ten_san_pham",
+            "Quy cách": "quy_cach",
+            "客户技术要求": "khach_hang_yeu_cau_ky_thuat",
+            "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
             "Loại sản phẩm": "loai_san_pham",
             "Mã PO": "ma_po",
             "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
@@ -1457,6 +1659,8 @@ def filter_data_sql(column_filters, page=1, limit=50, sort_by="Tracking ID", sor
             "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
             "Tên sản phẩm": "ten_san_pham",
             "Quy cách": "quy_cach",
+            "客户技术要求": "khach_hang_yeu_cau_ky_thuat",
+            "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
             "Số lượng": "so_luong",
             "Mã PO": "ma_po",
             "Mã bản vẽ": "ma_ban_ve",
@@ -1564,6 +1768,8 @@ def _convert_rows_to_format(rows):
             "Nhân viên kinh doanh": sales_name_value,  # Giữ lại để tương thích
             "Tên sản phẩm": record.get("ten_san_pham"),
             "Quy cách": record.get("quy_cach"),
+            "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+            "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
             "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
             "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
             "Số lượng": record.get("so_luong"),
@@ -1578,7 +1784,11 @@ def _convert_rows_to_format(rows):
             "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
             "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
             "is_pending": record.get("is_pending"),
-            "accepted_by": record.get("accepted_by")
+            "Trạng thái chờ": record.get("is_pending"),
+            "accepted_by": record.get("accepted_by"),
+            "Người nhận": record.get("accepted_by"),
+            "accepted_at": record.get("accepted_at"),
+            "Thời gian nhận": record.get("accepted_at")
         }
         data.append(old_format)
     
@@ -1657,6 +1867,8 @@ def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="asc"
             "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
             "Tên sản phẩm": "ten_san_pham",
             "Quy cách": "quy_cach",
+            "客户技术要求": "khach_hang_yeu_cau_ky_thuat",
+            "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
             "Số lượng": "so_luong",
             "Mã PO": "ma_po",
             "Mã bản vẽ": "ma_ban_ve",
@@ -1667,7 +1879,7 @@ def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="asc"
         db_sort_column = sort_column_map.get(sort_by, "tracking_id")
         
         # Validate limit to prevent excessive memory usage
-        limit = min(limit, 500)  # Max 500 records per page
+        limit = min(limit, MAX_PROJECT_PAGE_LIMIT)
         
         # Calculate offset
         offset = (page - 1) * limit
@@ -1823,6 +2035,8 @@ def get_record_by_tracking_id(tracking_id):
                     "Nhân viên kinh doanh": sales_name_value,
                     "Tên sản phẩm": record.get("ten_san_pham"),
                     "Quy cách": record.get("quy_cach"),
+                    "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                    "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                     "Số lượng": record.get("so_luong"),
@@ -2684,6 +2898,8 @@ def get_pending_notices(user_id: Union[int, None] = None) -> List[Dict[str, Any]
                     "Nhân viên kinh doanh": sales_name_value,
                     "Tên sản phẩm": record.get("ten_san_pham"),
                     "Quy cách": record.get("quy_cach"),
+                    "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                    "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                     "Số lượng": record.get("so_luong"),
@@ -2776,16 +2992,24 @@ def accept_job(tracking_id: int, engineer_name: str) -> bool:
         conn = get_connection()
         cursor = conn.cursor()
         
+        accepted_at = datetime.now().strftime('%Y-%m-%d %H:%M')
+        default_completion_status = '待出图 - Đang vẽ'
+
         # Update project - chuyển từ 'yes' (pending) sang 'no' (accepted)
         cursor.execute('''
             UPDATE projects 
-            SET is_pending = 'no', accepted_by = ?, accepted_at = ?
+            SET is_pending = 'no',
+                accepted_by = ?,
+                accepted_at = ?,
+                tinh_trang_hoan_thanh = ?
             WHERE tracking_id = ? AND is_pending = 'yes'
-        ''', (engineer_name, datetime.now().isoformat(), tracking_id))
+        ''', (engineer_name, accepted_at, default_completion_status, tracking_id))
         
         conn.commit()
         success = cursor.rowcount > 0
         conn.close()
+        if success:
+            invalidate_cache()
         
         print(f"[DB] Accept job tracking_id={tracking_id} by {engineer_name}, success={success}")
         return success
@@ -2828,6 +3052,7 @@ def add_sales_record(record_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             record_data.get('Nhân viên kinh doanh'),
             record_data.get('Tên sản phẩm'),
             record_data.get('Quy cách'),
+            record_data.get('客户技术要求') or record_data.get('Yêu cầu kỹ thuật KH'),
             record_data.get('Người liên hệ\n(KH)') or record_data.get('Người liên hệ (KH)'),
             record_data.get('Số lượng'),
             record_data.get('Mã PO'),
@@ -2910,6 +3135,8 @@ def get_projects_by_user(user_id: int) -> List[Dict[str, Any]]:
                 "Nhân viên kinh doanh": sales_name_value,
                 "Tên sản phẩm": record.get("ten_san_pham"),
                 "Quy cách": record.get("quy_cach"),
+                "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                 "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                 "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                 "Số lượng": record.get("so_luong"),
@@ -2985,6 +3212,8 @@ def get_accepted_projects_by_engineer(engineer_name: str) -> List[Dict[str, Any]
                 "Nhân viên kinh doanh": sales_name_value,
                 "Tên sản phẩm": record.get("ten_san_pham"),
                 "Quy cách": record.get("quy_cach"),
+                "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                 "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                 "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                 "Số lượng": record.get("so_luong"),
@@ -3067,6 +3296,8 @@ def get_all_notices_for_engineer(engineer_name: str) -> List[Dict[str, Any]]:
                     "Nhân viên kinh doanh": sales_name_value,
                     "Tên sản phẩm": record.get("ten_san_pham"),
                     "Quy cách": record.get("quy_cach"),
+                    "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
+                    "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
                     "Số lượng": record.get("so_luong"),

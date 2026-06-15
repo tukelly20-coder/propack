@@ -9,6 +9,7 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 import time
 import pyperclip
+import sqlite3
 
 # Lấy thư mục của ứng dụng (hỗ trợ cả PyInstaller và Python thường)
 if getattr(sys, 'frozen', False):
@@ -46,6 +47,18 @@ FALLBACK_BASE_PATH = r"\\192.168.2.165\越南vp共享文件夹\09-工程图纸 B
 
 # Đường dẫn file Excel chứa mapping cEngineerFigNo -> cInvCode
 EXCEL_PATH = r"\\192.168.2.165\越南vp共享文件夹\09-工程图纸 Bản vẽ Kỹ Thuật Công Trình\存货档案库.xlsx"
+FALLBACK_EXCEL_URL = os.getenv(
+    'MATERIAL_EXCEL_FALLBACK_URL',
+    'https://gofile.me/7R631/ZDEPKMcgh'
+)
+FALLBACK_EXCEL_PATH = os.getenv(
+    'MATERIAL_EXCEL_FALLBACK_PATH',
+    os.path.abspath(os.path.join(app_dir, '..', '..', 'misc', 'fallback_excel', '存货档案库_fallback.xlsx'))
+)
+PARENT_CODE_CACHE_DB = os.getenv(
+    'PARENT_CODE_CACHE_DB',
+    os.path.abspath(os.path.join(app_dir, '..', '..', 'DB.db'))
+)
 
 
 def shorten_path_display(path: str, max_len: int = 500) -> str:
@@ -255,33 +268,140 @@ def normalize_unc_path(path: str) -> str:
 
 
 CACHED_EXCEL_DATA = None
+EXCEL_LOAD_SOURCE = None
+
+def format_parent_code_value(value):
+    """Chuẩn hóa mã mẹ đọc từ Excel."""
+    if value is None or pd.isna(value):
+        return None
+
+    text = str(value).strip()
+    if not text or text.lower() == 'nan':
+        return None
+
+    try:
+        if '.' in text:
+            return str(int(float(text)))
+    except Exception:
+        pass
+
+    return text
+
+def save_parent_code_cache(engineer_fig_no: str, parent_code: str, source: str = 'tool-open') -> bool:
+    """Lưu mapping mã bản vẽ -> mã mẹ vào SQLite cache nếu DB khả dụng."""
+    lookup_code = str(engineer_fig_no or '').upper().strip()
+    clean_parent = str(parent_code or '').strip()
+    if not lookup_code or not clean_parent:
+        return False
+
+    try:
+        now = datetime.now().isoformat()
+        conn = sqlite3.connect(PARENT_CODE_CACHE_DB)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS parent_code_cache (
+                engineer_fig_no TEXT PRIMARY KEY,
+                parent_code TEXT NOT NULL,
+                source TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        cursor.execute('''
+            INSERT INTO parent_code_cache
+                (engineer_fig_no, parent_code, source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(engineer_fig_no) DO UPDATE SET
+                parent_code = excluded.parent_code,
+                source = excluded.source,
+                updated_at = excluded.updated_at
+        ''', (lookup_code, clean_parent, source, now, now))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.warning(f"[DB] Cannot save parent_code_cache: {e}")
+        return False
+
+def download_fallback_excel():
+    """Tải Excel fallback từ URL nếu chưa có cache cục bộ."""
+    if not FALLBACK_EXCEL_URL:
+        return None
+
+    try:
+        os.makedirs(os.path.dirname(FALLBACK_EXCEL_PATH), exist_ok=True)
+        logger.info(f"[Excel] Downloading fallback Excel: {FALLBACK_EXCEL_URL}")
+        content = None
+        content_type = ''
+        for attempt in range(1, 4):
+            response = requests.get(FALLBACK_EXCEL_URL, allow_redirects=True, timeout=60)
+            response.raise_for_status()
+            content = response.content
+            content_type = response.headers.get('content-type')
+            if content.startswith(b'PK'):
+                break
+            logger.warning(f"[Excel] Fallback URL returned non-xlsx content on attempt {attempt}: {content_type}")
+            if attempt < 3:
+                time.sleep(5)
+
+        if not content or not content.startswith(b'PK'):
+            logger.warning(f"[Excel] Fallback URL did not return an .xlsx file: {content_type}")
+            return None
+
+        tmp_path = FALLBACK_EXCEL_PATH + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            f.write(content)
+        os.replace(tmp_path, FALLBACK_EXCEL_PATH)
+        return FALLBACK_EXCEL_PATH
+    except Exception as e:
+        logger.warning(f"[Excel] Cannot download fallback Excel: {e}")
+        return None
+
+def get_excel_candidates(excel_path: str):
+    """Nguồn Excel ưu tiên: nội bộ trước, fallback local/web sau."""
+    candidates = [('internal', excel_path)]
+    if os.path.exists(FALLBACK_EXCEL_PATH):
+        candidates.append(('fallback-cache', FALLBACK_EXCEL_PATH))
+    else:
+        downloaded_path = download_fallback_excel()
+        if downloaded_path:
+            candidates.append(('fallback-web', downloaded_path))
+    return candidates
 
 def get_excel_data(excel_path: str):
     """Đọc dữ liệu Excel vào memory (chỉ tải 1 lần)."""
-    global CACHED_EXCEL_DATA
+    global CACHED_EXCEL_DATA, EXCEL_LOAD_SOURCE
     logger.debug(f"[Excel] get_excel_data called with path: {excel_path}, CACHED_EXCEL_DATA is {'None' if CACHED_EXCEL_DATA is None else f'{len(CACHED_EXCEL_DATA)} sheets'}")
     if CACHED_EXCEL_DATA is not None:
         logger.debug(f"[Excel] Returning cached data with {len(CACHED_EXCEL_DATA)} sheets")
         return CACHED_EXCEL_DATA
         
     safe_print(f"   [INFO] Đang tải dữ liệu Excel vào bộ nhớ 1 lần duy nhất, vui lòng đợi...")
-    logger.info(f"Loading Excel into memory: {excel_path}")
-    
-    try:
-        xls = pd.ExcelFile(excel_path)
-        data = []
-        for sheet_name in xls.sheet_names:
-            df = pd.read_excel(excel_path, sheet_name=sheet_name)
-            if 'cEngineerFigNo' in df.columns and 'cInvCode' in df.columns:
-                data.append((sheet_name, df))
-        safe_print(f"   [OK] Đã tải xong dữ liệu Excel!")
-        CACHED_EXCEL_DATA = data
-        logger.info(f"[Excel] Cached {len(data)} sheets")
-        return CACHED_EXCEL_DATA
-    except Exception as e:
-        safe_print(f"   [ERROR] Lỗi khi tải dữ liệu Excel: {e}")
-        logger.error(f"Failed to load Excel data: {e}")
-        return None
+
+    for source, candidate_path in get_excel_candidates(excel_path):
+        try:
+            if source == 'internal' and not os.path.exists(candidate_path):
+                logger.warning(f"Excel file not found: {candidate_path}")
+                continue
+
+            logger.info(f"Loading Excel into memory ({source}): {candidate_path}")
+            xls = pd.ExcelFile(candidate_path)
+            data = []
+            for sheet_name in xls.sheet_names:
+                df = pd.read_excel(candidate_path, sheet_name=sheet_name)
+                if 'cEngineerFigNo' in df.columns and 'cInvCode' in df.columns:
+                    data.append((sheet_name, df))
+            if data:
+                safe_print(f"   [OK] Đã tải xong dữ liệu Excel! ({source})")
+                CACHED_EXCEL_DATA = data
+                EXCEL_LOAD_SOURCE = source
+                logger.info(f"[Excel] Cached {len(data)} sheets from {source}")
+                return CACHED_EXCEL_DATA
+        except Exception as e:
+            safe_print(f"   [ERROR] Lỗi khi tải dữ liệu Excel ({source}): {e}")
+            logger.error(f"Failed to load Excel data ({source}): {e}")
+
+    return None
 
 def find_cinvcode_from_excel(engineer_fig_no: str, return_all: bool = False) -> str | list | None:
     """Tìm cInvCode tương ứng với cEngineerFigNo trong file Excel.
@@ -300,12 +420,6 @@ def find_cinvcode_from_excel(engineer_fig_no: str, return_all: bool = False) -> 
     try:
         logger.debug(f"[Excel] Looking for cEngineerFigNo: {engineer_fig_no}")
         
-        if not os.path.exists(excel_path):
-            safe_print(f"   [ERROR] File not found or not accessible")
-            safe_print(f"   [TIP] Please check network connection and access rights")
-            logger.warning(f"Excel file not found: {excel_path}")
-            return None
-            
         excel_data = get_excel_data(excel_path)
         if not excel_data:
             return None
@@ -337,8 +451,12 @@ def find_cinvcode_from_excel(engineer_fig_no: str, return_all: bool = False) -> 
                     matches_list = matches.to_dict('records')
                     
                     # Lọc bỏ các giá trị NaN
-                    matches_list = [{'cEngineerFigNo': str(m['cEngineerFigNo']), 'cInvCode': str(int(m['cInvCode']))} 
-                                    for m in matches_list if pd.notna(m['cInvCode'])]
+                    matches_list = [
+                        {'cEngineerFigNo': str(m['cEngineerFigNo']).upper().strip(), 'cInvCode': format_parent_code_value(m['cInvCode'])}
+                        for m in matches_list if format_parent_code_value(m['cInvCode'])
+                    ]
+                    for match in matches_list:
+                        save_parent_code_cache(match['cEngineerFigNo'], match['cInvCode'], EXCEL_LOAD_SOURCE or 'tool-open')
                     
                     if return_all:
                         # Trả về tất cả các kết quả

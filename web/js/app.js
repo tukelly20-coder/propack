@@ -150,8 +150,8 @@ async function switchTab(tab) {
  * @param {string} activeTab - Tab đang active
  */
 function updateNavLinks(activeTab) {
-    // Update navbar links
-    document.querySelectorAll('.navbar .nav-link').forEach(link => {
+    // Update compact menu links
+    document.querySelectorAll('.app-shell-menu .nav-link').forEach(link => {
         const linkTab = link.dataset.tab;
         if (linkTab === activeTab) {
             link.classList.add('active');
@@ -291,7 +291,8 @@ function loadScript(src) {
          const script = document.createElement('script');
          script.id = src.replace('.js', '').split('/').pop() + '-script';
          const assetVersion = window.APP_ASSET_VERSION || '';
-         script.src = assetVersion ? `${src}?v=${encodeURIComponent(assetVersion)}` : src;
+         const versionSeparator = src.includes('?') ? '&' : '?';
+         script.src = assetVersion ? `${src}${versionSeparator}v=${encodeURIComponent(assetVersion)}` : src;
          script.onload = resolve;
          script.onerror = reject;
          document.head.appendChild(script);
@@ -372,6 +373,7 @@ async function checkAuthStatus() {
             AppState.isAuthenticated = true;
             AppState.currentUser = result.user;
             showUserSection(result.user);
+            refreshNoticeBadgeCount();
         } else {
             // Show login modal if not authenticated
             showLoginModal();
@@ -417,6 +419,7 @@ async function handleLogin(e) {
             showUserSection(result.user);
             
             showToast(t('toast_success'), t('toast_login_success'), 'success');
+            refreshNoticeBadgeCount();
             
             // Load initial module
             loadModule(AppState.currentTab);
@@ -467,7 +470,7 @@ function showLoginError(message) {
  * @param {object} user - Thông tin user
  */
 function showUserSection(user) {
-    $('#user-section').show();
+    $('#user-section').css('display', 'flex');
     $('#user-name').text(user.full_name || user.username);
     $('#auth-overlay').hide();
     $('#main-content').show();
@@ -542,12 +545,18 @@ async function handleLogout() {
  * Setup navigation event listeners
  */
 function setupNavigation() {
-    // Navbar links
-    document.querySelectorAll('.navbar .nav-link[data-tab]').forEach(link => {
+    // Compact menu links
+    document.querySelectorAll('.app-shell-menu .nav-link[data-tab]').forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
             const tab = this.dataset.tab;
             window.location.hash = tab;
+
+            const menuToggle = document.getElementById('app-menu-toggle');
+            if (menuToggle) {
+                const menu = bootstrap.Dropdown.getInstance(menuToggle);
+                if (menu) menu.hide();
+            }
         });
     });
     
@@ -561,8 +570,8 @@ function setupNavigation() {
             AppState.currentTab = tabName;
             window.location.hash = tabName;
             
-            // Update navbar active state
-            document.querySelectorAll('.navbar .nav-link').forEach(link => {
+            // Update compact menu active state
+            document.querySelectorAll('.app-shell-menu .nav-link').forEach(link => {
                 link.classList.remove('active');
                 if (link.dataset.tab === tabName) {
                     link.classList.add('active');
@@ -664,10 +673,25 @@ function updateNoticeBadge(count) {
     }
 }
 
+async function refreshNoticeBadgeCount() {
+    try {
+        if (!AppState.isAuthenticated) {
+            updateNoticeBadge(0);
+            return;
+        }
+        const result = await getPendingCount();
+        const count = typeof result?.count === 'number' ? result.count : 0;
+        updateNoticeBadge(count);
+    } catch (error) {
+        console.warn('[App] Cannot refresh notice badge:', error);
+    }
+}
+
 // ============================================
 // EXPORT TO GLOBAL
 // ============================================
 
 window.switchTab = switchTab;
 window.updateNoticeBadge = updateNoticeBadge;
+window.refreshNoticeBadgeCount = refreshNoticeBadgeCount;
 window.AppState = AppState;
