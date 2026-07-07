@@ -350,6 +350,20 @@ class APIClient {
     }
 
     /**
+     * Lấy tùy chỉnh giao diện theo user hiện tại.
+     */
+    async getUserPreference(key) {
+        return this.request('GET', `/user-preferences/${encodeURIComponent(key)}`);
+    }
+
+    /**
+     * Lưu tùy chỉnh giao diện theo user hiện tại.
+     */
+    async setUserPreference(key, value) {
+        return this.request('PUT', `/user-preferences/${encodeURIComponent(key)}`, { value });
+    }
+
+    /**
      * Mở stream realtime cho projects (SSE)
      */
     createProjectStream(params = {}) {

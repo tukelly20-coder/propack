@@ -161,7 +161,7 @@ from src.db_helper import (
     ensure_realtime_schema, lock_project_cell, unlock_project_cell,
     get_active_project_locks, update_project_with_version, get_project_change_logs, get_project_change_log,
     revert_project_change_log, get_project_comments, add_project_comment, delete_project_comment,
-    normalize_project_field_name
+    normalize_project_field_name, get_user_preference, set_user_preference
 )
 
 # Import Tool Open core
@@ -819,17 +819,7 @@ def can_user_update_project(user, payload):
 
 
 def can_user_create_project(user):
-    if user is None:
-        return True, None
-    role = normalize_project_role(user.get('role'))
-    username = str(user.get('username', '')).strip().lower()
-    if role in {'admin', 'planner', 'sales'} or username == 'administrator':
-        return True, None
-    if role == 'production':
-        return False, "Production không có quyền tạo dự án."
-    if role == 'viewer':
-        return False, "Viewer chỉ có quyền xem dữ liệu."
-    return False, "Bạn không có quyền tạo dự án."
+    return True, None
 
 
 def can_user_delete_project(user, fallback_role=''):
@@ -953,9 +943,12 @@ def get_project_online_users():
         users = {}
         for client in project_subscribers.values():
             key = str(client.get('user_id') or client.get('username') or '').strip() or 'anonymous'
+            user_name = client.get('user_name') or client.get('full_name') or client.get('username') or key
             users[key] = {
                 "user_id": client.get('user_id') or key,
                 "username": client.get('username') or key,
+                "user_name": user_name,
+                "full_name": user_name,
                 "connected_at": client.get('connected_at')
             }
         return list(users.values())
@@ -1330,6 +1323,7 @@ def socket_api():
             engineer_name = req_data.get('engineer_name')
             success = accept_job(tracking_id, engineer_name)
             if success:
+                updated_record = get_record_by_id(tracking_id)
                 publish_notice_event(
                     event_type='job_accepted',
                     message=f"Job #{tracking_id} đã được {engineer_name} nhận",
@@ -1337,34 +1331,35 @@ def socket_api():
                     tracking_id=tracking_id,
                     extra={"accepted_by": engineer_name}
                 )
-            response_data = {"success": success}
+                publish_project_event(
+                    'project_updated',
+                    message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                    tracking_id=tracking_id,
+                    record=updated_record,
+                    extra={"accepted_by": engineer_name}
+                )
+            response_data = {"success": success, "record": get_record_by_id(tracking_id) if success else None}
             
         elif request_type == "ADD_SALES_RECORD":
-            user_role = req_data.get('user_role')
-            user_permissions = req_data.get('user_permissions', [])
-            
-            has_permission = False
-            if user_role in ['admin', 'IT']:
-                has_permission = True
-            elif user_role == 'sales' and 'create_sales_record' in user_permissions:
-                has_permission = True
-            
-            if not has_permission:
-                response_data = {"success": False, "error": "Bạn không có quyền tạo tracking mới"}
+            record_data = req_data.get('record', {})
+            new_record = add_sales_record(record_data)
+            if new_record:
+                publish_notice_event(
+                    event_type='new_project_pending',
+                    message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
+                    target_roles=['engineer', 'eng', 'admin'],
+                    record=new_record,
+                    tracking_id=new_record.get('Tracking ID')
+                )
+                publish_project_event(
+                    'project_created',
+                    message=f"Dự án #{new_record.get('Tracking ID')} mới được tạo",
+                    tracking_id=new_record.get('Tracking ID'),
+                    record=new_record
+                )
+                response_data = {"success": True, "record": new_record}
             else:
-                record_data = req_data.get('record', {})
-                new_record = add_sales_record(record_data)
-                if new_record:
-                    publish_notice_event(
-                        event_type='new_project_pending',
-                        message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
-                        target_roles=['engineer', 'eng', 'admin'],
-                        record=new_record,
-                        tracking_id=new_record.get('Tracking ID')
-                    )
-                    response_data = {"success": True, "record": new_record}
-                else:
-                    response_data = {"success": False, "error": "Failed to add record"}
+                response_data = {"success": False, "error": "Failed to add record"}
                     
         elif request_type == "GET_SALES_PROJECTS":
             user_id = req_data.get('user_id')
@@ -1887,6 +1882,36 @@ def api_me():
     })
 
 
+@app.route('/api/user-preferences/<preference_key>', methods=['GET', 'PUT'])
+def api_user_preference(preference_key):
+    """Đọc/lưu tùy chỉnh giao diện theo user hiện tại."""
+    user, error = get_user_from_bearer_token()
+    if error:
+        return jsonify({"success": False, "error": "Chưa đăng nhập"}), 401
+
+    user_id = user.get('user_id') or user.get('username')
+    if not user_id:
+        return jsonify({"success": False, "error": "Không xác định được user"}), 400
+
+    safe_key = str(preference_key or '').strip()
+    if not safe_key or len(safe_key) > 100:
+        return jsonify({"success": False, "error": "Preference key không hợp lệ"}), 400
+
+    if request.method == 'GET':
+        return jsonify({
+            "success": True,
+            "key": safe_key,
+            "value": get_user_preference(user_id, safe_key)
+        })
+
+    data = request.get_json(silent=True) or {}
+    value = data.get('value')
+    success = set_user_preference(user_id, safe_key, value)
+    if not success:
+        return jsonify({"success": False, "error": "Không lưu được cài đặt"}), 500
+    return jsonify({"success": True, "key": safe_key})
+
+
 @app.route('/api/profile', methods=['PUT'])
 def api_profile_update():
     """Cập nhật thông tin profile của user hiện tại"""
@@ -2060,6 +2085,7 @@ def api_projects_stream():
     """SSE stream cho bảng projects realtime collaboration."""
     username = request.args.get('username', '')
     user_id = request.args.get('user_id', '')
+    user_name = request.args.get('user_name', '') or request.args.get('full_name', '') or username or user_id
 
     client_id = uuid.uuid4().hex
     client_queue = queue.Queue(maxsize=100)
@@ -2069,6 +2095,7 @@ def api_projects_stream():
             "queue": client_queue,
             "username": username,
             "user_id": user_id,
+            "user_name": user_name,
             "connected_at": time.time()
         }
 
@@ -2860,6 +2887,7 @@ def api_notices_accept():
     try:
         success = accept_job(tracking_id, engineer_name)
         if success:
+            updated_record = get_record_by_id(tracking_id)
             publish_notice_event(
                 event_type='job_accepted',
                 message=f"Job #{tracking_id} đã được {engineer_name} nhận",
@@ -2867,9 +2895,17 @@ def api_notices_accept():
                 tracking_id=tracking_id,
                 extra={"accepted_by": engineer_name}
             )
+            publish_project_event(
+                'project_updated',
+                message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                tracking_id=tracking_id,
+                record=updated_record,
+                extra={"accepted_by": engineer_name}
+            )
             return jsonify({
                 "success": True,
-                "message": f"Đã nhận job {tracking_id}"
+                "message": f"Đã nhận job {tracking_id}",
+                "record": updated_record
             })
         else:
             return jsonify({
@@ -4886,6 +4922,7 @@ def handle_tcp_client(client_socket, client_address):
             engineer_name = request.get('engineer_name')
             success = accept_job(tracking_id, engineer_name)
             if success:
+                updated_record = get_record_by_id(tracking_id)
                 publish_notice_event(
                     event_type='job_accepted',
                     message=f"Job #{tracking_id} đã được {engineer_name} nhận",
@@ -4893,34 +4930,35 @@ def handle_tcp_client(client_socket, client_address):
                     tracking_id=tracking_id,
                     extra={"accepted_by": engineer_name}
                 )
-            response_data = {"success": success}
+                publish_project_event(
+                    'project_updated',
+                    message=f"Job #{tracking_id} đã được {engineer_name} nhận",
+                    tracking_id=tracking_id,
+                    record=updated_record,
+                    extra={"accepted_by": engineer_name}
+                )
+            response_data = {"success": success, "record": get_record_by_id(tracking_id) if success else None}
             
         elif request_type == "ADD_SALES_RECORD":
-            user_role = request.get('user_role')
-            user_permissions = request.get('user_permissions', [])
-            
-            has_permission = False
-            if user_role in ['admin', 'IT']:
-                has_permission = True
-            elif user_role == 'sales' and 'create_sales_record' in user_permissions:
-                has_permission = True
-            
-            if not has_permission:
-                response_data = {"success": False, "error": "Bạn không có quyền tạo tracking mới"}
+            record_data = request.get('record', {})
+            new_record = add_sales_record(record_data)
+            if new_record:
+                publish_notice_event(
+                    event_type='new_project_pending',
+                    message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
+                    target_roles=['engineer', 'eng', 'admin'],
+                    record=new_record,
+                    tracking_id=new_record.get('Tracking ID')
+                )
+                publish_project_event(
+                    'project_created',
+                    message=f"Dự án #{new_record.get('Tracking ID')} mới được tạo",
+                    tracking_id=new_record.get('Tracking ID'),
+                    record=new_record
+                )
+                response_data = {"success": True, "record": new_record}
             else:
-                record_data = request.get('record', {})
-                new_record = add_sales_record(record_data)
-                if new_record:
-                    publish_notice_event(
-                        event_type='new_project_pending',
-                        message=f"Dự án #{new_record.get('Tracking ID')} mới đang chờ nhận",
-                        target_roles=['engineer', 'eng', 'admin'],
-                        record=new_record,
-                        tracking_id=new_record.get('Tracking ID')
-                    )
-                    response_data = {"success": True, "record": new_record}
-                else:
-                    response_data = {"success": False, "error": "Failed to add record"}
+                response_data = {"success": False, "error": "Failed to add record"}
                     
         elif request_type == "GET_SALES_PROJECTS":
             user_id = request.get('user_id')

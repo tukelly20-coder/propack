@@ -669,7 +669,7 @@ PROJECT_COLUMN_MAPPING = {
     'desired_solution_time': 'desired_solution_time',
 }
 
-LOCK_TIMEOUT_SECONDS = 30
+LOCK_TIMEOUT_SECONDS = 4
 
 
 def _extract_customer_name(payload: Dict[str, Any]) -> str:
@@ -3190,6 +3190,74 @@ def get_user_with_permissions(username: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def ensure_user_preferences_table() -> bool:
+    """Tạo bảng lưu tùy chỉnh giao diện theo user nếu DB cũ chưa có."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id TEXT NOT NULL,
+                preference_key TEXT NOT NULL,
+                preference_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, preference_key)
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Error ensuring user_preferences table: {e}")
+        return False
+
+
+def get_user_preference(user_id: Union[int, str], preference_key: str) -> Optional[Any]:
+    """Lấy preference JSON đã lưu cho một user."""
+    ensure_user_preferences_table()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT preference_value FROM user_preferences WHERE user_id = ? AND preference_key = ?',
+            (str(user_id), str(preference_key))
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return json.loads(row['preference_value'])
+    except Exception as e:
+        print(f"[DB] Error getting user preference: {e}")
+        return None
+
+
+def set_user_preference(user_id: Union[int, str], preference_key: str, value: Any) -> bool:
+    """Lưu preference JSON cho một user."""
+    ensure_user_preferences_table()
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO user_preferences (user_id, preference_key, preference_value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, preference_key) DO UPDATE SET
+                preference_value = excluded.preference_value,
+                updated_at = excluded.updated_at
+        ''', (
+            str(user_id),
+            str(preference_key),
+            json.dumps(value, ensure_ascii=False),
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"[DB] Error setting user preference: {e}")
+        return False
+
+
 def ensure_default_users():
     """
     Đảm bảo các users mặc định tồn tại trong database.
@@ -3542,6 +3610,7 @@ def accept_job(tracking_id: int, engineer_name: str) -> bool:
         True nếu thành công
     """
     try:
+        ensure_realtime_schema()
         conn = get_connection()
         cursor = conn.cursor()
         
@@ -3554,9 +3623,19 @@ def accept_job(tracking_id: int, engineer_name: str) -> bool:
             SET is_pending = 'no',
                 accepted_by = ?,
                 accepted_at = ?,
-                tinh_trang_hoan_thanh = ?
+                tinh_trang_hoan_thanh = ?,
+                version = COALESCE(version, 1) + 1,
+                updated_by = ?,
+                updated_at = ?
             WHERE tracking_id = ? AND is_pending = 'yes'
-        ''', (engineer_name, accepted_at, default_completion_status, tracking_id))
+        ''', (
+            engineer_name,
+            accepted_at,
+            default_completion_status,
+            engineer_name,
+            datetime.now().isoformat(),
+            tracking_id
+        ))
         
         conn.commit()
         success = cursor.rowcount > 0

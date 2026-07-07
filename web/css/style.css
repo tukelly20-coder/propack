@@ -658,6 +658,9 @@ body.project-column-resizing * {
     background: #f0fff8;
     font-size: 12px;
     font-weight: 600;
+    position: relative;
+    cursor: pointer;
+    outline: none;
 }
 
 .projects-presence-dot {
@@ -665,6 +668,65 @@ body.project-column-resizing * {
     height: 8px;
     border-radius: 50%;
     background: #198754;
+}
+
+.projects-presence-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 2200;
+    display: none;
+    min-width: 180px;
+    max-width: min(280px, calc(100vw - 20px));
+    padding: 8px;
+    border: 1px solid #cfd9e5;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+    color: #172033;
+    font-weight: 500;
+}
+
+.projects-presence:hover .projects-presence-popover,
+.projects-presence:focus .projects-presence-popover,
+.projects-presence:focus-within .projects-presence-popover {
+    display: block;
+}
+
+.projects-presence-popover-title {
+    padding: 2px 4px 6px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.projects-presence-list {
+    display: grid;
+    gap: 4px;
+}
+
+.projects-presence-user {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    background: #f8fafc;
+    overflow-wrap: anywhere;
+}
+
+.projects-presence-user-dot {
+    width: 7px;
+    height: 7px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #198754;
+}
+
+.projects-presence-empty {
+    padding: 6px;
+    color: #64748b;
 }
 
 .material-doc-summary {
@@ -981,6 +1043,15 @@ body.project-column-resizing * {
 
 .projects-search {
     width: clamp(190px, 24vw, 320px);
+}
+
+.projects-search .btn i {
+    margin-right: 0;
+}
+
+.projects-search.is-dirty .form-control {
+    border-color: #86b7fe;
+    box-shadow: inset 0 0 0 1px rgba(13, 110, 253, 0.18);
 }
 
 .projects-filter-count {

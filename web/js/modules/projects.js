@@ -32,6 +32,7 @@ const ProjectsState = {
     activeCell: null,
     editingCell: null,
     projectLocks: new Map(),
+    lockCleanupTimer: null,
     realtimeStream: null,
     realtimeConnected: false,
     realtimeReloadTimer: null,
@@ -43,6 +44,7 @@ const ProjectsState = {
     undoStack: [],
     columnFilters: {},
     activeFilterKey: null,
+    searchDraft: '',
     columnWidths: {},
     columnResize: null,
     rangeSelection: null,
@@ -106,15 +108,19 @@ const ProjectsState = {
 };
 
 const PROJECT_LAYOUT_STORAGE_PREFIX = 'projects_table_layout_v3';
+const PROJECT_LAYOUT_PREFERENCE_KEY = 'projects_table_layout';
+const PROJECT_FILTER_STORAGE_PREFIX = 'projects_table_filters_v1';
+const PROJECT_FILTER_PREFERENCE_KEY = 'projects_table_filters';
+const PROJECT_LOCK_CLEANUP_INTERVAL_MS = 1000;
 const PROJECT_DEFAULT_ROW_HEIGHT = 46;
 const PROJECT_MIN_ROW_HEIGHT = 30;
 const PROJECT_MAX_ROW_HEIGHT = 120;
 const PROJECT_DEFAULT_HEADER_HEIGHT = 54;
 const PROJECT_MIN_HEADER_HEIGHT = 34;
 const PROJECT_MAX_HEADER_HEIGHT = 180;
-const PROJECT_VIRTUAL_OVERSCAN = 36;
+const PROJECT_VIRTUAL_OVERSCAN = 72;
 const PROJECT_VIRTUAL_RENDER_CHUNK = 18;
-const PROJECT_BOTTOM_BLANK_ROWS = 24;
+const PROJECT_BOTTOM_BLANK_ROWS = 5;
 const PROJECT_UNDO_LIMIT = 30;
 const PROJECT_MIN_COLUMN_WIDTH = 58;
 
@@ -226,9 +232,11 @@ function initProjectsModule() {
     }
     
     loadProjectTableLayout();
+    loadProjectFilterState();
 
     // Render the module content
     renderProjectsContent();
+    applyProjectFilterControlsState();
     
     // Translate the rendered content based on current language
     if (typeof translatePage === 'function') {
@@ -247,6 +255,9 @@ function initProjectsModule() {
     // Load data
     loadProjects();
     startProjectsRealtime();
+    startProjectLockCleanup();
+    syncProjectTableLayoutFromServer();
+    syncProjectFilterStateFromServer();
 }
 
 /**
@@ -284,17 +295,21 @@ function renderProjectsContent() {
                             <option value="very_urgent">${t('urgency_very_urgent')}</option>
                         </select>
                         <div class="input-group input-group-sm projects-search">
-                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <button class="btn btn-outline-secondary" type="button" id="btn-apply-search-project" title="Enter">
+                                <i class="bi bi-search"></i>
+                            </button>
                             <input type="text" class="form-control" id="search-input-project"
-                                   placeholder="${t('search_projects') || 'Tìm kiếm...'}" title="Ctrl+F">
+                                   value="${escapeHtml(ProjectsState.searchDraft || ProjectsState.searchText || '')}"
+                                   placeholder="${t('search_projects') || 'Tìm kiếm...'}" title="Ctrl+F, Enter">
                             <button class="btn btn-outline-secondary" type="button" id="btn-clear-search" title="${t('clear_search')}">
                                 <i class="bi bi-x-lg"></i>
                             </button>
                         </div>
                     </div>
-                    <div class="projects-presence" id="projects-presence" title="Người đang online">
+                    <div class="projects-presence" id="projects-presence" title="Người đang online" tabindex="0">
                         <span class="projects-presence-dot"></span>
                         <span id="projects-presence-count">0</span>
+                        <div class="projects-presence-popover" id="projects-presence-popover" role="tooltip"></div>
                     </div>
                     <span class="projects-filter-count" id="projects-filter-count"></span>
                 </div>
@@ -676,6 +691,7 @@ function setupProjectsEvents() {
     $('#filter-status').change(function() {
         ProjectsState.filterStatus = $(this).val();
         ProjectsState.currentPage = 1;
+        saveProjectFilterState();
         renderProjectsTablePreservingViewport();
     });
     
@@ -683,31 +699,36 @@ function setupProjectsEvents() {
     $('#filter-urgency').change(function() {
         ProjectsState.filterUrgency = $(this).val();
         ProjectsState.currentPage = 1;
+        saveProjectFilterState();
         renderProjectsTablePreservingViewport();
     });
     
     // Search input
     $('#search-input-project').on('input', debounce(function(e) {
-        ProjectsState.searchText = e?.target?.value || '';
-        ProjectsState.currentPage = 1;
-        renderProjectsTable();
-        focusFirstProjectSearchResult();
-    }, 120));
+        ProjectsState.searchDraft = e?.target?.value || '';
+        updateProjectSearchDirtyState();
+        saveProjectFilterState();
+    }, 180));
 
     $('#search-input-project').on('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            ProjectsState.searchText = $(this).val();
-            renderProjectsTable();
-            focusFirstProjectSearchResult();
+            applyProjectSearchFromInput();
         }
+    });
+
+    $('#btn-apply-search-project').click(function() {
+        applyProjectSearchFromInput();
     });
     
     // Clear search
     $('#btn-clear-search').click(function() {
         $('#search-input-project').val('');
+        ProjectsState.searchDraft = '';
         ProjectsState.searchText = '';
         ProjectsState.currentPage = 1;
+        saveProjectFilterState();
+        updateProjectSearchDirtyState();
         renderProjectsTablePreservingViewport();
     });
     
@@ -734,6 +755,7 @@ function setupProjectsEvents() {
         if (key) {
             delete ProjectsState.columnFilters[key];
             hideProjectColumnFilter();
+            saveProjectFilterState();
             renderProjectsTablePreservingViewport();
         }
     });
@@ -857,6 +879,31 @@ function updateToolbarButtonsI18n() {
     updateProjectContextMenuI18n();
 }
 
+function applyProjectFilterControlsState() {
+    $('#filter-status').val(ProjectsState.filterStatus || '');
+    $('#filter-urgency').val(ProjectsState.filterUrgency || '');
+    $('#search-input-project').val(ProjectsState.searchDraft || ProjectsState.searchText || '');
+    updateProjectSearchDirtyState();
+}
+
+function updateProjectSearchDirtyState() {
+    const draft = String(ProjectsState.searchDraft ?? '');
+    const applied = String(ProjectsState.searchText ?? '');
+    $('.projects-search').toggleClass('is-dirty', draft !== applied);
+    $('#btn-apply-search-project').toggleClass('btn-primary', draft !== applied);
+    $('#btn-apply-search-project').toggleClass('btn-outline-secondary', draft === applied);
+}
+
+function applyProjectSearchFromInput() {
+    const value = $('#search-input-project').val() || '';
+    ProjectsState.searchDraft = value;
+    ProjectsState.searchText = value;
+    ProjectsState.currentPage = 1;
+    saveProjectFilterState();
+    updateProjectSearchDirtyState();
+    renderProjectsTablePreservingViewport();
+}
+
 /**
  * Update quick actions dropdown with i18n
  */
@@ -978,8 +1025,7 @@ function getProjectCurrentRole() {
 }
 
 function canCurrentUserCreateProject() {
-    const role = getProjectCurrentRole();
-    return ['admin', 'planner', 'sales'].includes(role);
+    return true;
 }
 
 function canCurrentUserDeleteProject() {
@@ -1013,12 +1059,14 @@ function setProjectLocks(locks = []) {
         if (!lock) return;
         ProjectsState.projectLocks.set(getProjectLockKey(lock.tracking_id, lock.field_name), lock);
     });
+    pruneExpiredProjectLocks();
     applyProjectLocksToRenderedCells();
 }
 
 function upsertProjectLock(lock) {
     if (!lock) return;
     ProjectsState.projectLocks.set(getProjectLockKey(lock.tracking_id, lock.field_name), lock);
+    pruneExpiredProjectLocks();
     applyProjectLocksToRenderedCells();
 }
 
@@ -1036,6 +1084,35 @@ function getProjectCellLock($cell, column = null) {
     return ProjectsState.projectLocks.get(getProjectLockKey(id, fieldName)) || null;
 }
 
+function getProjectLockExpiryTime(lock) {
+    if (!lock || !lock.expires_at) return 0;
+    const parsed = new Date(lock.expires_at);
+    const time = parsed.getTime();
+    return Number.isFinite(time) ? time : 0;
+}
+
+function pruneExpiredProjectLocks() {
+    const now = Date.now();
+    let changed = false;
+    ProjectsState.projectLocks.forEach((lock, key) => {
+        const expiresAt = getProjectLockExpiryTime(lock);
+        if (expiresAt && expiresAt <= now) {
+            ProjectsState.projectLocks.delete(key);
+            changed = true;
+        }
+    });
+    return changed;
+}
+
+function startProjectLockCleanup() {
+    if (ProjectsState.lockCleanupTimer) return;
+    ProjectsState.lockCleanupTimer = setInterval(() => {
+        if (pruneExpiredProjectLocks()) {
+            applyProjectLocksToRenderedCells();
+        }
+    }, PROJECT_LOCK_CLEANUP_INTERVAL_MS);
+}
+
 function isProjectCellLockedByOther($cell, column = null) {
     const lock = getProjectCellLock($cell, column);
     if (!lock) return false;
@@ -1043,6 +1120,7 @@ function isProjectCellLockedByOther($cell, column = null) {
 }
 
 function applyProjectLocksToRenderedCells() {
+    pruneExpiredProjectLocks();
     $('#projects-table-body .project-sheet-cell').each(function() {
         const $cell = $(this);
         const column = getVisibleProjectColumns()[Number($cell.data('col'))];
@@ -1132,7 +1210,8 @@ function startProjectsRealtime() {
     try {
         ProjectsState.realtimeStream = api.createProjectStream({
             user_id: user.user_id || '',
-            username: user.username || ''
+            username: user.username || '',
+            user_name: user.full_name || user.display_name || user.username || ''
         });
     } catch (error) {
         console.warn('[Projects] Cannot open realtime stream:', error);
@@ -1186,32 +1265,70 @@ function handleProjectRealtimeEvent(event) {
         mergeRealtimeProjectRecord(payload.record);
         return;
     }
-    if (payload.type === 'project_created' || payload.type === 'project_deleted') {
-        scheduleProjectsRealtimeReload();
+    if (payload.type === 'project_created') {
+        if (!payload.record) {
+            scheduleProjectsRealtimeReload();
+            return;
+        }
+        mergeRealtimeProjectRecord(payload.record, { allowInsert: true });
+        return;
+    }
+    if (payload.type === 'project_deleted') {
+        removeRealtimeProjectRecord(payload.tracking_id);
     }
 }
 
 function updateProjectsPresence(users = []) {
     ProjectsState.onlineUsers = users;
     const count = users.length;
-    const label = users
-        .map(user => user.username || user.user_id)
-        .filter(Boolean)
-        .join(', ');
+    const labels = users
+        .map(user => user.full_name || user.user_name || user.username || user.user_id)
+        .filter(Boolean);
+    const label = labels.join(', ');
     $('#projects-presence-count').text(String(count));
     $('#projects-presence').attr('title', label ? `Online: ${label}` : 'Người đang online');
+    renderProjectsPresencePopover(labels);
 }
 
-function mergeRealtimeProjectRecord(record) {
+function renderProjectsPresencePopover(labels = []) {
+    const popover = $('#projects-presence-popover');
+    if (!popover.length) return;
+    const items = labels.length
+        ? labels.map(label => `<div class="projects-presence-user"><span class="projects-presence-user-dot"></span><span>${escapeHtml(label)}</span></div>`).join('')
+        : `<div class="projects-presence-empty">${escapeHtml(t('no_online_users') || 'Chưa có người online')}</div>`;
+    popover.html(`
+        <div class="projects-presence-popover-title">${escapeHtml(t('online_users') || 'Đang online')}</div>
+        <div class="projects-presence-list">${items}</div>
+    `);
+}
+
+function mergeRealtimeProjectRecord(record, options = {}) {
     const id = getProjectId(record);
     if (!id) return;
+    const oldDisplayIndex = getDisplayProjects().findIndex(project => getProjectId(project) === String(id));
     const index = ProjectsState.projects.findIndex(project => getProjectId(project) === String(id));
+    let mergedRecord = record;
     if (index >= 0) {
-        ProjectsState.projects[index] = { ...ProjectsState.projects[index], ...record };
-        renderProjectsTablePreservingViewport();
+        mergedRecord = { ...ProjectsState.projects[index], ...record };
+        ProjectsState.projects[index] = mergedRecord;
+    } else if (options.allowInsert) {
+        ProjectsState.projects.push(record);
+        ProjectsState.totalRecords = Math.max(ProjectsState.totalRecords || 0, ProjectsState.projects.length);
+        renderProjectsVirtualRowsPreservingViewport();
+        updateToolbarState();
+        return;
     } else {
         scheduleProjectsRealtimeReload();
+        return;
     }
+
+    const newDisplayIndex = getDisplayProjects().findIndex(project => getProjectId(project) === String(id));
+    if (oldDisplayIndex !== newDisplayIndex || newDisplayIndex < 0) {
+        renderProjectsVirtualRowsPreservingViewport();
+    } else {
+        patchRenderedProjectRow(mergedRecord, newDisplayIndex);
+    }
+    updateToolbarState();
 }
 
 function scheduleProjectsRealtimeReload() {
@@ -1220,6 +1337,44 @@ function scheduleProjectsRealtimeReload() {
         ProjectsState.realtimeReloadTimer = null;
         loadProjects({ preserveScroll: true });
     }, 500);
+}
+
+function removeRealtimeProjectRecord(trackingId) {
+    const id = String(trackingId || '');
+    if (!id) return;
+    const index = ProjectsState.projects.findIndex(project => getProjectId(project) === id);
+    if (index < 0) return;
+    ProjectsState.projects.splice(index, 1);
+    ProjectsState.totalRecords = Math.max(0, (ProjectsState.totalRecords || 1) - 1);
+    ProjectsState.selectedIds = ProjectsState.selectedIds.filter(selectedId => String(selectedId) !== id);
+    renderProjectsVirtualRowsPreservingViewport();
+    updateToolbarState();
+}
+
+function renderProjectsVirtualRowsPreservingViewport() {
+    const viewportSnapshot = captureProjectViewport();
+    renderProjectsVirtualRows({ force: true });
+    restoreProjectViewport(viewportSnapshot);
+}
+
+function patchRenderedProjectRow(project, rowIndex) {
+    const trackingId = getProjectId(project);
+    const $row = $('#projects-table-body tr').filter(function() {
+        return String($(this).data('id')) === String(trackingId);
+    });
+    if (!$row.length) return;
+
+    const columns = getVisibleProjectColumns();
+    columns.forEach((column, colIndex) => {
+        const $cell = $row.find(`.project-sheet-cell[data-col="${colIndex}"]`);
+        if (!$cell.length || $cell.data('draft') || $cell.data('blank')) return;
+        if (ProjectsState.editingCell === $cell[0]) return;
+        const rawValue = getProjectValue(project, column.fields, '');
+        renderProjectCellDisplay($cell, column, rawValue);
+        $cell.attr('data-row', rowIndex);
+    });
+    $row.attr('data-row-index', rowIndex);
+    applyProjectLocksToRenderedCells();
 }
 
 function scrollProjectsToBottom() {
@@ -1399,9 +1554,7 @@ function renderProjectsVirtualRows(options = {}) {
 }
 
 function getProjectBottomBlankRowCount() {
-    const wrap = document.getElementById('projects-table-wrap');
-    const visibleRows = wrap ? Math.ceil(wrap.clientHeight / getProjectRowHeight()) : 0;
-    return Math.max(PROJECT_BOTTOM_BLANK_ROWS, visibleRows + 6);
+    return PROJECT_BOTTOM_BLANK_ROWS;
 }
 
 function getProjectVirtualTotalRows(displayCount = getDisplayProjects().length) {
@@ -1778,15 +1931,39 @@ function normalizeProjectFilterText(value) {
     return String(value ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
 
+function stripProjectHtml(value) {
+    const element = document.createElement('div');
+    element.innerHTML = String(value ?? '');
+    return element.textContent || element.innerText || '';
+}
+
+function getProjectRenderedFilterLabel(project, column, rowIndex = 0) {
+    if (!column) return t('empty_value');
+    const rawValue = getProjectValue(project, column.fields, '');
+    const isEmpty = rawValue === undefined || rawValue === null || String(rawValue).trim() === '';
+    if (isEmpty) return t('empty_value');
+
+    if (column.key === 'ngay') return formatProjectMonthCell(rawValue);
+    if (column.key === 'tg_tiepnhan') return formatProjectDateOnlyCell(rawValue);
+    if (column.key === 'trangthai') return stripProjectHtml(renderPendingStatus(rawValue)).trim() || String(rawValue);
+    if (column.key === 'dokhan') return normalizeProjectUrgency(rawValue).label || String(rawValue);
+    if (column.key === 'yeucaukythuat') return t('click_to_view');
+    if (column.key === 'tracking_id') return String(rawValue || rowIndex + 1);
+    return stripProjectHtml(formatProjectCellValue(column, rawValue, rowIndex)).trim();
+}
+
+function getProjectRenderedFilterValue(project, column, rowIndex = 0) {
+    return normalizeProjectFilterText(getProjectRenderedFilterLabel(project, column, rowIndex));
+}
+
 function getProjectSearchTokens(searchText) {
     return normalizeProjectFilterText(searchText).split(/\s+/).filter(Boolean);
 }
 
 function getProjectSearchHaystack(project) {
     const visibleColumns = getVisibleProjectColumns();
-    const visibleValues = visibleColumns.map(column => getProjectValue(project, column.fields, ''));
-    const rawValues = Object.values(project || {});
-    return normalizeProjectFilterText([...visibleValues, ...rawValues].join(' '));
+    const visibleValues = visibleColumns.map(column => getProjectRenderedFilterLabel(project, column));
+    return normalizeProjectFilterText(visibleValues.join(' '));
 }
 
 function matchProjectSearch(project) {
@@ -1809,10 +1986,7 @@ function getDisplayProjects() {
             if (!Array.isArray(selectedValues) || selectedValues.length === 0) return true;
             const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === key);
             if (!column) return true;
-            const rawValue = getProjectValue(project, column.fields, '');
-            const displayValue = rawValue ? localizeMixedProjectLabel(rawValue) : t('empty_value');
-            const normalizedValue = normalizeProjectFilterText(displayValue);
-            return selectedValues.includes(normalizedValue);
+            return selectedValues.includes(getProjectRenderedFilterValue(project, column));
         });
     });
 }
@@ -1850,13 +2024,25 @@ function focusFirstProjectSearchResult() {
     });
 }
 
+function matchProjectColumnFilters(project, excludedKey = '') {
+    return Object.entries(ProjectsState.columnFilters).every(([key, selectedValues]) => {
+        if (key === excludedKey) return true;
+        if (!Array.isArray(selectedValues) || selectedValues.length === 0) return true;
+        const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === key);
+        if (!column) return true;
+        return selectedValues.includes(getProjectRenderedFilterValue(project, column));
+    });
+}
+
 function getProjectColumnFilterOptions(columnKey) {
     const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === columnKey);
     if (!column) return [];
     const values = new Map();
-    ProjectsState.projects.forEach(project => {
-        const rawValue = getProjectValue(project, column.fields, '');
-        const label = rawValue === undefined || rawValue === null || String(rawValue).trim() === '' ? t('empty_value') : localizeMixedProjectLabel(String(rawValue));
+    ProjectsState.projects.forEach((project, rowIndex) => {
+        if (!matchProjectSearch(project)) return;
+        if (!matchProjectQuickFilters(project)) return;
+        if (!matchProjectColumnFilters(project, columnKey)) return;
+        const label = getProjectRenderedFilterLabel(project, column, rowIndex);
         const normalized = normalizeProjectFilterText(label);
         if (!values.has(normalized)) values.set(normalized, label);
     });
@@ -1915,6 +2101,7 @@ function applyProjectColumnFilterOnly(value) {
     ProjectsState.columnFilters[key] = [String(value)];
     
     hideProjectColumnFilter();
+    saveProjectFilterState();
     renderProjectsTablePreservingViewport();
 }
 
@@ -1941,6 +2128,7 @@ function applyProjectColumnFilter() {
         ProjectsState.columnFilters[key] = checkedValues;
     }
     hideProjectColumnFilter();
+    saveProjectFilterState();
     renderProjectsTablePreservingViewport();
 }
 
@@ -3830,50 +4018,66 @@ function getProjectLayoutStorageKey() {
     return `${PROJECT_LAYOUT_STORAGE_PREFIX}:${String(userKey).trim() || 'anonymous'}`;
 }
 
+function getProjectTableLayoutPayload() {
+    return {
+        visibleColumns: { ...ProjectsState.visibleColumns },
+        columnOrder: [...ProjectsState.columnOrder],
+        columnWidths: { ...ProjectsState.columnWidths },
+        rowHeight: getProjectRowHeight(),
+        headerHeight: getProjectHeaderHeight()
+    };
+}
+
+function applyProjectTableLayoutPayload(parsed) {
+    if (!parsed || typeof parsed !== 'object') return false;
+    const visibleColumns = parsed.visibleColumns && typeof parsed.visibleColumns === 'object'
+        ? parsed.visibleColumns
+        : parsed;
+
+    ProjectsState.columnsConfig.forEach(col => {
+        if (typeof visibleColumns[col.key] === 'boolean') {
+            ProjectsState.visibleColumns[col.key] = visibleColumns[col.key];
+        }
+    });
+
+    const defaultOrder = getDefaultProjectColumnOrder();
+    if (Array.isArray(parsed.columnOrder)) {
+        ProjectsState.columnOrder = parsed.columnOrder
+            .filter(key => defaultOrder.includes(key));
+        defaultOrder.forEach(key => {
+            if (!ProjectsState.columnOrder.includes(key)) ProjectsState.columnOrder.push(key);
+        });
+    } else {
+        ProjectsState.columnOrder = defaultOrder;
+    }
+
+    if (parsed.columnWidths && typeof parsed.columnWidths === 'object') {
+        ProjectsState.columnWidths = {};
+        PROJECT_SPREADSHEET_COLUMNS.forEach(column => {
+            const width = Number(parsed.columnWidths[column.key]);
+            if (Number.isFinite(width) && width >= PROJECT_MIN_COLUMN_WIDTH) {
+                ProjectsState.columnWidths[column.key] = Math.round(width);
+            }
+        });
+    }
+
+    ProjectsState.rowHeight = clampProjectNumber(parsed.rowHeight, PROJECT_MIN_ROW_HEIGHT, PROJECT_MAX_ROW_HEIGHT, PROJECT_DEFAULT_ROW_HEIGHT);
+    const savedHeaderHeight = Number(parsed.headerHeight);
+    ProjectsState.headerHeight = savedHeaderHeight === 84
+        ? PROJECT_DEFAULT_HEADER_HEIGHT
+        : clampProjectNumber(savedHeaderHeight, PROJECT_MIN_HEADER_HEIGHT, PROJECT_MAX_HEADER_HEIGHT, PROJECT_DEFAULT_HEADER_HEIGHT);
+    return true;
+}
+
 function loadProjectTableLayout() {
     try {
-        const saved = localStorage.getItem(getProjectLayoutStorageKey())
-            || localStorage.getItem('projects_visible_columns_v2');
+        const storageKey = getProjectLayoutStorageKey();
+        const saved = localStorage.getItem(storageKey)
+            || (storageKey.endsWith(':anonymous') ? localStorage.getItem('projects_visible_columns_v2') : null);
         if (!saved) return;
 
         const parsed = JSON.parse(saved);
-        if (!parsed || typeof parsed !== 'object') return;
-        const visibleColumns = parsed.visibleColumns && typeof parsed.visibleColumns === 'object'
-            ? parsed.visibleColumns
-            : parsed;
-
-        ProjectsState.columnsConfig.forEach(col => {
-            if (typeof visibleColumns[col.key] === 'boolean') {
-                ProjectsState.visibleColumns[col.key] = visibleColumns[col.key];
-            }
-        });
-
-        const defaultOrder = getDefaultProjectColumnOrder();
-        if (Array.isArray(parsed.columnOrder)) {
-            ProjectsState.columnOrder = parsed.columnOrder
-                .filter(key => defaultOrder.includes(key));
-            defaultOrder.forEach(key => {
-                if (!ProjectsState.columnOrder.includes(key)) ProjectsState.columnOrder.push(key);
-            });
-        } else {
-            ProjectsState.columnOrder = defaultOrder;
-        }
-
-        if (parsed.columnWidths && typeof parsed.columnWidths === 'object') {
-            ProjectsState.columnWidths = {};
-            PROJECT_SPREADSHEET_COLUMNS.forEach(column => {
-                const width = Number(parsed.columnWidths[column.key]);
-                if (Number.isFinite(width) && width >= PROJECT_MIN_COLUMN_WIDTH) {
-                    ProjectsState.columnWidths[column.key] = Math.round(width);
-                }
-            });
-        }
-
-        ProjectsState.rowHeight = clampProjectNumber(parsed.rowHeight, PROJECT_MIN_ROW_HEIGHT, PROJECT_MAX_ROW_HEIGHT, PROJECT_DEFAULT_ROW_HEIGHT);
-        const savedHeaderHeight = Number(parsed.headerHeight);
-        ProjectsState.headerHeight = savedHeaderHeight === 84
-            ? PROJECT_DEFAULT_HEADER_HEIGHT
-            : clampProjectNumber(savedHeaderHeight, PROJECT_MIN_HEADER_HEIGHT, PROJECT_MAX_HEADER_HEIGHT, PROJECT_DEFAULT_HEADER_HEIGHT);
+        applyProjectTableLayoutPayload(parsed);
     } catch (error) {
         console.warn('[Projects] Cannot load table layout:', error);
     }
@@ -3881,16 +4085,131 @@ function loadProjectTableLayout() {
 
 function saveProjectTableLayout() {
     try {
-        localStorage.setItem(getProjectLayoutStorageKey(), JSON.stringify({
-            visibleColumns: ProjectsState.visibleColumns,
-            columnOrder: ProjectsState.columnOrder,
-            columnWidths: ProjectsState.columnWidths,
-            rowHeight: getProjectRowHeight(),
-            headerHeight: getProjectHeaderHeight()
-        }));
+        const payload = getProjectTableLayoutPayload();
+        localStorage.setItem(getProjectLayoutStorageKey(), JSON.stringify(payload));
+        saveProjectTableLayoutToServer(payload);
     } catch (error) {
         console.warn('[Projects] Cannot save table layout:', error);
     }
+}
+
+async function syncProjectTableLayoutFromServer() {
+    if (!api?.getUserPreference || !localStorage.getItem('auth_token')) return;
+    try {
+        const result = await api.getUserPreference(PROJECT_LAYOUT_PREFERENCE_KEY);
+        const layout = result?.value;
+        if (!layout || typeof layout !== 'object') {
+            saveProjectTableLayoutToServer(getProjectTableLayoutPayload());
+            return;
+        }
+        const before = JSON.stringify(getProjectTableLayoutPayload());
+        if (!applyProjectTableLayoutPayload(layout)) return;
+        localStorage.setItem(getProjectLayoutStorageKey(), JSON.stringify(getProjectTableLayoutPayload()));
+        if (JSON.stringify(getProjectTableLayoutPayload()) !== before) {
+            initColumnSelector();
+            renderProjectsTablePreservingViewport();
+        }
+    } catch (error) {
+        console.warn('[Projects] Cannot sync table layout:', error);
+    }
+}
+
+function saveProjectTableLayoutToServer(payload = getProjectTableLayoutPayload()) {
+    if (!api?.setUserPreference || !localStorage.getItem('auth_token')) return;
+    api.setUserPreference(PROJECT_LAYOUT_PREFERENCE_KEY, payload)
+        .catch(error => console.warn('[Projects] Cannot persist table layout:', error));
+}
+
+function getProjectFilterStorageKey() {
+    let userKey = 'anonymous';
+    try {
+        const currentUser = JSON.parse(localStorage.getItem('current_user') || '{}');
+        userKey = currentUser.id || currentUser.user_id || currentUser.username || currentUser.full_name || userKey;
+    } catch (error) {
+        userKey = 'anonymous';
+    }
+    return `${PROJECT_FILTER_STORAGE_PREFIX}:${String(userKey).trim() || 'anonymous'}`;
+}
+
+function getProjectFilterStatePayload() {
+    return {
+        filterStatus: ProjectsState.filterStatus || '',
+        filterUrgency: ProjectsState.filterUrgency || '',
+        searchText: ProjectsState.searchText || '',
+        searchDraft: ProjectsState.searchDraft || ProjectsState.searchText || '',
+        columnFilters: { ...ProjectsState.columnFilters }
+    };
+}
+
+function applyProjectFilterStatePayload(parsed) {
+    if (!parsed || typeof parsed !== 'object') return false;
+    ProjectsState.filterStatus = typeof parsed.filterStatus === 'string' ? parsed.filterStatus : '';
+    ProjectsState.filterUrgency = typeof parsed.filterUrgency === 'string' ? parsed.filterUrgency : '';
+    ProjectsState.searchText = typeof parsed.searchText === 'string' ? parsed.searchText : '';
+    ProjectsState.searchDraft = typeof parsed.searchDraft === 'string' ? parsed.searchDraft : ProjectsState.searchText;
+
+    const validKeys = new Set(PROJECT_SPREADSHEET_COLUMNS.map(column => column.key));
+    const nextFilters = {};
+    if (parsed.columnFilters && typeof parsed.columnFilters === 'object') {
+        Object.entries(parsed.columnFilters).forEach(([key, values]) => {
+            if (!validKeys.has(key) || !Array.isArray(values)) return;
+            const cleanedValues = values
+                .map(value => normalizeProjectFilterText(value))
+                .filter(Boolean);
+            if (cleanedValues.length > 0) {
+                nextFilters[key] = [...new Set(cleanedValues)];
+            }
+        });
+    }
+    ProjectsState.columnFilters = nextFilters;
+    return true;
+}
+
+function loadProjectFilterState() {
+    try {
+        const saved = localStorage.getItem(getProjectFilterStorageKey());
+        if (!saved) return;
+        applyProjectFilterStatePayload(JSON.parse(saved));
+    } catch (error) {
+        console.warn('[Projects] Cannot load filters:', error);
+    }
+}
+
+function saveProjectFilterState() {
+    try {
+        const payload = getProjectFilterStatePayload();
+        localStorage.setItem(getProjectFilterStorageKey(), JSON.stringify(payload));
+        saveProjectFilterStateToServer(payload);
+    } catch (error) {
+        console.warn('[Projects] Cannot save filters:', error);
+    }
+}
+
+async function syncProjectFilterStateFromServer() {
+    if (!api?.getUserPreference || !localStorage.getItem('auth_token')) return;
+    try {
+        const result = await api.getUserPreference(PROJECT_FILTER_PREFERENCE_KEY);
+        const filters = result?.value;
+        if (!filters || typeof filters !== 'object') {
+            saveProjectFilterStateToServer(getProjectFilterStatePayload());
+            return;
+        }
+        const before = JSON.stringify(getProjectFilterStatePayload());
+        if (!applyProjectFilterStatePayload(filters)) return;
+        localStorage.setItem(getProjectFilterStorageKey(), JSON.stringify(getProjectFilterStatePayload()));
+        applyProjectFilterControlsState();
+        if (JSON.stringify(getProjectFilterStatePayload()) !== before) {
+            renderProjectsTablePreservingViewport();
+        }
+    } catch (error) {
+        console.warn('[Projects] Cannot sync filters:', error);
+    }
+}
+
+function saveProjectFilterStateToServer(payload = getProjectFilterStatePayload()) {
+    if (!api?.setUserPreference || !localStorage.getItem('auth_token')) return;
+    api.setUserPreference(PROJECT_FILTER_PREFERENCE_KEY, payload)
+        .catch(error => console.warn('[Projects] Cannot persist filters:', error));
 }
 
 /**
@@ -4234,10 +4553,15 @@ function buildProjectRowClipboardText(project) {
 
 function applyProjectContextFilter(cellMeta) {
     if (!cellMeta || !cellMeta.key) return;
-    const value = String(cellMeta.rawValue || '').trim();
+    const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === cellMeta.key);
+    const project = ProjectsState.projects.find(item => getProjectId(item) === String(cellMeta.rowId || ''));
+    const value = project && column
+        ? getProjectRenderedFilterValue(project, column)
+        : normalizeProjectFilterText(cellMeta.rawValue);
     if (!value) return;
-    ProjectsState.columnFilters[cellMeta.key] = [normalizeProjectFilterText(value)];
+    ProjectsState.columnFilters[cellMeta.key] = [value];
     hideProjectContextMenu();
+    saveProjectFilterState();
     renderProjectsTablePreservingViewport();
     showToast(t('success'), t('filtered_column', { column: cellMeta.columnLabel }), 'success');
 }
