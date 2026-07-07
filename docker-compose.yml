@@ -1,0 +1,20 @@
+services:
+  propack-server:
+    build:
+      context: .
+    container_name: propack-server
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+      - "12345:12345"
+    environment:
+      SERVER_LOG_LEVEL: INFO
+      SERVER_LOG_REQUESTS: "1"
+      SERVER_LOG_STATIC: "0"
+    volumes:
+      - ./DB.db:/app/DB.db
+      - ./used_codes.json:/app/used_codes.json
+      - ./web_sessions.json:/app/web_sessions.json
+      - ./credentials.json:/app/credentials.json
+      - ./system_prompt.json:/app/system_prompt.json
+      - ./misc/fallback_excel:/app/misc/fallback_excel

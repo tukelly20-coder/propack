@@ -130,8 +130,10 @@ const translations = {
         // Filters
         filter_status: 'Lọc theo trạng thái',
         filter_urgency: 'Lọc theo độ khẩn',
+        filter_customer: 'Lọc theo khách hàng',
         all_status: 'Tất cả trạng thái',
         all_urgency: 'Tất cả độ khẩn',
+        all_customers: 'Tất cả khách hàng',
         status_pending: 'Chờ xử lý',
         status_in_progress: 'Đang làm',
         status_completed: 'Hoàn thành',
@@ -697,8 +699,10 @@ const translations = {
         // Filters
         filter_status: '按状态筛选',
         filter_urgency: '按紧急程度筛选',
+        filter_customer: '按客户筛选',
         all_status: '全部状态',
         all_urgency: '全部紧急程度',
+        all_customers: '全部客户',
         status_pending: '待处理',
         status_in_progress: '进行中',
         status_completed: '已完成',

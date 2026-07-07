@@ -245,10 +245,13 @@ class APIClient {
                 
                 return result;
             } else {
-                // Token expired or invalid
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('current_user');
-                localStorage.removeItem('token_expiration');
+                // Only clear the saved login when the server has positively rejected
+                // the token. Transient startup/proxy errors should not force re-login.
+                if (['invalid_token', 'expired', 'no_token'].includes(result.reason)) {
+                    localStorage.removeItem('auth_token');
+                    localStorage.removeItem('current_user');
+                    localStorage.removeItem('token_expiration');
+                }
                 return { authenticated: false, user: null, reason: result.reason || 'invalid' };
             }
         } catch (error) {
@@ -794,4 +797,3 @@ window.api = api;
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { APIClient, api, login, logout, getCurrentUser, submitLog, getPendingNotices, getPendingCount, getAllNoticesForEngineer, acceptJob, openNoticeStream };
 }
-

@@ -7,7 +7,10 @@ const path = require('path');
   fs.mkdirSync(artifactsDir, { recursive: true });
   const logs = { console: [], responses: [], notes: [] };
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || '/usr/bin/google-chrome'
+  });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
 
@@ -43,7 +46,7 @@ const path = require('path');
   let generatedCode = '';
   const genLoc = page.locator('#generated-code');
   if (await genLoc.count()) {
-    generatedCode = ((await genLoc.first().textContent()) || '').trim();
+    generatedCode = ((await genLoc.first().inputValue().catch(() => '')) || (await genLoc.first().textContent()) || '').trim();
   }
   logs.notes.push({ generatedVisible, generatedCode });
 
@@ -52,11 +55,17 @@ const path = require('path');
 
   await page.screenshot({ path: path.join(artifactsDir, 'diag-code-tab.png'), fullPage: true });
 
-  await page.click('#tab-ai');
+  await page.evaluate(() => { window.location.hash = 'ai'; });
   await page.waitForSelector('#chat-input-ai', { state: 'visible' });
   await page.fill('#chat-input-ai', 'Test AI response ngắn.');
-  await page.click('#send-btn-ai');
-  await page.waitForTimeout(12000);
+  const sendDisabled = await page.locator('#send-btn-ai').isDisabled().catch(() => true);
+  const aiStatus = await page.locator('#status-text-ai').textContent().catch(() => '');
+  if (!sendDisabled) {
+    await page.click('#send-btn-ai');
+    await page.waitForTimeout(12000);
+  } else {
+    logs.notes.push({ aiSkipped: true, aiStatus: (aiStatus || '').trim() });
+  }
 
   const aiMessages = await page.locator('#chat-messages-ai .message').count().catch(() => 0);
   const aiErrorCount = await page.locator('#chat-messages-ai .error-message').count().catch(() => 0);

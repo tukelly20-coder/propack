@@ -374,6 +374,17 @@ async function checkAuthStatus() {
             AppState.currentUser = result.user;
             showUserSection(result.user);
             refreshNoticeBadgeCount();
+        } else if (result.reason === 'network_error' || result.reason === 'error') {
+            const cachedUser = getCachedCurrentUser();
+            if (cachedUser) {
+                AppState.isAuthenticated = true;
+                AppState.currentUser = cachedUser;
+                showUserSection(cachedUser);
+                showToast(t('info'), result.error || 'Server đang khởi động lại, phiên đăng nhập sẽ tự kiểm tra lại.', 'info');
+                setTimeout(checkAuthStatus, 3000);
+                return;
+            }
+            showLoginModal();
         } else {
             // Show login modal if not authenticated
             showLoginModal();
@@ -381,6 +392,16 @@ async function checkAuthStatus() {
     } catch (error) {
         console.error('[App] Auth check failed:', error);
         showLoginModal();
+    }
+}
+
+function getCachedCurrentUser() {
+    try {
+        const rawUser = localStorage.getItem('current_user');
+        return rawUser ? JSON.parse(rawUser) : null;
+    } catch (e) {
+        console.warn('[App] Cannot read cached user:', e.message);
+        return null;
     }
 }
 

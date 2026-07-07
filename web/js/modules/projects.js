@@ -294,6 +294,9 @@ function renderProjectsContent() {
                             <option value="urgent">${t('urgency_urgent')}</option>
                             <option value="very_urgent">${t('urgency_very_urgent')}</option>
                         </select>
+                        <select class="form-select form-select-sm" id="filter-customer" title="${t('filter_customer')}">
+                            <option value="">${t('all_customers')}</option>
+                        </select>
                         <div class="input-group input-group-sm projects-search">
                             <button class="btn btn-outline-secondary" type="button" id="btn-apply-search-project" title="Enter">
                                 <i class="bi bi-search"></i>
@@ -702,6 +705,13 @@ function setupProjectsEvents() {
         saveProjectFilterState();
         renderProjectsTablePreservingViewport();
     });
+
+    $('#filter-customer').change(function() {
+        ProjectsState.filterCustomer = $(this).val();
+        ProjectsState.currentPage = 1;
+        saveProjectFilterState();
+        renderProjectsTablePreservingViewport();
+    });
     
     // Search input
     $('#search-input-project').on('input', debounce(function(e) {
@@ -882,6 +892,8 @@ function updateToolbarButtonsI18n() {
 function applyProjectFilterControlsState() {
     $('#filter-status').val(ProjectsState.filterStatus || '');
     $('#filter-urgency').val(ProjectsState.filterUrgency || '');
+    updateProjectCustomerFilterOptions();
+    $('#filter-customer').val(ProjectsState.filterCustomer || '');
     $('#search-input-project').val(ProjectsState.searchDraft || ProjectsState.searchText || '');
     updateProjectSearchDirtyState();
 }
@@ -943,6 +955,8 @@ function updateProjectsFilterOptions() {
         urgencyFilter.find('option').eq(2).text(t('urgency_urgent'));
         urgencyFilter.find('option').eq(3).text(t('urgency_very_urgent'));
     }
+
+    updateProjectCustomerFilterOptions();
     
 }
 
@@ -974,6 +988,7 @@ async function loadProjects(options = {}) {
             ProjectsState.projects = result.data || [];
             ProjectsState.totalRecords = result.total || 0;
             ProjectsState.totalPages = Math.ceil(ProjectsState.totalRecords / ProjectsState.pageSize) || 1;
+            updateProjectCustomerFilterOptions();
             
             renderProjectsTable();
             if (viewportSnapshot) {
@@ -2005,7 +2020,58 @@ function matchProjectQuickFilters(project) {
         if (ProjectsState.filterStatus === 'in_progress' && (pending === 'yes' || pending === 'pending' || completion.includes('hoan thanh') || completion.includes('完成'))) return false;
     }
 
+    if (ProjectsState.filterCustomer) {
+        const customer = normalizeProjectFilterText(getProjectValue(project, ['Khách hàng', 'khach_hang', 'khachhang'], ''));
+        if (customer !== ProjectsState.filterCustomer) return false;
+    }
+
     return true;
+}
+
+function getProjectCustomerFilterOptions() {
+    const names = [];
+    const addName = value => {
+        const name = String(value || '').trim();
+        if (name) names.push(name);
+    };
+
+    ProjectsState.projects.forEach(project => {
+        addName(getProjectValue(project, ['Khách hàng', 'khach_hang', 'khachhang'], ''));
+    });
+
+    ProjectsState.customers.forEach(customer => {
+        addName(customer && customer.name ? customer.name : customer);
+    });
+
+    const byNormalized = new Map();
+    names.forEach(name => {
+        const normalized = normalizeProjectFilterText(name);
+        if (normalized && !byNormalized.has(normalized)) {
+            byNormalized.set(normalized, name);
+        }
+    });
+
+    return [...byNormalized.entries()]
+        .map(([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'vi'));
+}
+
+function updateProjectCustomerFilterOptions() {
+    const select = $('#filter-customer');
+    if (!select.length) return;
+
+    const current = ProjectsState.filterCustomer || select.val() || '';
+    const options = getProjectCustomerFilterOptions();
+    select.empty();
+    select.append($('<option></option>').val('').text(t('all_customers')));
+    options.forEach(option => {
+        select.append($('<option></option>').val(option.value).text(option.label));
+    });
+
+    if (current && !options.some(option => option.value === current)) {
+        ProjectsState.filterCustomer = '';
+    }
+    select.val(ProjectsState.filterCustomer || '');
 }
 
 function focusFirstProjectSearchResult() {
@@ -3414,13 +3480,16 @@ async function loadCustomers() {
         const result = await api.getCustomers();
         if (result.success && result.data) {
             ProjectsState.customers = result.data;
+            updateProjectCustomerFilterOptions();
             return result.data;
         }
         ProjectsState.customers = [];
+        updateProjectCustomerFilterOptions();
         return [];
     } catch (error) {
         console.error('[Projects] Error loading customers:', error);
         ProjectsState.customers = [];
+        updateProjectCustomerFilterOptions();
         return [];
     }
 }
@@ -4135,6 +4204,7 @@ function getProjectFilterStatePayload() {
     return {
         filterStatus: ProjectsState.filterStatus || '',
         filterUrgency: ProjectsState.filterUrgency || '',
+        filterCustomer: ProjectsState.filterCustomer || '',
         searchText: ProjectsState.searchText || '',
         searchDraft: ProjectsState.searchDraft || ProjectsState.searchText || '',
         columnFilters: { ...ProjectsState.columnFilters }
@@ -4145,6 +4215,7 @@ function applyProjectFilterStatePayload(parsed) {
     if (!parsed || typeof parsed !== 'object') return false;
     ProjectsState.filterStatus = typeof parsed.filterStatus === 'string' ? parsed.filterStatus : '';
     ProjectsState.filterUrgency = typeof parsed.filterUrgency === 'string' ? parsed.filterUrgency : '';
+    ProjectsState.filterCustomer = typeof parsed.filterCustomer === 'string' ? normalizeProjectFilterText(parsed.filterCustomer) : '';
     ProjectsState.searchText = typeof parsed.searchText === 'string' ? parsed.searchText : '';
     ProjectsState.searchDraft = typeof parsed.searchDraft === 'string' ? parsed.searchDraft : ProjectsState.searchText;
 
@@ -4309,12 +4380,16 @@ function getProjectContextCellMeta(rowId, $cell) {
     if (!$cell || !$cell.length) return null;
     const key = String($cell.data('key') || '');
     const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === key);
+    const project = getProjectContextRow(rowId);
+    const rawValue = project && column
+        ? getProjectValue(project, column.fields, '')
+        : ($cell.attr('data-raw-value') || $cell.text().trim());
     return {
         rowId,
         key,
         columnLabel: getProjectColumnDisplayName(column) || key,
         columnZhLabel: column?.zhLabel || '',
-        rawValue: localizeMixedProjectLabel($cell.attr('data-raw-value') || $cell.text().trim())
+        rawValue
     };
 }
 
