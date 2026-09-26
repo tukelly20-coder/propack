@@ -6,7 +6,7 @@ from flask import Response, jsonify, request, send_from_directory
 
 def register_scanner_routes(app, base_dir):
     scanner_frontend_dist = os.path.abspath(
-        os.path.join(base_dir, '..', '..', 'folderscaner', 'frontend', 'dist')
+        os.path.join(base_dir, '..', 'folderscaner', 'frontend', 'dist')
     )
     scanner_backend_url = os.getenv('SCANNER_BACKEND_URL', 'http://127.0.0.1:18001').rstrip('/')
 
