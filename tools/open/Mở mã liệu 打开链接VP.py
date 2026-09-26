@@ -60,6 +60,16 @@ PARENT_CODE_CACHE_DB = os.getenv(
     os.path.abspath(os.path.join(app_dir, '..', '..', 'DB.db'))
 )
 
+_EXCEL_COLUMN_ALIASES = {
+    '工程图号': 'cEngineerFigNo',
+    '存货编码': 'cInvCode',
+}
+
+def _normalize_excel_columns(df):
+    df = df.copy()
+    df.rename(columns={k: v for k, v in _EXCEL_COLUMN_ALIASES.items() if k in df.columns}, inplace=True)
+    return df
+
 
 def shorten_path_display(path: str, max_len: int = 500) -> str:
     """Hiển thị đường dẫn đầy đủ."""
@@ -389,6 +399,7 @@ def get_excel_data(excel_path: str):
             data = []
             for sheet_name in xls.sheet_names:
                 df = pd.read_excel(candidate_path, sheet_name=sheet_name)
+                df = _normalize_excel_columns(df)
                 if 'cEngineerFigNo' in df.columns and 'cInvCode' in df.columns:
                     data.append((sheet_name, df))
             if data:

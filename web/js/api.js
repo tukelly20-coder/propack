@@ -12,6 +12,22 @@
 const API_BASE_URL = '/api';
 const REQUEST_TIMEOUT = 30000; // 30 seconds timeout
 
+function getStoredAuthToken() {
+    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+}
+
+function getStoredCurrentUser() {
+    const rawUser = localStorage.getItem('current_user') || sessionStorage.getItem('current_user');
+    return rawUser;
+}
+
+function clearStoredAuthentication() {
+    ['auth_token', 'current_user', 'token_expiration'].forEach(key => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+    });
+}
+
 class APIClient {
     constructor(baseUrl = API_BASE_URL) {
         this.baseUrl = baseUrl;
@@ -41,7 +57,7 @@ class APIClient {
         };
         
         // Add auth token if available
-        const token = localStorage.getItem('auth_token');
+        const token = getStoredAuthToken();
         if (token) {
             options.headers['Authorization'] = `Bearer ${token}`;
         }
@@ -60,7 +76,7 @@ class APIClient {
                 if (response.status === 429) {
                     throw new Error(result.error || 'Quá nhiều lần thử. Vui lòng thử lại sau.');
                 }
-                throw new Error(result.error || 'Có lỗi xảy ra');
+                throw new Error(result.error || result.message || 'Có lỗi xảy ra');
             }
             
             return result;
@@ -123,13 +139,18 @@ class APIClient {
             console.log('Result success:', result.success); // Debug log
             
             if (response.ok && result.success) {
-                // Only persist to localStorage if persist is true
+                // Keep credentials for the active browser session even when
+                // "remember me" is off. Persistent storage is only used when
+                // the user explicitly opts in.
                 if (persist) {
                     localStorage.setItem('auth_token', result.token);
                     localStorage.setItem('current_user', JSON.stringify(result.user));
-                    
-                    localStorage.removeItem('token_expiration');
+                } else {
+                    sessionStorage.setItem('auth_token', result.token);
+                    sessionStorage.setItem('current_user', JSON.stringify(result.user));
                 }
+                localStorage.removeItem('token_expiration');
+                sessionStorage.removeItem('token_expiration');
                 
                 return result;
             } else {
@@ -184,7 +205,7 @@ class APIClient {
      * Đăng xuất
      */
     async logout() {
-        const token = localStorage.getItem('auth_token');
+        const token = getStoredAuthToken();
         
         try {
             if (token) {
@@ -200,10 +221,7 @@ class APIClient {
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
-            // Always clear local storage
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('current_user');
-            localStorage.removeItem('token_expiration');
+            clearStoredAuthentication();
         }
     }
 
@@ -211,7 +229,7 @@ class APIClient {
      * Lấy thông tin user hiện tại
      */
     async getCurrentUser() {
-        const token = localStorage.getItem('auth_token');
+        const token = getStoredAuthToken();
         
         if (!token) {
             return { authenticated: false, user: null, reason: 'no_token' };
@@ -233,8 +251,12 @@ class APIClient {
             const result = await response.json();
             
             if (result.authenticated) {
-                // Update localStorage with latest user data
-                localStorage.setItem('current_user', JSON.stringify(result.user));
+                // Preserve the storage mode selected at login.
+                if (localStorage.getItem('auth_token')) {
+                    localStorage.setItem('current_user', JSON.stringify(result.user));
+                } else {
+                    sessionStorage.setItem('current_user', JSON.stringify(result.user));
+                }
                 
                 localStorage.removeItem('token_expiration');
                 
@@ -248,9 +270,7 @@ class APIClient {
                 // Only clear the saved login when the server has positively rejected
                 // the token. Transient startup/proxy errors should not force re-login.
                 if (['invalid_token', 'expired', 'no_token'].includes(result.reason)) {
-                    localStorage.removeItem('auth_token');
-                    localStorage.removeItem('current_user');
-                    localStorage.removeItem('token_expiration');
+                    clearStoredAuthentication();
                 }
                 return { authenticated: false, user: null, reason: result.reason || 'invalid' };
             }
@@ -297,17 +317,22 @@ class APIClient {
     }
 
     /**
-     * Lấy tất cả dự án (có phân trang)
+     * Lấy dự án (cursor-based pagination cho on-demand loading)
      */
     async getProjects(params = {}) {
-        const defaultParams = {
-            page: 1,
-            limit: 50,
-            sort_by: 'Tracking ID',
-            sort_order: 'asc'
+        const queryParams = {
+            limit: params.limit || 50,
+            sort_by: params.sort_by || 'Tracking ID',
+            sort_order: params.sort_order || 'desc'
         };
-        
-        return this.request('GET', '/projects', null, { ...defaultParams, ...params });
+        if (params.cursor) {
+            queryParams.cursor = params.cursor;
+        }
+        // Legacy fallback: nếu có page thì vẫn gửi
+        if (params.page && !params.cursor) {
+            queryParams.page = params.page;
+        }
+        return this.request('GET', '/projects', null, queryParams);
     }
 
     /**
@@ -353,6 +378,20 @@ class APIClient {
     }
 
     /**
+     * Lấy danh sách cột project bị khóa chỉnh sửa toàn cục.
+     */
+    async getProjectColumnEditLocks() {
+        return this.request('GET', '/projects/column-edit-locks');
+    }
+
+    /**
+     * Admin lưu danh sách cột project bị khóa chỉnh sửa toàn cục.
+     */
+    async setProjectColumnEditLocks(lockedColumns) {
+        return this.request('PUT', '/projects/column-edit-locks', { locked_columns: lockedColumns });
+    }
+
+    /**
      * Lấy tùy chỉnh giao diện theo user hiện tại.
      */
     async getUserPreference(key) {
@@ -388,7 +427,46 @@ class APIClient {
      * Liệt kê nội dung thư mục vật liệu qua server.
      */
     async getMaterialFolder(listUrl) {
+        if (/^\/scanner-api(\/|$)/.test(listUrl)) {
+            const response = await fetch(listUrl, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || result.message || result.detail || 'Có lỗi xảy ra');
+            }
+            return result;
+        }
         return this.request('GET', listUrl.replace(/^\/api/, ''));
+    }
+
+    /**
+     * Mở thư mục vật liệu bằng Windows Explorer trên server.
+     */
+    async openMaterialFolder(openUrl) {
+        if (/^\/scanner-api(\/|$)/.test(openUrl)) {
+            const response = await fetch(openUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || result.message || result.detail || 'Có lỗi xảy ra');
+            }
+            return result;
+        }
+        return this.request('POST', openUrl.replace(/^\/api/, ''));
+    }
+
+    /**
+     * Lấy danh sách nhân viên thiết kế từ thông tin tài khoản user.
+     */
+    async getUserDesigners() {
+        return this.request('GET', '/users/designers');
     }
 
     /**
@@ -516,7 +594,7 @@ class APIClient {
      * Gửi log lên server
      */
     async submitLog(logContent, logType = 'general') {
-        const token = localStorage.getItem('auth_token');
+        const token = getStoredAuthToken();
         
         try {
             const response = await fetch(`${this.baseUrl}/logs`, {
@@ -731,6 +809,27 @@ class APIClient {
     async getCustomers() {
         return this.request('GET', '/customers');
     }
+
+    /**
+     * Tạo khách hàng mới
+     */
+    async createCustomer(data) {
+        return this.request('POST', '/customers', data);
+    }
+
+    /**
+     * Cập nhật khách hàng
+     */
+    async updateCustomer(customerId, data) {
+        return this.request('PUT', `/customers/${customerId}`, data);
+    }
+
+    /**
+     * Xóa khách hàng
+     */
+    async deleteCustomer(customerId) {
+        return this.request('DELETE', `/customers/${customerId}`);
+    }
 }
 
 // Export singleton instance
@@ -790,10 +889,25 @@ async function getCustomers() {
 }
 window.getCustomers = getCustomers;
 
+async function createCustomer(data) {
+    return api.createCustomer(data);
+}
+window.createCustomer = createCustomer;
+
+async function updateCustomer(customerId, data) {
+    return api.updateCustomer(customerId, data);
+}
+window.updateCustomer = updateCustomer;
+
+async function deleteCustomer(customerId) {
+    return api.deleteCustomer(customerId);
+}
+window.deleteCustomer = deleteCustomer;
+
 // Also export the API client instance
 window.api = api;
 
 // Export class for use in other files
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { APIClient, api, login, logout, getCurrentUser, submitLog, getPendingNotices, getPendingCount, getAllNoticesForEngineer, acceptJob, openNoticeStream };
+    module.exports = { APIClient, api, login, logout, getCurrentUser, submitLog, getPendingNotices, getPendingCount, getAllNoticesForEngineer, acceptJob, openNoticeStream, getCustomers, createCustomer, updateCustomer, deleteCustomer };
 }

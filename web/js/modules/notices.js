@@ -39,6 +39,7 @@ const NoticesState = {
     reconnectAttempts: 0,
     refreshTimer: null,
     initialized: false,
+    lastLoadedAt: null,
     // Column visibility
     visibleColumns: {
         'checkbox': true,
@@ -111,9 +112,6 @@ function renderNoticesContent() {
             <div class="card-body py-2">
                 <div class="notices-toolbar">
                     <div class="notices-toolbar-actions">
-                        <button class="btn btn-primary btn-sm" id="btn-accept-selected-notice" disabled title="Nhận các việc đang chọn">
-                            <i class="bi bi-check2-square"></i> Nhận
-                        </button>
                         <button class="btn btn-outline-secondary btn-sm" id="btn-refresh-notice" title="${t('refresh')}">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -134,18 +132,12 @@ function renderNoticesContent() {
                     </div>
 
                     <div class="notices-toolbar-stats">
-                        <span class="notice-stat-chip">${t('stat_total')}: <strong id="stat-total-notices">0</strong></span>
-                        <span class="notice-stat-chip is-pending">${t('stat_pending')}: <strong id="stat-pending-notices">0</strong></span>
-                        <span class="notice-stat-chip is-accepted">${t('stat_accepted')}: <strong id="stat-accepted-notices">0</strong></span>
-                        <span class="notice-stat-chip is-urgent">${t('stat_urgent')}: <strong id="stat-urgent-notices">0</strong></span>
+                        <span class="notice-stat-chip"><i class="bi bi-collection"></i>${t('stat_total')}: <strong id="stat-total-notices">0</strong></span>
+                        <span class="notice-stat-chip is-pending"><i class="bi bi-tags"></i>Cần phân loại: <strong id="stat-pending-notices">0</strong></span>
+                        <span class="notice-stat-chip is-urgent"><i class="bi bi-lightning-charge"></i>${t('stat_urgent')}: <strong id="stat-urgent-notices">0</strong></span>
                     </div>
 
                     <div class="notices-toolbar-filters">
-                        <select class="form-select form-select-sm" id="filter-status-notice" title="${t('notice_filter_status')}">
-                            <option value="">${t('notice_all_status')}</option>
-                            <option value="pending">${t('status_pending_option')}</option>
-                            <option value="accepted">${t('status_accepted')}</option>
-                        </select>
                         <select class="form-select form-select-sm" id="filter-urgency-notice" title="${t('notice_filter_urgency')}">
                             <option value="">${t('notice_all_urgency')}</option>
                             <option value="normal">${t('urgency_normal')}</option>
@@ -154,7 +146,7 @@ function renderNoticesContent() {
                         </select>
                         <div class="input-group input-group-sm notices-search">
                             <input type="text" class="form-control" id="search-input-notice" 
-                                   placeholder="${t('notice_search_placeholder') || t('search_placeholder') || 'Tìm kiếm...'}">
+                                   placeholder="Tìm mã, khách hàng, quy cách...">
                             <button class="btn btn-outline-secondary" type="button" id="btn-clear-search-notice" title="${t('clear_search')}">
                                 <i class="bi bi-x-lg"></i>
                             </button>
@@ -163,6 +155,10 @@ function renderNoticesContent() {
                             <i class="bi bi-broadcast-pin"></i> Đang kết nối
                         </span>
                     </div>
+                </div>
+                <div class="notices-toolbar-subline">
+                    <span id="notice-scope-label">${getNoticeScopeLabel()}</span>
+                    <span id="notice-last-updated">Chưa tải dữ liệu</span>
                 </div>
             </div>
         </div>
@@ -183,8 +179,8 @@ function renderNoticesContent() {
         </div>
 
         <!-- Facebook-style Notice Feed -->
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card notices-feed-card">
+            <div class="card-header notices-feed-header">
                 <div class="d-flex align-items-center gap-2">
                     <input type="checkbox" id="select-all-notices" class="form-check-input">
                     <span class="fw-semibold">${t('notices_title')}</span>
@@ -311,24 +307,6 @@ function renderNoticesContent() {
             </div>
         </div>
         
-        <!-- View Detail Modal -->
-        <div class="modal fade" id="view-modal-notice" tabindex="-1">
-            <div class="modal-dialog modal-lg modal-dialog-scrollable">
-                <div class="modal-content">
-                    <div class="modal-header bg-info text-white">
-                        <h5 class="modal-title"><i class="bi bi-eye"></i> ${t('view_project_title')}</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body" id="view-content-notice">
-                        <!-- Content will be loaded here -->
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">${t('close')}</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
         <!-- Confirm Delete Modal -->
         <div class="modal fade" id="confirm-delete-modal-notice" tabindex="-1">
             <div class="modal-dialog modal-sm">
@@ -354,11 +332,6 @@ function renderNoticesContent() {
  * Setup Notices event listeners - Synced with Projects
  */
 function setupNoticesEvents() {
-    // Bulk accept button
-    $('#btn-accept-selected-notice').click(function() {
-        acceptSelectedNotices();
-    });
-
     // View selected button
     $('#btn-view-selected-notice').click(function() {
         if (NoticesState.selectedIds.length === 1) {
@@ -368,7 +341,7 @@ function setupNoticesEvents() {
     
     // Refresh button
     $('#btn-refresh-notice').click(function() {
-        loadNotices();
+        loadNotices({ silent: true });
     });
     
     // Column toggle button
@@ -497,22 +470,18 @@ function filterNotices() {
         
         // Search filter
         if (NoticesState.searchText) {
-            const searchLower = NoticesState.searchText.toLowerCase();
-            const match =
-                String(getNoticeValue(notice, ['Tracking ID', 'tracking_id'], '')).toLowerCase().includes(searchLower) ||
-                String(getNoticeValue(notice, ['Khách hàng', 'khach_hang'], '')).toLowerCase().includes(searchLower) ||
-                String(getNoticeValue(notice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], '')).toLowerCase().includes(searchLower) ||
-                String(getNoticeValue(notice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '')).toLowerCase().includes(searchLower) ||
-                String(getNoticeValue(notice, ['Nhân viên thiết kế', 'Kỹ sư', 'accepted_by'], '')).toLowerCase().includes(searchLower);
-            if (!match) return false;
+            const searchLower = normalizeNoticeSearchText(NoticesState.searchText);
+            if (!getNoticeSearchText(notice).includes(searchLower)) return false;
         }
         
         return true;
-    });
+    }).sort(compareNoticesForFeed);
     
     NoticesState.filteredNotices = filtered;
     NoticesState.totalRecords = filtered.length;
     NoticesState.totalPages = Math.ceil(NoticesState.totalRecords / NoticesState.pageSize) || 1;
+    NoticesState.currentPage = Math.min(Math.max(NoticesState.currentPage, 1), NoticesState.totalPages);
+    pruneSelectedNotices();
     
     // Apply pagination
     const start = (NoticesState.currentPage - 1) * NoticesState.pageSize;
@@ -522,6 +491,8 @@ function filterNotices() {
     renderNoticesTable(paginatedData);
     updatePaginationNotice();
     updateStats(filtered);
+    updateToolbarStateNotice();
+    updateNoticeLastLoadedText();
 }
 
 // ============================================
@@ -531,11 +502,15 @@ function filterNotices() {
 /**
  * Load notices data
  */
-async function loadNotices() {
+async function loadNotices(options = {}) {
     console.log('[Notices] Loading notices...');
     
     const tbody = $('#notices-table-body');
-    tbody.html(createNoticeFeedLoadingState());
+    const silent = !!options.silent;
+    const hasExistingRows = NoticesState.notices.length > 0 || $('#notices-table-body .notice-item').length > 0;
+    if (!silent || !hasExistingRows) {
+        tbody.html(createNoticeFeedLoadingState());
+    }
     
     NoticesState.isLoading = true;
     updateToolbarStateNotice();
@@ -564,13 +539,17 @@ async function loadNotices() {
         }
 
         if (noticeRows.length > 0 || (result && (Array.isArray(result) || result.success))) {
-            NoticesState.notices = noticeRows.map(normalizeNotice);
+            NoticesState.notices = noticeRows
+                .map(normalizeNotice)
+                .filter(isNoticeNeedsClassification)
+                .sort(compareNoticesForFeed);
             NoticesState.selectedIds = [];
+            NoticesState.lastLoadedAt = new Date();
              
             // Calculate stats
             NoticesState.stats.total = NoticesState.notices.length;
-            NoticesState.stats.pending = NoticesState.notices.filter(n => getNormalizedNoticeStatus(n) === 'pending').length;
-            NoticesState.stats.accepted = NoticesState.notices.filter(n => getNormalizedNoticeStatus(n) === 'accepted').length;
+            NoticesState.stats.pending = NoticesState.notices.length;
+            NoticesState.stats.accepted = 0;
             NoticesState.stats.urgent = NoticesState.notices.filter(n => getNormalizedNoticeUrgency(n) !== 'normal').length;
              
             // Apply filters and pagination
@@ -578,6 +557,7 @@ async function loadNotices() {
 
             const scopeLabel = getNoticeScopeLabel();
             $('#notice-scope-label').text(scopeLabel);
+            updateNoticeLastLoadedText();
              
             // Update global notice badge
             updateNoticeBadge(NoticesState.stats.pending);
@@ -586,11 +566,15 @@ async function loadNotices() {
             NoticesState.filteredNotices = [];
             NoticesState.totalRecords = 0;
             NoticesState.totalPages = 1;
-            tbody.html(createNoticeFeedEmptyState('Không có thông báo nào'));
+            NoticesState.lastLoadedAt = new Date();
+            tbody.html(createNoticeFeedEmptyState('Không có thông báo cần phân loại'));
+            filterNotices();
         }
     } catch (error) {
         console.error('[Notices] Load error:', error);
-        tbody.html(createNoticeFeedErrorState('Lỗi tải dữ liệu: ' + error.message));
+        if (!silent || !hasExistingRows) {
+            tbody.html(createNoticeFeedErrorState('Lỗi tải dữ liệu: ' + error.message));
+        }
     } finally {
         NoticesState.isLoading = false;
         updateToolbarStateNotice();
@@ -621,42 +605,61 @@ function renderNoticesTable(notices) {
         const trackingId = String(getNoticeValue(notice, ['Tracking ID', 'tracking_id'], '-'));
         const isSelected = NoticesState.selectedIds.includes(trackingId);
         const productName = getNoticeValue(notice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], '-');
+        const spec = getNoticeValue(notice, ['Quy cách', 'quy_cach'], '');
+        const planCode = getNoticeValue(notice, ['Mã bản vẽ', 'ma_ban_ve'], '');
+        const productType = getNoticeValue(notice, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '');
         const customer = getNoticeValue(notice, ['Khách hàng', 'khach_hang'], '-');
         const engineer = getNoticeValue(notice, ['Người nhận', 'accepted_by', 'Nhân viên thiết kế', 'Kỹ sư'], getPendingReceiverText());
         const salesperson = getNoticeValue(notice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], '-');
         const quantity = getNoticeValue(notice, ['Số lượng', 'so_luong'], '-');
         const relativeTime = formatNoticeTime(getNoticeValue(notice, ['Ngày', 'Created_Date'], ''));
+        const recordNo = startIndex + index + 1;
+        const initials = getNoticeInitials(customer || productName);
+        const quantityText = String(quantity || '-');
+        const needsClassification = isNoticeNeedsClassification(notice);
+        const itemTitle = productName && productName !== '-' ? productName : (spec || 'Chưa có tên sản phẩm');
+        const itemClasses = [
+            isSelected ? 'selected' : '',
+            `notice-${status}`,
+            `urgency-${urgency}`,
+            needsClassification ? 'notice-classification' : ''
+        ].filter(Boolean).join(' ');
         
         html += `
-            <div class="notice-item ${isSelected ? 'selected' : ''} notice-${status}" data-id="${trackingId}">
+            <div class="notice-item ${itemClasses}" data-id="${trackingId}">
                 <div class="notice-item-left">
-                    <input type="checkbox" class="row-checkbox form-check-input" ${isSelected ? 'checked' : ''}>
+                    <input type="checkbox" class="row-checkbox form-check-input" aria-label="Chọn thông báo ${trackingId}" ${isSelected ? 'checked' : ''}>
                     <div class="notice-avatar ${status === 'pending' ? 'unread' : ''}">
-                        <i class="bi bi-bell-fill"></i>
+                        <span>${escapeHtml(initials)}</span>
                     </div>
                 </div>
                 <div class="notice-item-main">
                     <div class="notice-item-head">
                         <a href="#" class="view-link view-notice" data-id="${trackingId}">#${trackingId}</a>
+                        ${planCode ? `<span class="notice-plan-code">${escapeHtml(String(planCode))}</span>` : ''}
+                        <span class="notice-record-no">STT ${recordNo}</span>
                         <span class="notice-dot ${status === 'pending' ? '' : 'd-none'}"></span>
                     </div>
+                    <div class="notice-item-title">${escapeHtml(String(itemTitle))}</div>
                     <div class="notice-item-message">
-                        <strong>${escapeHtml(customer)}</strong> có yêu cầu cho sản phẩm <strong>${escapeHtml(productName)}</strong>
+                        ${buildNoticeMessage(notice, customer, productName, status)}
                     </div>
                     <div class="notice-item-meta">
                         <span><i class="bi bi-person-badge"></i> KD: ${escapeHtml(String(salesperson))}</span>
                         <span><i class="bi bi-person-workspace"></i> KS: ${escapeHtml(String(engineer))}</span>
-                        <span><i class="bi bi-box-seam"></i> SL: ${quantity}</span>
+                        <span><i class="bi bi-box-seam"></i> SL: ${escapeHtml(quantityText)}</span>
+                        ${spec ? `<span><i class="bi bi-rulers"></i> ${escapeHtml(String(spec))}</span>` : ''}
                         <span><i class="bi bi-clock"></i> ${relativeTime}</span>
                     </div>
                 </div>
                 <div class="notice-item-right">
+                    ${needsClassification ? '<span class="notice-classification-badge"><i class="bi bi-tags"></i> Cần phân loại</span>' : ''}
+                    ${productType ? `<span class="notice-product-type">${escapeHtml(String(productType))}</span>` : ''}
                     ${getNoticeUrgencyBadge(urgency)}
-                    ${getStatusBadge(status)}
                     <div class="notice-actions">
-                        ${status === 'pending' ? `
-                            <button class="btn btn-sm btn-primary quick-accept-notice" data-id="${trackingId}">
-                                <i class="bi bi-check2-circle"></i> Nhận
+                        ${needsClassification ? `
+                            <button class="btn btn-sm btn-warning quick-classify-notice" data-id="${trackingId}">
+                                <i class="bi bi-tags"></i> Phân loại
                             </button>
                         ` : ''}
                         <button class="btn btn-sm btn-outline-secondary quick-view-notice" data-id="${trackingId}">
@@ -683,12 +686,11 @@ function setupNoticesRowHandlers() {
         updateSelectedIdsNotice();
     });
     
-    // Accept button
-    $('.quick-accept-notice').click(function(e) {
+    $('.quick-classify-notice').click(function(e) {
         e.preventDefault();
         e.stopPropagation();
         const id = $(this).data('id');
-        acceptNotice(id);
+        openNoticeClassification(id);
     });
     
     // View button
@@ -749,13 +751,12 @@ function updateSelectedIdsNotice() {
  */
 function updateToolbarStateNotice() {
     const count = NoticesState.selectedIds.length;
-    const selectedPendingCount = NoticesState.selectedIds
+    const selectedClassificationCount = NoticesState.selectedIds
         .map(id => findNoticeById(id))
-        .filter(n => n && getNormalizedNoticeStatus(n) === 'pending')
+        .filter(n => n && isNoticeNeedsClassification(n))
         .length;
     
     $('#btn-view-selected-notice').prop('disabled', count !== 1);
-    $('#btn-accept-selected-notice').prop('disabled', selectedPendingCount === 0);
     
     const start = (NoticesState.currentPage - 1) * NoticesState.pageSize + 1;
     const end = Math.min(NoticesState.currentPage * NoticesState.pageSize, NoticesState.totalRecords);
@@ -800,14 +801,13 @@ function updateStats(data) {
     
     const stats = {
         total: notices.length,
-        pending: notices.filter(n => getNormalizedNoticeStatus(n) === 'pending').length,
-        accepted: notices.filter(n => getNormalizedNoticeStatus(n) === 'accepted').length,
+        pending: notices.filter(isNoticeNeedsClassification).length,
+        accepted: 0,
         urgent: notices.filter(n => getNormalizedNoticeUrgency(n) !== 'normal').length
     };
     
     $('#stat-total-notices').text(stats.total);
     $('#stat-pending-notices').text(stats.pending);
-    $('#stat-accepted-notices').text(stats.accepted);
     $('#stat-urgent-notices').text(stats.urgent);
 }
 
@@ -820,7 +820,13 @@ function updateStats(data) {
  * @param {string} id - Tracking ID
  */
 async function acceptNotice(id) {
-    if (!confirm('Bạn có muốn nhận công việc này?')) {
+    const notice = findNoticeById(id);
+    if (notice && isNoticeNeedsClassification(notice)) {
+        openNoticeClassification(id);
+        return;
+    }
+    if (!notice || getNormalizedNoticeStatus(notice) !== 'pending') {
+        showToast('Thông báo', 'Công việc này không còn ở trạng thái chờ nhận', 'warning');
         return;
     }
     
@@ -852,6 +858,11 @@ async function acceptNotice(id) {
  * @param {string} id - Tracking ID
  */
 async function viewNotice(id) {
+    const opened = await openProjectDetailFromNotice(id);
+    if (opened) {
+        return;
+    }
+
     let notice = findNoticeById(id);
     if (!notice) {
         try {
@@ -865,39 +876,29 @@ async function viewNotice(id) {
     }
     
     if (notice) {
-        const detailRows = [
-            ['Tracking ID', getNoticeValue(notice, ['Tracking ID'], '-')],
-            ['Khách hàng', getNoticeValue(notice, ['Khách hàng'], '-')],
-            ['Tên sản phẩm', getNoticeValue(notice, ['Tên sản phẩm'], '-')],
-            ['Quy cách', getNoticeValue(notice, ['Quy cách'], '-')],
-            ['Số lượng', getNoticeValue(notice, ['Số lượng'], '-')],
-            ['Mã PO', getNoticeValue(notice, ['Mã PO'], '-')],
-            ['Mã bản vẽ', getNoticeValue(notice, ['Mã bản vẽ'], '-')],
-            ['Mã bản vẽ kỹ thuật', getNoticeValue(notice, ['Mã bản vẽ kỹ thuật (sau khi đặt hàng)'], '-')],
-            ['Mã mẹ', getNoticeValue(notice, ['Mã mẹ'], '-')],
-            ['Loại sản phẩm', getNoticeValue(notice, ['Loại sản phẩm'], '-')],
-            ['Nhân viên KD', getNoticeValue(notice, ['Nhân viên KD'], '-')],
-            ['Kỹ sư', getNoticeValue(notice, ['Nhân viên thiết kế', 'Người nhận'], getPendingReceiverText())],
-            ['Độ khẩn', getNoticeUrgencyLabel(getNormalizedNoticeUrgency(notice))],
-            ['Trạng thái', getNoticeStatusLabel(getNormalizedNoticeStatus(notice))],
-            ['接收人', getNoticeValue(notice, ['Người nhận', 'accepted_by'], '-')],
-            ['接收方案时间', getNoticeValue(notice, ['Thời gian nhận', 'accepted_at'], '-')],
-            ['Ngày', getNoticeValue(notice, ['Ngày'], '-')],
-            ['TG mong muốn', getNoticeValue(notice, ['Thời gian mong muốn có bản vẽ'], '-')],
-            ['TG hoàn thành', getNoticeValue(notice, ['Thời gian hoàn thành kế hoạch'], '-')]
-        ];
-
-        let html = '<div class="detail-section">';
-        detailRows.forEach(([label, value]) => {
-            html += `<div class="detail-item"><strong>${label}:</strong><span>${escapeHtml(String(value || '-'))}</span></div>`;
-        });
-        html += '</div>';
-        
-        $('#view-content-notice').html(html);
-        
-        const modal = new bootstrap.Modal('#view-modal-notice');
-        modal.show();
+        openNoticeClassification(id);
     }
+}
+
+async function openProjectDetailFromNotice(id) {
+    try {
+        if (typeof window.viewProject !== 'function') {
+            if (typeof loadScript === 'function' && !document.getElementById('projects-script')) {
+                await loadScript('js/modules/projects.js');
+            }
+            if (typeof window.initProjectsModule === 'function') {
+                window.initProjectsModule();
+            }
+        }
+
+        if (typeof window.viewProject === 'function') {
+            await window.viewProject(id);
+            return true;
+        }
+    } catch (error) {
+        console.warn('[Notices] Cannot open standard project detail modal:', error);
+    }
+    return false;
 }
 
 /**
@@ -1227,7 +1228,7 @@ function startAutoRefresh() {
     
     autoRefreshInterval = setInterval(() => {
         if (!NoticesState.isLoading) {
-            loadNotices();
+            loadNotices({ silent: true });
         }
     }, 30000);
 }
@@ -1335,15 +1336,12 @@ function handleRealtimeNoticeEvent(payload) {
 
     if (payload.type === 'new_project_pending') {
         const trackingId = payload.tracking_id || payload.record?.tracking_id || '';
-        showToast('Thông báo mới', `Có dự án mới #${trackingId} đang chờ nhận`, 'info');
+        showToast('Thông báo mới', `Có cập nhật dự án #${trackingId}`, 'info');
         queueRealtimeNoticeRefresh();
         return;
     }
 
     if (payload.type === 'job_accepted') {
-        const trackingId = payload.tracking_id || '';
-        const acceptedBy = payload.accepted_by || 'Kỹ sư';
-        showToast('Cập nhật job', `Job #${trackingId} đã được ${acceptedBy} nhận`, 'success');
         queueRealtimeNoticeRefresh();
     }
 }
@@ -1355,20 +1353,14 @@ function queueRealtimeNoticeRefresh() {
     NoticesState.refreshTimer = setTimeout(async () => {
         NoticesState.refreshTimer = null;
         if (!NoticesState.isLoading) {
-            await loadNotices();
+            await loadNotices({ silent: true });
         }
         refreshPendingNoticeBadge();
     }, 300);
 }
 
 async function refreshPendingNoticeBadge() {
-    try {
-        const result = await getPendingCount();
-        const count = typeof result?.count === 'number' ? result.count : 0;
-        updateNoticeBadge(count);
-    } catch (error) {
-        console.warn('[Notices] Cannot refresh pending badge:', error);
-    }
+    updateNoticeBadge(NoticesState.stats.pending || 0);
 }
 
 function updateNoticeRealtimeStatus(text, connected) {
@@ -1429,22 +1421,133 @@ function getNoticeStatusLabel(status) {
 
 function getNormalizedNoticeStatus(notice) {
     const raw = String(
-        getNoticeValue(notice, ['Trạng thái', 'status', 'is_pending'], '')
+        getNoticeValue(notice, ['Trạng thái', 'status', 'is_pending', 'Trạng thái chờ'], '')
     ).toLowerCase().trim();
-    if (raw === 'yes' || raw === 'pending') return 'pending';
-    if (raw === 'no' || raw === 'accepted') return 'accepted';
-    if (raw === 'in_progress') return 'in_progress';
-    if (raw === 'completed') return 'completed';
+    if (raw === 'yes' || raw === 'pending' || raw === 'chờ nhận' || raw === '待接收') return 'pending';
+    if (raw === 'no' || raw === 'accepted' || raw === 'đã nhận' || raw === '已接收') return 'accepted';
+    if (raw === 'in_progress' || raw === 'đang làm') return 'in_progress';
+    if (raw === 'completed' || raw === 'hoàn thành') return 'completed';
     return 'pending';
+}
+
+async function openNoticeClassification(id) {
+    const notice = findNoticeById(id);
+    const planCode = notice ? getNoticeValue(notice, ['Mã bản vẽ', 'ma_ban_ve'], '') : '';
+    const searchValue = String(planCode || id || '').trim();
+
+    if (typeof window.switchTab === 'function') {
+        await window.switchTab('projects');
+    } else {
+        window.location.hash = '#projects';
+    }
+
+    setTimeout(() => {
+        const searchInput = $('#search-input-project');
+        if (searchInput.length && searchValue) {
+            searchInput.val(searchValue).trigger('input');
+        }
+        setTimeout(() => {
+            if (typeof window.focusProjectRowById === 'function') {
+                window.focusProjectRowById(String(id), 'loaisanpham');
+            }
+            showToast('Thông báo', 'Đã focus dòng cần phân loại. Hãy chọn cột 产品类型 / Loại sản phẩm.', 'info');
+        }, 450);
+    }, 250);
 }
 
 function getNormalizedNoticeUrgency(notice) {
     const raw = String(
         getNoticeValue(notice, ['Độ khẩn', 'Tính cấp bách', 'urgency_level', 'urgency'], 'normal')
     ).toLowerCase().trim();
-    if (raw === 'very_urgent' || raw === 'rất khẩn') return 'very_urgent';
-    if (raw === 'urgent' || raw === 'khẩn') return 'urgent';
+    if (raw === 'very_urgent' || raw === 'rất khẩn' || raw === '很急') return 'very_urgent';
+    if (raw === 'urgent' || raw === 'khẩn' || raw === '急') return 'urgent';
     return 'normal';
+}
+
+function normalizeNoticeSearchText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function getNoticeSearchText(notice) {
+    const searchableValues = [
+        getNoticeValue(notice, ['Tracking ID', 'tracking_id'], ''),
+        getNoticeValue(notice, ['Khách hàng', 'khach_hang'], ''),
+        getNoticeValue(notice, ['Tên sản phẩm', 'Sản phẩm', 'ten_san_pham'], ''),
+        getNoticeValue(notice, ['Quy cách', 'quy_cach'], ''),
+        getNoticeValue(notice, ['Mã PO', 'ma_po'], ''),
+        getNoticeValue(notice, ['Mã bản vẽ', 'ma_ban_ve'], ''),
+        getNoticeValue(notice, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], ''),
+        getNoticeValue(notice, ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], ''),
+        getNoticeValue(notice, ['Nhân viên KD', 'Nhân viên kinh doanh', 'nhan_vien_kinh_doanh'], ''),
+        getNoticeValue(notice, ['Nhân viên thiết kế', 'Kỹ sư', 'accepted_by'], '')
+    ];
+    return normalizeNoticeSearchText(searchableValues.join(' '));
+}
+
+function compareNoticesForFeed(a, b) {
+    const statusWeight = { pending: 0, in_progress: 1, accepted: 2, completed: 3 };
+    const urgencyWeight = { very_urgent: 0, urgent: 1, normal: 2 };
+    const statusDiff = (statusWeight[getNormalizedNoticeStatus(a)] ?? 9) - (statusWeight[getNormalizedNoticeStatus(b)] ?? 9);
+    if (statusDiff !== 0) return statusDiff;
+
+    const urgencyDiff = (urgencyWeight[getNormalizedNoticeUrgency(a)] ?? 9) - (urgencyWeight[getNormalizedNoticeUrgency(b)] ?? 9);
+    if (urgencyDiff !== 0) return urgencyDiff;
+
+    return getNoticeTimestamp(b) - getNoticeTimestamp(a);
+}
+
+function getNoticeTimestamp(notice) {
+    const dateText = getNoticeValue(notice, ['Ngày', 'Created_Date'], '');
+    const date = new Date(dateText);
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function pruneSelectedNotices() {
+    const visibleIds = new Set(NoticesState.filteredNotices.map(n => String(getNoticeValue(n, ['Tracking ID', 'tracking_id'], ''))));
+    NoticesState.selectedIds = NoticesState.selectedIds.filter(id => visibleIds.has(String(id)));
+}
+
+function getNoticeInitials(value) {
+    const words = String(value || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean);
+    if (words.length === 0) return 'TB';
+    return words.slice(0, 2).map(word => word[0]).join('').toUpperCase();
+}
+
+function buildNoticeMessage(notice, customer, productName, status) {
+    if (isNoticeNeedsClassification(notice)) {
+        return 'Không đoán được <strong>产品类型</strong> từ quy cách/thư mục. Hãy chọn loại sản phẩm hoặc bổ sung keyword rule.';
+    }
+    const safeCustomer = escapeHtml(String(customer || 'Khách hàng'));
+    const safeProduct = escapeHtml(String(productName || 'sản phẩm'));
+    const verb = 'cần kiểm tra cho';
+    return `<strong>${safeCustomer}</strong> ${verb} <strong>${safeProduct}</strong>`;
+}
+
+function isNoticeNeedsClassification(notice) {
+    const statusText = String(getNoticeValue(notice, ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], '')).toLowerCase();
+    const productType = String(getNoticeValue(notice, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '')).trim();
+    return !productType && (
+        statusText.includes('cần phân loại sản phẩm')
+        || statusText.includes('không đoán được')
+        || statusText.includes('khong doan duoc')
+    );
+}
+
+function updateNoticeLastLoadedText() {
+    const target = $('#notice-last-updated');
+    if (!target.length) return;
+    if (!NoticesState.lastLoadedAt) {
+        target.text('Chưa tải dữ liệu');
+        return;
+    }
+    target.text(`Cập nhật ${formatNoticeTime(NoticesState.lastLoadedAt.toISOString())}`);
 }
 
 function getNoticeValue(notice, keys, fallback = '') {
@@ -1462,17 +1565,7 @@ function getPendingReceiverText() {
 }
 
 function getNoticeScopeLabel() {
-    const normalizedRole = String(NoticesState.currentUserRole || '').toLowerCase();
-    if ((normalizedRole === 'engineer' || normalizedRole === 'eng') && NoticesState.currentUserName) {
-        return `Thông báo của kỹ sư: ${NoticesState.currentUserName}`;
-    }
-    if (normalizedRole === 'admin') {
-        return 'Thông báo chờ xử lý toàn hệ thống';
-    }
-    if (NoticesState.currentUserName) {
-        return `Thông báo chờ xử lý của: ${NoticesState.currentUserName}`;
-    }
-    return 'Thông báo chờ xử lý';
+    return 'Thông báo cần phân loại sản phẩm';
 }
 
 function normalizeNotice(rawNotice) {
@@ -1504,11 +1597,11 @@ function findNoticeById(id) {
 async function acceptSelectedNotices() {
     const pendingIds = NoticesState.selectedIds
         .map(id => findNoticeById(id))
-        .filter(n => n && getNormalizedNoticeStatus(n) === 'pending')
+        .filter(n => n && getNormalizedNoticeStatus(n) === 'pending' && !isNoticeNeedsClassification(n))
         .map(n => n['Tracking ID']);
 
     if (pendingIds.length === 0) {
-        showToast('Thông báo', 'Không có công việc chờ để nhận', 'warning');
+        showToast('Thông báo', 'Không có công việc thường để nhận. Dòng cần phân loại hãy bấm nút Phân loại.', 'warning');
         return;
     }
 
@@ -1520,11 +1613,10 @@ async function acceptSelectedNotices() {
 
     showLoading('Đang nhận công việc đã chọn...');
     try {
-        let successCount = 0;
-        for (const trackingId of pendingIds) {
-            const result = await acceptJob(trackingId, engineerName);
-            if (result && result.success) successCount += 1;
-        }
+        const results = await Promise.allSettled(
+            pendingIds.map(trackingId => acceptJob(trackingId, engineerName))
+        );
+        const successCount = results.filter(result => result.status === 'fulfilled' && result.value?.success).length;
 
         if (successCount > 0) {
             showToast('Thành công', `Đã nhận ${successCount}/${pendingIds.length} công việc`, 'success');

@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Sau đó mở trình duyệt tại: **http://localhost:5000**
+Sau đó mở trình duyệt tại: **http://localhost:8001**
 
 ## Cấu trúc thư mục
 

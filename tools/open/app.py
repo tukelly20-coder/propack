@@ -342,15 +342,16 @@ def get_parent_code():
 # ========================================================================
 
 if __name__ == '__main__':
+    port = int(os.getenv('TOOL_OPEN_PORT', '8001'))
     safe_print("=" * 50)
     safe_print("Mo ma lieu Web Server")
     safe_print("=" * 50)
-    safe_print("Truy cap: http://localhost:5000")
-    safe_print("API: http://localhost:5000/api/*")
+    safe_print(f"Truy cap: http://localhost:{port}")
+    safe_print(f"API: http://localhost:{port}/api/*")
     safe_print("=" * 50)
     
     try:
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True, use_reloader=False)
+        app.run(host='0.0.0.0', port=port, debug=True, threaded=True, use_reloader=False)
     except ValueError as e:
         if 'I/O operation on closed file' in str(e):
             safe_print("Flask server stopped (stdout closed)")
@@ -358,7 +359,7 @@ if __name__ == '__main__':
             safe_print(f"Flask server error: {e}")
     except OSError as e:
         if 'WinError 10048' in str(e) or 'Address already in use' in str(e):
-            safe_print("Port 5000 already in use")
+            safe_print(f"Port {port} already in use")
         else:
             safe_print(f"Flask server error: {e}")
     except Exception as e:

@@ -118,6 +118,7 @@ async function saveProfile() {
             const currentUser = JSON.parse(localStorage.getItem('current_user') || '{}');
             const updatedUser = { ...currentUser, ...userData };
             localStorage.setItem('current_user', JSON.stringify(updatedUser));
+            window.dispatchEvent(new CustomEvent('appUserChanged', { detail: { user: updatedUser } }));
             
             showToast('Lưu thông tin thành công!', 'success');
         } else {

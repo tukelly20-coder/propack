@@ -1,199 +1,175 @@
-# Workflow: Sales tạo Project → Engineer nhận Job
+# Workflow làm việc thực tế của dự án
 
-## Mô tả workflow
+Tài liệu này mô tả **workflow nghiệp vụ của dự án**, không phải workflow kỹ thuật của hệ thống.
 
-Dự án bắt đầu từ bên Sales, họ tạo một dự án mới. Bên tiếp nhận phương án là Công trình Engineer, họ sẽ tiếp nhận và điền mã bản vẽ phương án.
+Dự án có 2 luồng làm việc chính:
 
----
-
-## Sơ đồ workflow
-
-```mermaid
-flowchart TD
-    A["Sales<br/>新建 Project"] --> B{Validate<br/>Kiểm tra dữ liệu}
-    B -->|Pass| C["Server: add_sales_record<br/>Lưu vào DB với is_pending='yes'"]
-    B -->|Fail| A
-    
-    C --> D["Thông báo hiển thị<br/>trong tab Notice"]
-    D --> E["Công trình Engineer<br/>Nhấn nút Nhận Job"]
-    
-    E --> F["Server: accept_job<br/>Cập nhật is_pending='no'"]
-    F --> G["accepted_by = Tên Engineer<br/>accepted_at = Thời gian hiện tại"]
-    G --> H["Thông báo biến mất<br/>Job được chuyển cho Engineer"]
-```
+1. **Luồng phương án**: làm bản vẽ/phương án trước khi trúng thầu.
+2. **Luồng xuống đơn**: chỉ bắt đầu sau khi phương án trúng thầu; lúc này mới có mã bản vẽ xuống đơn và mã mẹ.
 
 ---
 
-## Chi tiết từng bước
+## Tổng Quan
 
-### Bước 1: Sales tạo Project mới (新建)
+Một project có thể dừng lại ở giai đoạn phương án nếu không trúng thầu. Không phải project nào cũng đi đến giai đoạn xuống đơn.
 
-Sales nhấn nút **新建** và điền các thông tin sau:
+Vì vậy, các cột trong bảng cần được hiểu theo mốc công việc:
 
-| Trường dữ liệu | Mô tả |
-|---|---|
-| Tracking ID | Tự động sinh (AUTO) |
-| 创建日期 (Ngày tạo) | Ngày giờ hiện tại |
-| 客户公司名称 (Tên khách hàng) | Bắt buộc |
-| 业务员 (Nhân viên kinh doanh) | Tự động lấy từ session |
-| 产品名称 (Tên sản phẩm) | Bắt buộc |
-| 规格 (Quy cách) | Tùy chọn |
-| 客户联系人 (Người liên hệ) | Bắt buộc |
-| 数量 (Số lượng) | Tùy chọn |
-| PO号 (Mã PO) | Tùy chọn |
-| # 方案图号 (Mã bản vẽ phương án) | Tùy chọn | (khi sales tạo mới chưa cần điền, ẩn tùy chọn này)
-| # 图纸编码 (Mã bản vẽ) | Tùy chọn | (khi sales tạo mới chưa cần điền, ẩn tùy chọn này)
-| # 母料号 (Mã mẹ) | Tùy chọn | (khi sales tạo mới chưa cần điền, ẩn tùy chọn này)
-| 产品类型 (Loại sản phẩm) | Tùy chọn |
-    loại sản phẩm có dropdown 
-        SJT散件图 - Bản vẽ tách chi tiết
-        WLJ物料架 - Giá đựng vật liệu
-        ZZC周转车 - Xe trung chuyển
-        GZT工作台 - Bàn thao tác
-        WCP无尘棚 - Phòng sạch
-        LSX流水线 - Băng tải
-        ZWJ转弯机 - Băng tải chuyển hướng 90,180
-        GZL改造类 - Cải tạo
-        BSX倍速线 - Băng chuyền xích
-        WLL围栏类 - Hàng rào
-        GTX滚筒线 - Băng chuyền con lăn
-        ZHT展会图 - Bản vẽ mặt bằng
-        LHX老化线 - Băng chuyền lão hóa
-| 紧急程度 (Mức độ khẩn cấp) | normal/urgent/very_urgent
-
-### Bước 2: Lưu vào Database
-
-Khi Sales nhấn **Lưu**, hệ thống thực hiện:
-
-1. Gọi API `ADD_SALES_RECORD` → `add_sales_record()` trong `db_helper.py`
-2. Record được lưu vào bảng `projects` với:
-   - `is_pending = 'yes'` (trạng thái chờ nhận)
-   - `user_id` = ID của Sales tạo
-3. Trả về kết quả thành công cho Sales
-
-### Bước 3: Hiển thị thông báo
-
-- Job mới xuất hiện trong tab **Notice** / **Thông báo**
-- Chỉ hiển thị các record có `is_pending = 'yes'`
-- Sales thấy tất cả job đang chờ (sửa đổi)
-- Engineer thấy tất cả job đang chờ
-
-### Bước 4: Engineer nhận Job
-
-Engineer thực hiện:
-
-1. Xem danh sách job trong tab **Notice**
-2. Nhấn nút **Nhận Job** / **接受任务**
-3. Hệ thống gọi API `ACCEPT_JOB` → `accept_job()` trong `db_helper.py`
-
-### Bước 5: Cập nhật Database
-
-Hàm `accept_job()` thực hiện:
-
-```python
-UPDATE projects 
-SET is_pending = 'no', 
-    accepted_by = <tên engineer>, 
-    accepted_at = <thời gian hiện tại>
-WHERE tracking_id = ? AND is_pending = 'yes'
-```
-
-- `is_pending` chuyển từ `'yes'` sang `'no'`
-- `accepted_by` = tên engineer bấm nhận
-- `accepted_at` = thời gian ISO hiện tại
-
-### Bước 6: Hoàn tất
-
-- Job biến mất khỏi danh sách thông báo chờ
-- Job được chuyển vào danh sách của Engineer
-- Sales không còn thấy job này trong tab Notice
-
----
-
-## Database Schema (bảng projects)
-
-```sql
--- Các cột quan trọng cho workflow
-projects (
-    tracking_id INTEGER PRIMARY KEY,
-    Created_Date DATE,
-    khach_hang VARCHAR(200),
-    nhan_vien_kinh_doanh VARCHAR(100),
-    ten_san_pham VARCHAR(200),
-    quy_cach TEXT,
-    nguoi_lien_he_kh VARCHAR(100),
-    so_luong INTEGER,
-    ma_po VARCHAR(50),
-    ma_ban_ve VARCHAR(50),
-    ma_me VARCHAR(50),
-    loai_san_pham VARCHAR(100),
-    sales_name VARCHAR(100),
-    user_id INTEGER,
-    is_pending VARCHAR(10) DEFAULT 'no',  -- 'yes' = chờ nhận, 'no' = đã nhận
-    accepted_by VARCHAR(100),              -- Người nhận job
-    accepted_at TEXT,                     -- Thời gian nhận
-    urgency_level VARCHAR(20)             -- Mức độ khẩn cấp
-)
-```
-
----
-
-## API Endpoints
-
-| API | Method | Mô tả |
+| Nhóm dữ liệu | Giai đoạn phương án | Sau khi trúng thầu / xuống đơn |
 |---|---|---|
-| `/api/socket` | POST | Socket API - `ADD_SALES_RECORD` |
-| `/api/notices/pending` | GET | Lấy danh sách job chờ (`is_pending = 'yes'`) |
-| `/api/notices/accept` | POST | Engineer nhận job |
-| `/api/projects` | POST | Thêm project mới |
+| Thông tin khách hàng | Có | Có |
+| Quy cách / yêu cầu | Có | Có thể bổ sung/chỉnh sửa |
+| Mã bản vẽ phương án | Có thể có | Giữ để đối chiếu |
+| Mã bản vẽ xuống đơn | Chưa có | Bắt đầu có |
+| Mã mẹ | Chưa có | Bắt đầu có |
+| BOM / hoàn thành đơn | Chưa bắt buộc | Bắt đầu theo dõi |
 
 ---
 
-## User Roles và Permissions
+## Luồng 1: Làm Phương Án
 
-| Role | Quyền |
+### Mục Đích
+
+Làm phương án để báo giá, trao đổi với khách hàng và tham gia đấu thầu.
+
+Ở giai đoạn này, dự án **chưa được xem là đơn hàng chính thức**.
+
+### Dữ Liệu Thường Có
+
+| Trường trên bảng | Ý nghĩa |
 |---|---|
-| Sales | `create_sales_record`, `view_history` |
-| Engineer | `job_accept`, `view_history` |
-| Admin | Tất cả quyền |
+| Ngày | Tháng/ngày tạo nhu cầu |
+| Khách hàng | Khách hàng hoặc công ty cần làm phương án |
+| Nhân viên kinh doanh | Người phụ trách khách hàng |
+| Khách hàng yêu cầu quy cách | Kích thước, nội dung, yêu cầu chính của phương án |
+| Loại sản phẩm | Nhóm sản phẩm để phân loại và tạo mã |
+| Tính cấp bách | Mức độ ưu tiên |
+| Người thiết kế | Người làm phương án/bản vẽ |
+| Tình trạng hoàn thành | Trạng thái của phương án |
+
+### Mã Và Dữ Liệu Chưa Bắt Buộc
+
+Trong luồng phương án, các thông tin sau **có thể trống**:
+
+| Trường | Lý do |
+|---|---|
+| Mã bản vẽ xuống đơn | Chưa trúng thầu nên chưa xuống đơn |
+| Mã mẹ | Chưa có sản phẩm chính thức để tạo mã mẹ |
+| PO | Khách hàng chưa đặt hàng |
+| BOM | Chưa cần hoàn thiện BOM chính thức |
+| Thời gian hoàn thành kế hoạch | Có thể chưa xác định |
+
+### Kết Quả Của Luồng Phương Án
+
+Có 2 khả năng:
+
+1. **Không trúng thầu**
+   - Project dừng ở trạng thái phương án.
+   - Không cần mã bản vẽ xuống đơn.
+   - Không cần mã mẹ.
+
+2. **Trúng thầu**
+   - Project chuyển sang luồng 2.
+   - Bắt đầu bổ sung mã bản vẽ xuống đơn, mã mẹ và các thông tin sản xuất.
 
 ---
 
-## Files liên quan
+## Luồng 2: Sau Khi Phương Án Trúng Thầu / Xuống Đơn
 
-- `src/db_helper.py` - Database helper với `add_sales_record()`, `accept_job()`
-- `server.py` - Server xử lý API
-- `web/js/notices.js` - Frontend xử lý hiển thị notice và nút nhận job
--
+### Mục Đích
 
-ưu tiên phát triển website, tạm dừng phát triển desktop app
+Chuyển project từ phương án sang đơn hàng chính thức để xử lý bản vẽ kỹ thuật, mã mẹ, BOM và sản xuất.
+
+Luồng này **chỉ bắt đầu khi phương án đã trúng thầu**.
+
+### Dữ Liệu Bắt Đầu Cần Có
+
+| Trường trên bảng | Ý nghĩa |
+|---|---|
+| Mã bản vẽ xuống đơn | Mã bản vẽ chính thức sau khi có đơn |
+| Mã mẹ | Mã vật tư/sản phẩm mẹ để liên kết BOM, ERP, vật liệu |
+| PO | Mã PO nếu khách hàng đã phát hành |
+| Số lượng | Số lượng theo đơn |
+| Thời gian mong muốn có bản vẽ | Deadline theo đơn |
+| Thời gian hoàn thành kế hoạch | Mốc hoàn thành nội bộ |
+| Tình trạng hoàn thành | Theo dõi đã ra bản vẽ, đang BOM, BOM hoàn thành... |
+
+### Ý Nghĩa Các Mã
+
+| Loại mã | Khi nào có | Dùng để làm gì |
+|---|---|---|
+| Mã bản vẽ phương án | Trong giai đoạn làm phương án | Đối chiếu phương án, lịch sử đấu thầu |
+| Mã bản vẽ xuống đơn | Sau khi trúng thầu | Quản lý bản vẽ chính thức của đơn hàng |
+| Mã mẹ | Sau khi xuống đơn | Liên kết BOM, ERP, vật liệu và sản xuất |
+
+### Kết Quả Của Luồng Xuống Đơn
+
+Project được theo dõi đến khi hoàn thành các mốc chính:
+
+1. Đã có mã bản vẽ xuống đơn.
+2. Đã có mã mẹ nếu cần BOM/sản xuất.
+3. Đã hoàn thành bản vẽ kỹ thuật.
+4. Đã hoàn thành BOM nếu project cần BOM.
+5. Sẵn sàng chuyển tiếp cho các bước sản xuất/mua vật tư.
 
 ---
 
-## Vietnamese / Tiếng Việt
+## Trạng Thái Gợi Ý Trên Bảng
 
-### Tóm tắt workflow
+Cột **Tình trạng hoàn thành** nên phân biệt rõ 2 luồng:
 
-1. **Sales** tạo project mới → `is_pending = 'yes'`
-2. Project hiện trong **tab Notice** (thông báo chờ)
-3. **Engineer** nhấn nút **Nhận Job**
-4. Hệ thống cập nhật:
-   - `is_pending` = `'no'`
-   - `accepted_by` = tên engineer
-   - `accepted_at` = thời gian nhận
-5. Job biến khỏi danh sách chờ, được chuyển cho Engineer
+| Trạng thái | Thuộc luồng | Ý nghĩa |
+|---|---|---|
+| Đang làm phương án | Phương án | Đang vẽ/chỉnh phương án |
+| Phương án đã hoàn thành | Phương án | Đã ra bản vẽ/phương án để báo giá |
+| Không trúng thầu | Phương án | Kết thúc ở giai đoạn phương án |
+| Trúng thầu - chờ xuống đơn | Chuyển tiếp | Đã trúng thầu nhưng chưa có mã xuống đơn |
+| Đã xuống đơn | Xuống đơn | Bắt đầu có mã bản vẽ chính thức |
+| Đang làm bản vẽ kỹ thuật | Xuống đơn | Đang xử lý bản vẽ sau đơn |
+| BOM đang làm | Xuống đơn | Đang tạo BOM |
+| BOM hoàn thành | Xuống đơn | BOM đã xong |
+| Hoàn thành | Xuống đơn | Hoàn tất các việc cần theo dõi |
 
 ---
 
-## Chinese / 中文
+## Cách Hiểu Các Ô Trống Trong Bảng
 
-### 工作流程摘要
+Không phải ô trống nào cũng là lỗi.
 
-1. **Sales** 创建新项目 → `is_pending = 'yes'`
-2. 项目显示在**通知**标签页（待处理）
-3. **工程师** 点击**接受任务**按钮
-4. 系统更新：
-   - `is_pending` = `'no'`
-   - `accepted_by` = 工程师姓名
-   - `accepted_at` = 接受时间
-5. 项目从待处理列表消失，转给工程师
+Trong luồng phương án, các cột như **mã bản vẽ xuống đơn**, **mã mẹ**, **PO**, **BOM** có thể trống là bình thường, vì project chưa trúng thầu.
+
+Chỉ nên xem là thiếu dữ liệu khi project đã vào luồng xuống đơn mà các thông tin bắt buộc vẫn trống.
+
+---
+
+## Nguyên Tắc Hiển Thị Trong Phần Mềm
+
+1. Khi project đang ở luồng phương án:
+   - Ưu tiên hiện thông tin khách hàng, quy cách, loại sản phẩm, người thiết kế, trạng thái phương án.
+   - Không nên báo lỗi chỉ vì chưa có mã mẹ hoặc mã bản vẽ xuống đơn.
+
+2. Khi project đã trúng thầu:
+   - Bắt đầu yêu cầu bổ sung mã bản vẽ xuống đơn.
+   - Bắt đầu yêu cầu mã mẹ nếu có BOM/sản xuất.
+   - Theo dõi rõ trạng thái BOM và hoàn thành.
+
+3. Modal chi tiết dự án nên giúp người xem biết project đang ở luồng nào:
+   - Phương án.
+   - Chờ xuống đơn.
+   - Đã xuống đơn / đang BOM / hoàn thành.
+
+---
+
+## Tóm Tắt Ngắn Gọn
+
+Workflow làm việc của dự án không phải chỉ là "Sales tạo - Engineer nhận".
+
+Workflow đúng là:
+
+1. Tạo nhu cầu/phương án.
+2. Làm bản vẽ phương án.
+3. Nếu không trúng thầu: dừng ở phương án.
+4. Nếu trúng thầu: chuyển sang xuống đơn.
+5. Sau khi xuống đơn mới có mã bản vẽ chính thức và mã mẹ.
+6. Tiếp tục theo dõi bản vẽ kỹ thuật, BOM và hoàn thành.
+

@@ -16,7 +16,9 @@ const AppState = {
         notices: false,
         taomabanve: false,
         profile: false,
-        ai: false
+        ai: false,
+        customers: false,
+        scanner: false
     }
 };
 
@@ -101,7 +103,7 @@ function updateLanguageLabel() {
  */
 function handleRouteChange() {
     const hash = window.location.hash.slice(1) || 'projects';
-    const validTabs = ['projects', 'notices', 'taomabanve', 'profile', 'ai'];
+    const validTabs = ['projects', 'notices', 'taomabanve', 'profile', 'ai', 'customers', 'scanner'];
     
     if (!validTabs.includes(hash)) {
         window.location.hash = 'projects';
@@ -206,6 +208,12 @@ async function loadModule(tab) {
             case 'ai':
                 await loadAIModule();
                 break;
+            case 'customers':
+                await loadCustomersModule();
+                break;
+            case 'scanner':
+                await loadScannerModule();
+                break;
         }
         
         AppState.modulesLoaded[tab] = true;
@@ -282,6 +290,34 @@ async function loadAIModule() {
 }
 
 /**
+ * Load Customers module
+ */
+async function loadCustomersModule() {
+    if (!document.getElementById('customers-script')) {
+        await loadScript('js/modules/customers.js');
+    }
+    if (typeof window.initCustomersModule === 'function') {
+        window.initCustomersModule();
+    }
+}
+
+/**
+ * Load Scanner module
+ */
+async function loadScannerModule() {
+    const existingScript = document.getElementById('scanner-script');
+    if (existingScript && typeof window.initScannerModule !== 'function') {
+        existingScript.remove();
+    }
+    if (!document.getElementById('scanner-script')) {
+        await loadScript(`js/modules/scanner.js?v=${Date.now()}`);
+    }
+    if (typeof window.initScannerModule === 'function') {
+        window.initScannerModule();
+    }
+}
+
+/**
  * Load script dynamically
  * @param {string} src - Đường dẫn script
  * @returns {Promise}
@@ -328,6 +364,16 @@ function triggerTabInit(tab) {
         case 'ai':
             if (typeof window.onAITabInit === 'function') {
                 window.onAITabInit();
+            }
+            break;
+        case 'customers':
+            if (typeof window.onCustomersTabInit === 'function') {
+                window.onCustomersTabInit();
+            }
+            break;
+        case 'scanner':
+            if (typeof window.onScannerTabInit === 'function') {
+                window.onScannerTabInit();
             }
             break;
     }
@@ -397,7 +443,7 @@ async function checkAuthStatus() {
 
 function getCachedCurrentUser() {
     try {
-        const rawUser = localStorage.getItem('current_user');
+        const rawUser = localStorage.getItem('current_user') || sessionStorage.getItem('current_user');
         return rawUser ? JSON.parse(rawUser) : null;
     } catch (e) {
         console.warn('[App] Cannot read cached user:', e.message);
@@ -438,6 +484,8 @@ async function handleLogin(e) {
             
             hideLoginModal();
             showUserSection(result.user);
+
+            window.dispatchEvent(new CustomEvent('appUserChanged', { detail: { user: result.user } }));
             
             showToast(t('toast_success'), t('toast_login_success'), 'success');
             refreshNoticeBadgeCount();
@@ -532,6 +580,7 @@ async function handleLogout() {
         // Clear localStorage
         try {
             localStorage.removeItem('current_user');
+            sessionStorage.removeItem('current_user');
         } catch (e) {
             console.warn('[App] localStorage remove failed:', e.message);
         }
@@ -542,16 +591,19 @@ async function handleLogout() {
             notices: false,
             taomabanve: false,
             profile: false,
-            ai: false
+            ai: false,
+            customers: false,
+            scanner: false
         };
         
         // Clear containers
-        ['projects', 'notices', 'taomabanve', 'profile', 'ai'].forEach(tab => {
+        ['projects', 'notices', 'taomabanve', 'profile', 'ai', 'customers', 'scanner'].forEach(tab => {
             const container = document.getElementById(tab + '-container');
             if (container) container.innerHTML = '';
         });
         
         $('#user-section').hide();
+        window.dispatchEvent(new CustomEvent('appUserChanged', { detail: { user: null } }));
         showLoginModal();
         
         showToast(t('toast_success'), t('toast_logout_success'), 'success');
@@ -694,17 +746,70 @@ function updateNoticeBadge(count) {
     }
 }
 
+function getAppNoticeValue(notice, keys, fallback = '') {
+    if (!notice || typeof notice !== 'object') return fallback;
+    for (const key of keys) {
+        const value = notice[key];
+        if (value === undefined || value === null) continue;
+        if (typeof value === 'string' && value.trim() === '') continue;
+        return value;
+    }
+    return fallback;
+}
+
+function normalizeAppNoticeText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function isAppClassificationNotice(notice) {
+    const productType = String(
+        getAppNoticeValue(notice, ['Loại sản phẩm', 'Hạng mục', 'loai_san_pham'], '')
+    ).trim();
+    const statusText = normalizeAppNoticeText(
+        getAppNoticeValue(notice, ['Tình trạng hoàn thành dự án', 'Tình trạng', 'tinh_trang_hoan_thanh'], '')
+    );
+
+    return !productType && (
+        statusText.includes('can phan loai san pham')
+        || statusText.includes('khong doan duoc')
+    );
+}
+
+async function getClassificationNoticeBadgeCount() {
+    const currentUser = AppState.currentUser || {};
+    const role = String(currentUser.role || '').toLowerCase();
+    const engineerName = currentUser.full_name || currentUser.username || '';
+
+    let result;
+    if ((role === 'engineer' || role === 'eng') && engineerName && typeof window.getAllNoticesForEngineer === 'function') {
+        result = await window.getAllNoticesForEngineer(engineerName);
+    } else if (typeof window.getPendingNotices === 'function') {
+        result = await window.getPendingNotices();
+    } else {
+        return 0;
+    }
+
+    const rows = Array.isArray(result)
+        ? result
+        : (result && Array.isArray(result.data) ? result.data : []);
+    return rows.filter(isAppClassificationNotice).length;
+}
+
 async function refreshNoticeBadgeCount() {
     try {
         if (!AppState.isAuthenticated) {
             updateNoticeBadge(0);
             return;
         }
-        const result = await getPendingCount();
-        const count = typeof result?.count === 'number' ? result.count : 0;
+        const count = await getClassificationNoticeBadgeCount();
         updateNoticeBadge(count);
     } catch (error) {
         console.warn('[App] Cannot refresh notice badge:', error);
+        updateNoticeBadge(0);
     }
 }
 

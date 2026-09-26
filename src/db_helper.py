@@ -7,6 +7,7 @@ Bao gồm: Projects, Users, Customers management
 import sqlite3
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Union
 
@@ -17,6 +18,197 @@ MAX_PROJECT_PAGE_LIMIT = 5000
 # In-memory cache for load_all
 _data_cache = None
 _cache_loaded = False
+_code_designer_cache = {
+    "mtime": None,
+    "by_code": {},
+    "by_plan_code": {},
+}
+_employee_designer_cache = {
+    "mtime": None,
+    "by_code": {},
+}
+
+
+def _normalize_drawing_code(value):
+    """Normalize drawing codes for lookup across manual input variants."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return ''.join(ch for ch in text.upper() if ch.isalnum())
+
+
+def _normalize_employee_code(value):
+    """Return the 3-digit employee code from values like 002 or ENG002."""
+    text = str(value or '').strip().upper()
+    if not text:
+        return ''
+    if re.fullmatch(r'\d{1,3}', text):
+        return text.zfill(3)
+    match = re.search(r'(\d{3})$', text)
+    return match.group(1) if match else ''
+
+
+def _extract_employee_code_from_plan_code(value):
+    """Extract employee code from plan drawing codes such as P002-2608-001-A0."""
+    text = str(value or '').strip().upper()
+    if not text:
+        return ''
+    match = re.match(r'^P(\d{3})(?:\D|$)', text)
+    if match and match.group(1) != '000':
+        return match.group(1)
+    return ''
+
+
+def _extract_employee_code_from_technical_code(value):
+    """Extract employee code from SJT technical codes such as PSJT002-0001-00-A0."""
+    text = str(value or '').strip().upper()
+    if not text:
+        return ''
+    match = re.match(r'^PSJT(\d{3})(?:\D|$)', text)
+    if match and match.group(1) != '000':
+        return match.group(1)
+    return ''
+
+
+def _load_employee_designer_lookup():
+    """Build employee-code -> full-name lookup from users.employee_id."""
+    try:
+        mtime = os.path.getmtime(DB_PATH)
+    except OSError:
+        mtime = None
+
+    if _employee_designer_cache.get("mtime") == mtime:
+        return _employee_designer_cache
+
+    by_code = {}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT full_name, username, employee_id, status
+            FROM users
+            WHERE COALESCE(status, 'active') = 'active'
+        """)
+        for row in cursor.fetchall():
+            code = _normalize_employee_code(row["employee_id"])
+            name = str(row["full_name"] or row["username"] or '').strip()
+            if code and name and code not in by_code:
+                by_code[code] = name
+        conn.close()
+    except Exception as e:
+        print(f"[DB] Error loading employee designer lookup: {e}")
+
+    _employee_designer_cache.update({"mtime": mtime, "by_code": by_code})
+    return _employee_designer_cache
+
+
+def _lookup_designer_by_employee_code(employee_code):
+    code = _normalize_employee_code(employee_code)
+    if not code:
+        return ''
+    return _load_employee_designer_lookup().get("by_code", {}).get(code, '')
+
+
+def _get_used_codes_path():
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.abspath(os.path.join(module_dir, '..', 'used_codes.json')),
+        os.path.abspath('used_codes.json'),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
+
+def _load_code_designer_lookup():
+    """Build code -> requester lookup from create-code history."""
+    path = _get_used_codes_path()
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        _code_designer_cache.update({"mtime": None, "by_code": {}, "by_plan_code": {}})
+        return _code_designer_cache
+
+    if _code_designer_cache.get("mtime") == mtime:
+        return _code_designer_cache
+
+    history_items = []
+    for encoding in ('utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1'):
+        try:
+            with open(path, 'r', encoding=encoding) as f:
+                data = json.load(f)
+            history_items = data.get('history', []) if isinstance(data, dict) else []
+            break
+        except Exception:
+            continue
+
+    by_code = {}
+    by_plan_code = {}
+    for item in reversed(history_items):
+        if not isinstance(item, dict):
+            continue
+        designer = str(item.get('name') or item.get('employee') or '').strip()
+        if not designer:
+            continue
+        code_key = _normalize_drawing_code(item.get('code'))
+        plan_key = _normalize_drawing_code(item.get('plan_code'))
+        if code_key and code_key not in by_code:
+            by_code[code_key] = designer
+        if plan_key and plan_key not in by_plan_code:
+            by_plan_code[plan_key] = designer
+
+    _code_designer_cache.update({"mtime": mtime, "by_code": by_code, "by_plan_code": by_plan_code})
+    return _code_designer_cache
+
+
+def _infer_designer_from_code_history(record):
+    current_value = str(record.get("nhan_vien_thiet_ke") or '').strip()
+    if current_value:
+        return current_value
+
+    plan_employee_code = _extract_employee_code_from_plan_code(record.get("ma_ban_ve"))
+    if plan_employee_code:
+        designer = _lookup_designer_by_employee_code(plan_employee_code)
+        if designer:
+            return designer
+
+    technical_employee_code = _extract_employee_code_from_technical_code(record.get("ma_ban_ve_ky_thuat"))
+    if technical_employee_code:
+        designer = _lookup_designer_by_employee_code(technical_employee_code)
+        if designer:
+            return designer
+
+    lookup = _load_code_designer_lookup()
+    technical_code = _normalize_drawing_code(record.get("ma_ban_ve_ky_thuat"))
+    plan_code = _normalize_drawing_code(record.get("ma_ban_ve"))
+
+    if technical_code:
+        designer = lookup.get("by_code", {}).get(technical_code)
+        if designer:
+            return designer
+    if plan_code:
+        designer = lookup.get("by_plan_code", {}).get(plan_code)
+        if designer:
+            return designer
+    return current_value
+
+
+def _apply_inferred_designer_update(db_updates, current_record=None):
+    """Auto-fill designer when drawing code encodes an employee id and designer is blank."""
+    if str(db_updates.get("nhan_vien_thiet_ke") or '').strip():
+        return db_updates
+
+    current_record = dict(current_record or {})
+    if "nhan_vien_thiet_ke" not in db_updates and str(current_record.get("nhan_vien_thiet_ke") or '').strip():
+        return db_updates
+
+    candidate = {**current_record, **db_updates}
+    designer = _infer_designer_from_code_history(candidate)
+    if designer:
+        db_updates["nhan_vien_thiet_ke"] = designer
+    return db_updates
 
 
 def get_db_path():
@@ -1336,20 +1528,25 @@ def update_record(tracking_id, new_data):
         if "Created_Date" in columns:
             # Schema mới - update columns riêng biệt
             # Xây dựng SET clause (không có updated_at)
-            set_clauses = []
-            values = []
+            db_updates = {}
             
             ensure_realtime_schema()
 
             for old_key, col_name in PROJECT_COLUMN_MAPPING.items():
                 if old_key in new_data:
-                    set_clauses.append(f"{col_name} = ?")
-                    values.append(new_data[old_key])
+                    db_updates[col_name] = new_data[old_key]
 
-            if not set_clauses:
+            if db_updates:
+                cursor.execute('SELECT * FROM projects WHERE tracking_id = ?', (tracking_id,))
+                current = cursor.fetchone()
+                db_updates = _apply_inferred_designer_update(db_updates, dict(current) if current else {})
+
+            if not db_updates:
                 conn.close()
                 return False
 
+            set_clauses = [f"{col_name} = ?" for col_name in db_updates]
+            values = list(db_updates.values())
             set_clauses.append("version = COALESCE(version, 1) + 1")
             set_clauses.append("updated_at = ?")
             values.append(datetime.now().isoformat())
@@ -1429,6 +1626,8 @@ def update_project_with_version(
             db_col = PROJECT_COLUMN_MAPPING.get(old_key)
             if db_col and db_col not in {'tracking_id', 'version', 'updated_at', 'updated_by'}:
                 db_updates[db_col] = value
+
+        db_updates = _apply_inferred_designer_update(db_updates, current_dict)
 
         if not db_updates:
             conn.close()
@@ -1771,11 +1970,13 @@ def delete_records(tracking_ids):
         conn = get_connection()
         cursor = conn.cursor()
         
+        deleted_count = 0
+
         # Xóa theo thứ tự giảm dần để tránh index issues
         for tid in sorted(tracking_ids, reverse=True):
             cursor.execute('DELETE FROM projects WHERE tracking_id = ?', (tid,))
+            deleted_count += max(cursor.rowcount, 0)
         
-        deleted_count = cursor.rowcount
         conn.commit()
         conn.close()
         
@@ -2304,31 +2505,51 @@ def _convert_rows_to_format(rows):
     for row in rows:
         record = dict(row)
         sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+        designer_value = _infer_designer_from_code_history(record)
         
         # Tối ưu: Chỉ tạo 20 keys cần thiết cho frontend
         # Bao gồm cả "Nhân viên KD" để frontend hiển thị đúng
         old_format = {
+            "tracking_id": record.get("tracking_id"),
             "Tracking ID": record.get("tracking_id"),
+            "Created_Date": record.get("Created_Date"),
             "Ngày": record.get("Created_Date"),
+            "khach_hang": record.get("khach_hang"),
             "Khách hàng": record.get("khach_hang"),
+            "nhan_vien_kinh_doanh": sales_name_value,
             "Nhân viên KD": sales_name_value,  # Thêm cho frontend
             "Nhân viên kinh doanh": sales_name_value,  # Giữ lại để tương thích
+            "ten_san_pham": record.get("ten_san_pham"),
             "Tên sản phẩm": record.get("ten_san_pham"),
+            "quy_cach": record.get("quy_cach"),
             "Quy cách": record.get("quy_cach"),
+            "khach_hang_yeu_cau_ky_thuat": record.get("khach_hang_yeu_cau_ky_thuat"),
             "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
             "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
+            "nguoi_lien_he_kh": record.get("nguoi_lien_he_kh"),
             "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
             "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+            "so_luong": record.get("so_luong"),
             "Số lượng": record.get("so_luong"),
+            "ma_po": record.get("ma_po"),
             "Mã PO": record.get("ma_po"),
+            "ma_ban_ve": record.get("ma_ban_ve"),
             "Mã bản vẽ": record.get("ma_ban_ve"),
+            "ma_ban_ve_ky_thuat": record.get("ma_ban_ve_ky_thuat"),
             "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+            "ma_me": record.get("ma_me"),
             "Mã mẹ": record.get("ma_me"),
+            "loai_san_pham": record.get("loai_san_pham"),
             "Loại sản phẩm": record.get("loai_san_pham"),
-            "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
+            "nhan_vien_thiet_ke": designer_value,
+            "Nhân viên thiết kế": designer_value,
+            "tinh_trang_hoan_thanh": record.get("tinh_trang_hoan_thanh"),
             "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
+            "urgency_level": record.get("urgency_level"),
             "Tính cấp bách": record.get("urgency_level"),
+            "thoi_gian_mong_muon_ban_ve": record.get("thoi_gian_mong_muon_ban_ve"),
             "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+            "thoi_gian_hoan_thanh_ke_hoach": record.get("thoi_gian_hoan_thanh_ke_hoach"),
             "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
             "is_pending": record.get("is_pending"),
             "Trạng thái chờ": record.get("is_pending"),
@@ -2476,6 +2697,121 @@ def get_paged_data_sql(page=1, limit=50, sort_by="Tracking ID", sort_order="asc"
         return get_paged_data(data, page, limit, sort_by, sort_order)
 
 
+def encode_cursor(val, tracking_id):
+    """Mã hóa cursor thành chuỗi Base64 an toàn"""
+    import base64
+    import json
+    raw = json.dumps({"val": val, "id": tracking_id})
+    return base64.urlsafe_b64encode(raw.encode('utf-8')).decode('utf-8')
+
+
+def decode_cursor(cursor_str):
+    """Giải mã cursor từ chuỗi Base64"""
+    import base64
+    import json
+    try:
+        if not cursor_str:
+            return None
+        raw = base64.urlsafe_b64decode(cursor_str.encode('utf-8')).decode('utf-8')
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def get_cursor_paged_data_sql(cursor_str=None, limit=50, sort_by="Tracking ID", sort_order="desc"):
+    """
+    Lấy dữ liệu phân trang theo Cursor (On-Demand Cursor Pagination)
+    Tối ưu truy vấn SQL O(1) không cần OFFSET
+    """
+    try:
+        if not os.path.exists(DB_PATH):
+            return {"data": [], "total": 0, "limit": limit, "next_cursor": None, "has_more": False}
+
+        limit = max(1, min(int(limit), 200))
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        sort_column_map = {
+            "Tracking ID": "tracking_id",
+            "Ngày": "Created_Date",
+            "Khách hàng": "khach_hang",
+            "Nhân viên kinh doanh": "nhan_vien_kinh_doanh",
+            "Tên sản phẩm": "ten_san_pham",
+            "Quy cách": "quy_cach",
+            "Yêu cầu kỹ thuật KH": "khach_hang_yeu_cau_ky_thuat",
+            "Số lượng": "so_luong",
+            "Mã PO": "ma_po",
+            "Mã bản vẽ": "ma_ban_ve",
+            "Loại sản phẩm": "loai_san_pham",
+            "Tình trạng hoàn thành dự án": "tinh_trang_hoan_thanh"
+        }
+        db_sort_column = sort_column_map.get(sort_by, "tracking_id")
+        order_dir = "DESC" if sort_order.lower() == "desc" else "ASC"
+        comp_op = "<" if order_dir == "DESC" else ">"
+
+        cursor_info = decode_cursor(cursor_str)
+        params = []
+
+        if cursor_info and "id" in cursor_info:
+            cursor_val = cursor_info.get("val")
+            cursor_id = cursor_info.get("id")
+
+            if db_sort_column == "tracking_id":
+                where_clause = f"WHERE tracking_id {comp_op} ?"
+                params.append(cursor_id)
+            else:
+                where_clause = f"WHERE ({db_sort_column} {comp_op} ?) OR ({db_sort_column} = ? AND tracking_id {comp_op} ?)"
+                params.extend([cursor_val, cursor_val, cursor_id])
+        else:
+            where_clause = ""
+
+        if db_sort_column == "tracking_id":
+            order_clause = f"ORDER BY tracking_id {order_dir}"
+        else:
+            order_clause = f"ORDER BY {db_sort_column} {order_dir}, tracking_id {order_dir}"
+
+        columns = (
+            "tracking_id, Created_Date, khach_hang, nhan_vien_kinh_doanh, ten_san_pham, "
+            "quy_cach, khach_hang_yeu_cau_ky_thuat, nguoi_lien_he_kh, so_luong, ma_po, "
+            "ma_ban_ve, ma_ban_ve_ky_thuat, ma_me, loai_san_pham, nhan_vien_thiet_ke, "
+            "tinh_trang_hoan_thanh, urgency_level, thoi_gian_mong_muon_ban_ve, "
+            "thoi_gian_hoan_thanh_ke_hoach, sales_name, user_id, is_pending, accepted_by, "
+            "accepted_at, desired_solution_time, version, updated_by, updated_at"
+        )
+        query = f"SELECT {columns} FROM projects {where_clause} {order_clause} LIMIT ?"
+        params.append(limit + 1)
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        has_more = len(rows) > limit
+        if has_more:
+            rows = rows[:limit]
+
+        data = _convert_rows_to_format(rows)
+
+        next_cursor = None
+        if has_more and data:
+            last_item = data[-1]
+            last_id = last_item.get("Tracking ID") or last_item.get("tracking_id") or 0
+            last_val = last_item.get(sort_by) or last_item.get(db_sort_column) or last_id
+            if last_val is None:
+                last_val = last_id
+            next_cursor = encode_cursor(last_val, last_id)
+
+        return {
+            "data": data,
+            "total": 0,
+            "limit": limit,
+            "next_cursor": next_cursor,
+            "has_more": has_more
+        }
+    except Exception as e:
+        print(f"[DB] Error in get_cursor_paged_data_sql: {e}")
+        return {"data": [], "total": 0, "limit": limit, "next_cursor": None, "has_more": False}
+
+
 def migrate_from_json(json_path='DB.json', backup=True):
     """
     Migration dữ liệu từ JSON file sang SQLite database
@@ -2575,35 +2911,54 @@ def get_record_by_tracking_id(tracking_id):
                 record = dict(row)
                 # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
                 sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                designer_value = _infer_designer_from_code_history(record)
                 
                 # Chuyển về format cũ để tương thích
                 return {
+                    "tracking_id": record.get("tracking_id"),
                     "Tracking ID": record.get("tracking_id"),
+                    "Created_Date": record.get("Created_Date"),
                     "Ngày": record.get("Created_Date"),
                     "Ngày khởi tạo": record.get("Created_Date"),
+                    "khach_hang": record.get("khach_hang"),
                     "Khách hàng": record.get("khach_hang"),
+                    "nhan_vien_kinh_doanh": sales_name_value,
                     "Nhân viên kinh doanh": sales_name_value,
+                    "ten_san_pham": record.get("ten_san_pham"),
                     "Tên sản phẩm": record.get("ten_san_pham"),
+                    "quy_cach": record.get("quy_cach"),
                     "Quy cách": record.get("quy_cach"),
+                    "khach_hang_yeu_cau_ky_thuat": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "客户技术要求": record.get("khach_hang_yeu_cau_ky_thuat"),
                     "Yêu cầu kỹ thuật KH": record.get("khach_hang_yeu_cau_ky_thuat"),
+                    "nguoi_lien_he_kh": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ\n(KH)": record.get("nguoi_lien_he_kh"),
                     "Người liên hệ (KH)": record.get("nguoi_lien_he_kh"),
+                    "so_luong": record.get("so_luong"),
                     "Số lượng": record.get("so_luong"),
+                    "ma_po": record.get("ma_po"),
                     "Mã PO": record.get("ma_po"),
+                    "ma_ban_ve": record.get("ma_ban_ve"),
                     "Mã bản vẽ": record.get("ma_ban_ve"),
                     "Mã bản vẽ phương án (mã trước khi đặt hàng)": record.get("ma_ban_ve"),
+                    "ma_ban_ve_ky_thuat": record.get("ma_ban_ve_ky_thuat"),
                     "Mã bản vẽ kỹ thuật (sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
                     "Mã bản vẽ kỹ thuật (mã sau khi đặt hàng)": record.get("ma_ban_ve_ky_thuat"),
+                    "ma_me": record.get("ma_me"),
                     "Mã mẹ ": record.get("ma_me"),
                     "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
+                    "loai_san_pham": record.get("loai_san_pham"),
                     "Loại sản phẩm": record.get("loai_san_pham"),
                     "Hạng mục": record.get("loai_san_pham"),
-                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
-                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "nhan_vien_thiet_ke": designer_value,
+                    "Nhân viên thiết kế": designer_value,
+                    "Kỹ sư thiết kế": designer_value,
+                    "tinh_trang_hoan_thanh": record.get("tinh_trang_hoan_thanh"),
                     "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
                     "Tính cấp bách": record.get("urgency_level"),
+                    "thoi_gian_mong_muon_ban_ve": record.get("thoi_gian_mong_muon_ban_ve"),
                     "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
+                    "thoi_gian_hoan_thanh_ke_hoach": record.get("thoi_gian_hoan_thanh_ke_hoach"),
                     "Thời gian hoàn thành kế hoạch": record.get("thoi_gian_hoan_thanh_ke_hoach"),
                     "user_id": record.get("user_id"),
                     "User ID": record.get("user_id"),
@@ -3190,6 +3545,24 @@ def get_user_with_permissions(username: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def update_user_last_login(user_id: Union[int, str], timestamp: str) -> bool:
+    """Cập nhật thời điểm đăng nhập gần nhất cho web session."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE users SET last_login = ? WHERE user_id = ?',
+            (timestamp, user_id)
+        )
+        conn.commit()
+        success = cursor.rowcount > 0
+        conn.close()
+        return success
+    except Exception as e:
+        print(f"[DB] Error updating last_login: {e}")
+        return False
+
+
 def ensure_user_preferences_table() -> bool:
     """Tạo bảng lưu tùy chỉnh giao diện theo user nếu DB cũ chưa có."""
     try:
@@ -3347,29 +3720,33 @@ def ensure_default_users():
     return created_count
 
 
-# ==================== CUSTOMER MANAGEMENT FUNCTIONS (DEPRECATED) ====================
-# Các hàm dưới đây đã bị loại bỏ khỏi chức năng chính.
-# Chúng được giữ lại để tương thích nhưng không còn được sử dụng bởi client.
+# ==================== CUSTOMER MANAGEMENT FUNCTIONS ====================
+
 
 def add_customer(customer_data: Dict[str, Any]) -> Optional[int]:
     """
-    DEPRECATED: Chức năng quản lý khách hàng đã bị loại bỏ.
-    Các hàm này được giữ lại để tương thích nhưng không còn được sử dụng.
+    Thêm khách hàng mới vào bảng customers.
     
     Args:
-        customer_data: dict chứa name, contact_person, phone, email, address
+        customer_data: dict với các keys: code, name, phonetic, english_name, 
+                       contact_person, phone, email, address
+    
     Returns:
-        customer id mới hoặc None nếu lỗi
+        customer_id nếu thành công, None nếu đã tồn tại
     """
     try:
         conn = get_connection()
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT OR IGNORE INTO customers (name, contact_person, phone, email, address)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO customers 
+            (code, name, phonetic, english_name, contact_person, phone, email, address)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            customer_data['name'],
+            customer_data.get('code'),
+            customer_data.get('name'),
+            customer_data.get('phonetic'),
+            customer_data.get('english_name'),
             customer_data.get('contact_person'),
             customer_data.get('phone'),
             customer_data.get('email'),
@@ -3381,15 +3758,110 @@ def add_customer(customer_data: Dict[str, Any]) -> Optional[int]:
         conn.close()
         
         if customer_id and customer_id > 0:
-            print(f"[DB] Added customer {customer_data['name']} with id={customer_id}")
+            print(f"[DB] Added customer {customer_data.get('name')} with id={customer_id}")
             return customer_id
         else:
-            # Customer already exists (due to UNIQUE constraint)
-            print(f"[DB] Customer {customer_data['name']} already exists")
+            print(f"[DB] Customer {customer_data.get('name')} already exists")
             return None
     
     except Exception as e:
         print(f"[DB] Error adding customer: {e}")
+        return None
+
+
+def update_customer(customer_id: int, customer_data: Dict[str, Any]) -> bool:
+    """
+    Cập nhật thông tin khách hàng.
+    
+    Args:
+        customer_id: ID của khách hàng
+        customer_data: dict với các keys cần cập nhật
+    
+    Returns:
+        True nếu thành công, False nếu thất bại
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Build dynamic UPDATE query based on provided fields
+        allowed_fields = ['code', 'name', 'phonetic', 'english_name', 
+                         'contact_person', 'phone', 'email', 'address']
+        updates = []
+        values = []
+        
+        for field in allowed_fields:
+            if field in customer_data:
+                updates.append(f"{field} = ?")
+                values.append(customer_data[field])
+        
+        if not updates:
+            conn.close()
+            return False
+        
+        values.append(customer_id)
+        query = f"UPDATE customers SET {', '.join(updates)} WHERE id = ?"
+        
+        cursor.execute(query, values)
+        conn.commit()
+        affected = cursor.rowcount
+        conn.close()
+        
+        return affected > 0
+    
+    except Exception as e:
+        print(f"[DB] Error updating customer {customer_id}: {e}")
+        return False
+
+
+def delete_customer(customer_id: int) -> bool:
+    """
+    Xóa khách hàng khỏi bảng customers.
+    
+    Args:
+        customer_id: ID của khách hàng cần xóa
+    
+    Returns:
+        True nếu thành công, False nếu thất bại
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM customers WHERE id = ?', (customer_id,))
+        conn.commit()
+        affected = cursor.rowcount
+        conn.close()
+        
+        return affected > 0
+    
+    except Exception as e:
+        print(f"[DB] Error deleting customer {customer_id}: {e}")
+        return False
+
+
+def get_customer_by_id(customer_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Lấy thông tin một khách hàng theo ID.
+    
+    Args:
+        customer_id: ID của khách hàng
+    
+    Returns:
+        dict thông tin khách hàng hoặc None
+    """
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM customers WHERE id = ?', (customer_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        return dict(row) if row else None
+    
+    except Exception as e:
+        print(f"[DB] Error getting customer {customer_id}: {e}")
         return None
 
 
@@ -3510,9 +3982,14 @@ def get_pending_notices(user_id: Union[int, None] = None) -> List[Dict[str, Any]
                 # Schema mới - convert to old format
                 # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
                 sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+                designer_value = _infer_designer_from_code_history(record)
                 
                 old_format = {
+                    "tracking_id": record.get("tracking_id"),
                     "Tracking ID": record.get("tracking_id"),
+                    "ma_ban_ve": record.get("ma_ban_ve"),
+                    "ma_ban_ve_ky_thuat": record.get("ma_ban_ve_ky_thuat"),
+                    "nhan_vien_thiet_ke": designer_value,
                     "Ngày": record.get("Created_Date"),
                     "Ngày khởi tạo": record.get("Created_Date"),
                     "Khách hàng": record.get("khach_hang"),
@@ -3533,8 +4010,8 @@ def get_pending_notices(user_id: Union[int, None] = None) -> List[Dict[str, Any]
                     "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
                     "Loại sản phẩm": record.get("loai_san_pham"),
                     "Hạng mục": record.get("loai_san_pham"),
-                    "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
-                    "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                    "Nhân viên thiết kế": designer_value,
+                    "Kỹ sư thiết kế": designer_value,
                     "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
                     "Tính cấp bách": record.get("tinh_cap_bach"),
                     "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),
@@ -3757,10 +4234,15 @@ def get_projects_by_user(user_id: int) -> List[Dict[str, Any]]:
             record = dict(row)
             # Lấy giá trị sales_name hoặc fallback về nhan_vien_kinh_doanh
             sales_name_value = record.get("sales_name") or record.get("nhan_vien_kinh_doanh", "")
+            designer_value = _infer_designer_from_code_history(record)
             
             # Chuyển về format cũ
             old_format = {
+                "tracking_id": record.get("tracking_id"),
                 "Tracking ID": record.get("tracking_id"),
+                "ma_ban_ve": record.get("ma_ban_ve"),
+                "ma_ban_ve_ky_thuat": record.get("ma_ban_ve_ky_thuat"),
+                "nhan_vien_thiet_ke": designer_value,
                 "Ngày": record.get("Created_Date"),
                 "Ngày khởi tạo": record.get("Created_Date"),
                 "Khách hàng": record.get("khach_hang"),
@@ -3781,8 +4263,8 @@ def get_projects_by_user(user_id: int) -> List[Dict[str, Any]]:
                 "Mã thành phẩm (Mã mẹ)": record.get("ma_me"),
                 "Loại sản phẩm": record.get("loai_san_pham"),
                 "Hạng mục": record.get("loai_san_pham"),
-                "Nhân viên thiết kế": record.get("nhan_vien_thiet_ke"),
-                "Kỹ sư thiết kế": record.get("nhan_vien_thiet_ke"),
+                "Nhân viên thiết kế": designer_value,
+                "Kỹ sư thiết kế": designer_value,
                 "Tình trạng hoàn thành dự án": record.get("tinh_trang_hoan_thanh"),
                 "Tính cấp bách": record.get("tinh_cap_bach"),
                 "Thời gian mong muốn có bản vẽ": record.get("thoi_gian_mong_muon_ban_ve"),

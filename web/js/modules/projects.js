@@ -10,22 +10,30 @@
 const ProjectsState = {
     projects: [],
     currentPage: 1,
-    pageSize: 100000,
+    pageSize: 200,
     totalRecords: 0,
     totalPages: 1,
     selectedIds: [],
     isLoading: false,
     searchText: '',
+    // === On-Demand Cursor Pagination State ===
+    nextCursor: null,
+    hasMore: true,
+    isLoadingMore: false,
+    isPrefetching: false,
+    prefetchBuffer: null,
+    loadedRecordSet: new Set(),
+    loadMoreError: null,
+    scrollSentinelObserver: null,
     // Quick filters
     filterStatus: '',
     filterUrgency: '',
-    filterCustomer: '',
     // Customers list for dropdown
     customers: [],
     quickAddDraft: {},
     quickAddStarted: false,
     quickAddPreviewId: null,
-    autoScrollToBottomOnLoad: true,
+    autoScrollToBottomOnLoad: false,
     virtualStart: 0,
     virtualEnd: 0,
     virtualScrollFrame: null,
@@ -36,20 +44,30 @@ const ProjectsState = {
     realtimeStream: null,
     realtimeConnected: false,
     realtimeReloadTimer: null,
+    autoRefreshTimer: null,
+    autoRefreshInFlight: false,
+    lastAutoRefreshAt: 0,
     onlineUsers: [],
     remoteCursors: new Map(),
     cursorPublishTimer: null,
     activeChangeLogContext: null,
     activeCommentContext: null,
     undoStack: [],
+    isLoadingAll: false,
+    allDataLoaded: false,
+    loadAllStartTime: 0,
+    dataLoadToken: 0,
     columnFilters: {},
     activeFilterKey: null,
     searchDraft: '',
     columnWidths: {},
     columnResize: null,
+    columnDrag: null,
+    suppressNextHeaderClick: false,
     rangeSelection: null,
     selectedCells: [],
     columnOrder: [],
+    columnEditLocks: [],
     rowHeight: 46,
     headerHeight: 54,
     rowHeightResize: null,
@@ -111,6 +129,7 @@ const PROJECT_LAYOUT_STORAGE_PREFIX = 'projects_table_layout_v3';
 const PROJECT_LAYOUT_PREFERENCE_KEY = 'projects_table_layout';
 const PROJECT_FILTER_STORAGE_PREFIX = 'projects_table_filters_v1';
 const PROJECT_FILTER_PREFERENCE_KEY = 'projects_table_filters';
+const PROJECT_COLUMN_EDIT_LOCKS_STORAGE_KEY = 'projects_column_edit_locks_v1';
 const PROJECT_LOCK_CLEANUP_INTERVAL_MS = 1000;
 const PROJECT_DEFAULT_ROW_HEIGHT = 46;
 const PROJECT_MIN_ROW_HEIGHT = 30;
@@ -118,11 +137,16 @@ const PROJECT_MAX_ROW_HEIGHT = 120;
 const PROJECT_DEFAULT_HEADER_HEIGHT = 54;
 const PROJECT_MIN_HEADER_HEIGHT = 34;
 const PROJECT_MAX_HEADER_HEIGHT = 180;
-const PROJECT_VIRTUAL_OVERSCAN = 72;
-const PROJECT_VIRTUAL_RENDER_CHUNK = 18;
+const PROJECT_VIRTUAL_OVERSCAN = 80;
+const PROJECT_VIRTUAL_RENDER_CHUNK = 80;
 const PROJECT_BOTTOM_BLANK_ROWS = 5;
 const PROJECT_UNDO_LIMIT = 30;
 const PROJECT_MIN_COLUMN_WIDTH = 58;
+const PROJECT_AUTO_REFRESH_INTERVAL_MS = 8000;
+
+// === On-Demand Loading Constants ===
+const PROJECT_ONDEMAND_BATCH_SIZE = 50;
+const PROJECT_PREFETCH_THRESHOLD = 10;
 
 const PROJECT_SPREADSHEET_COLUMNS = [
     { key: 'tracking_id', label: 'STT', zhLabel: '序号', width: 88, readOnly: true, fields: ['Tracking ID', 'tracking_id'], className: 'col-stt' },
@@ -168,18 +192,20 @@ const PROJECT_SELECT_OPTIONS = {
     ],
     productTypes: [
         'WLJ物料架 - Giá đựng vật liệu',
-        'ZZC周转车 - xe trung chuyển',
-        'GZT工作台 - bàn thao tác',
-        'WCP无尘棚 - phòng sạch',
-        'LSX流水线 - băng tải',
-        'ZWJ转弯机 - bang tải chuyển hướng 90*: 180*',
-        'GZL改造类 - sửa đổi',
-        'SJT散件图 - bản vẽ tách chi tiết',
-        'BSX倍速线 - Dây chuyền băng tải tự động',
-        'WLL围栏类 - hàng rào',
-        'GTX滚筒线 - băng tải con lăn'
+        'ZZC周转车 - Xe trung chuyển',
+        'GZT工作台 - Bàn thao tác',
+        'WCP无尘棚 - Phòng sạch',
+        'LSX流水线 - Băng tải',
+        'ZWJ转弯机 - Băng tải chuyển hướng 90/180',
+        'GZL改造类 - Cải tạo',
+        'SJT散件图 - Bản vẽ tách chi tiết',
+        'BSX倍速线 - Băng chuyền xích',
+        'WLL围栏类 - Hàng rào',
+        'GTX滚筒线 - Băng chuyền con lăn',
+        'ZHT展会图 - Bản vẽ mặt bằng',
+        'LHX老化线 - Băng chuyền lão hóa'
     ],
-    engineers: ['孟令宝', '邓氏乔贞', '阮文张', '阮克南', '黄庭字', '孙啸', '陈孟辉']
+    engineers: []
 };
 
 function getProjectsLanguage() {
@@ -187,9 +213,13 @@ function getProjectsLanguage() {
 }
 
 function localizeMixedProjectLabel(label) {
-    const text = String(label || '');
+    let text = String(label || '');
     const lang = getProjectsLanguage();
     if (!text) return '';
+
+    text = text
+        .replace(/GZL改造类\s*-\s*sửa đổi/gi, 'GZL改造类 - Cải tạo')
+        .replace(/GZL改造类\s*-\s*sua doi/gi, 'GZL改造类 - Cải tạo');
 
     if (text.includes(' / ')) {
         const parts = text.split(' / ');
@@ -213,6 +243,11 @@ function getProjectOptionLabel(option) {
     return localizeMixedProjectLabel(label);
 }
 
+function getProjectOptionEditorLabel(option) {
+    const label = typeof option === 'object' ? option.label : option;
+    return String(label || '').trim();
+}
+
 function getDefaultProjectColumnOrder() {
     return PROJECT_SPREADSHEET_COLUMNS.map(column => column.key);
 }
@@ -233,6 +268,8 @@ function initProjectsModule() {
     
     loadProjectTableLayout();
     loadProjectFilterState();
+    loadProjectColumnEditLocksFromLocal();
+    syncProjectDesignerOptionsFromUsers();
 
     // Render the module content
     renderProjectsContent();
@@ -249,15 +286,31 @@ function initProjectsModule() {
     // Setup language change listener
     setupProjectsLanguageListener();
     
-    // Pre-load customers for dropdown
-    loadCustomers();
-    
     // Load data
     loadProjects();
     startProjectsRealtime();
+    startProjectsAutoRefresh();
     startProjectLockCleanup();
     syncProjectTableLayoutFromServer();
     syncProjectFilterStateFromServer();
+    syncProjectColumnEditLocksFromServer();
+}
+
+async function syncProjectDesignerOptionsFromUsers() {
+    try {
+        const result = await api.getUserDesigners();
+        const designers = (result.designers || [])
+            .map(item => ({
+                value: String(item.value || item.label || '').trim(),
+                label: String(item.label || item.value || '').trim()
+            }))
+            .filter(item => item.value);
+        if (designers.length) {
+            PROJECT_SELECT_OPTIONS.engineers = designers;
+        }
+    } catch (error) {
+        console.warn('[Projects] Cannot load designers from user accounts:', error);
+    }
 }
 
 /**
@@ -280,23 +333,11 @@ function renderProjectsContent() {
                         <button class="btn btn-sm btn-outline-secondary" type="button" id="btn-toggle-columns" title="${t('btn_toggle_columns')}">
                             <i class="bi bi-layout-columns"></i><span>${t('btn_toggle_columns')}</span>
                         </button>
+                        <button class="btn btn-sm btn-outline-success" type="button" id="btn-load-all-data" title="${t('load_all_data')}">
+                            <i class="bi bi-database-down"></i><span>${t('load_all_data')}</span>
+                        </button>
                     </div>
                     <div class="projects-toolbar-filters">
-                        <select class="form-select form-select-sm" id="filter-status" title="${t('filter_status')}">
-                            <option value="">${t('all_status')}</option>
-                            <option value="pending">${t('status_pending')}</option>
-                            <option value="in_progress">${t('status_in_progress')}</option>
-                            <option value="completed">${t('status_completed')}</option>
-                        </select>
-                        <select class="form-select form-select-sm" id="filter-urgency" title="${t('filter_urgency')}">
-                            <option value="">${t('all_urgency')}</option>
-                            <option value="normal">${t('urgency_normal')}</option>
-                            <option value="urgent">${t('urgency_urgent')}</option>
-                            <option value="very_urgent">${t('urgency_very_urgent')}</option>
-                        </select>
-                        <select class="form-select form-select-sm" id="filter-customer" title="${t('filter_customer')}">
-                            <option value="">${t('all_customers')}</option>
-                        </select>
                         <div class="input-group input-group-sm projects-search">
                             <button class="btn btn-outline-secondary" type="button" id="btn-apply-search-project" title="Enter">
                                 <i class="bi bi-search"></i>
@@ -414,13 +455,15 @@ function renderProjectsContent() {
                 <button type="button" class="project-context-item ctx-copy-cell"><span class="ctx-icon"><i class="bi bi-copy"></i></span><span data-menu-label="copyCell">${t('copy_cell')}</span><kbd>Ctrl+C</kbd></button>
                 <button type="button" class="project-context-item ctx-copy-row"><span class="ctx-icon"><i class="bi bi-table"></i></span><span data-menu-label="copyRow">${t('copy_row')}</span></button>
                 <button type="button" class="project-context-item ctx-filter-value"><span class="ctx-icon"><i class="bi bi-funnel"></i></span><span data-menu-label="filterValue">${t('filter_this_value')}</span></button>
-                <button type="button" class="project-context-item ctx-comments"><span class="ctx-icon is-primary"><i class="bi bi-chat-left-text"></i></span><span data-menu-label="comments">Bình luận</span></button>
-                <button type="button" class="project-context-item ctx-change-log"><span class="ctx-icon is-info"><i class="bi bi-clock-history"></i></span><span data-menu-label="changeLog">Lịch sử chỉnh sửa</span></button>
-                <button type="button" class="project-context-item ctx-material-docs"><span class="ctx-icon is-primary"><i class="bi bi-folder2-open"></i></span><span data-menu-label="materialDocs">Tài liệu mã liệu</span></button>
+                <button type="button" class="project-context-item ctx-comments"><span class="ctx-icon is-primary"><i class="bi bi-chat-left-text"></i></span><span data-menu-label="comments">${t('context_comments')}</span></button>
+                <button type="button" class="project-context-item ctx-change-log"><span class="ctx-icon is-info"><i class="bi bi-clock-history"></i></span><span data-menu-label="changeLog">${t('context_change_log')}</span></button>
+                <button type="button" class="project-context-item ctx-material-docs"><span class="ctx-icon is-primary"><i class="bi bi-folder2-open"></i></span><span data-menu-label="materialDocs">${t('context_material_docs')}</span></button>
             </div>
             <div class="project-context-section">
                 <button type="button" class="project-context-item ctx-refresh"><span class="ctx-icon"><i class="bi bi-arrow-clockwise"></i></span><span data-menu-label="refresh">${t('refresh')}</span></button>
-                <button type="button" class="project-context-item ctx-columns"><span class="ctx-icon"><i class="bi bi-layout-columns"></i></span><span data-menu-label="columns">${t('btn_toggle_columns')}</span></button>
+                <button type="button" class="project-context-item ctx-lock-column-edit"><span class="ctx-icon is-warning"><i class="bi bi-lock"></i></span><span data-menu-label="lockColumnEdit">${t('lock_column_edit')}</span></button>
+                <button type="button" class="project-context-item ctx-hide-column"><span class="ctx-icon is-info"><i class="bi bi-eye-slash"></i></span><span data-menu-label="hideColumn">${t('hide_column')}</span></button>
+                <button type="button" class="project-context-item ctx-columns"><span class="ctx-icon is-primary"><i class="bi bi-layout-three-columns"></i></span><span data-menu-label="columns">${t('column_settings')}</span></button>
             </div>
             <div class="project-context-section">
                 <button type="button" class="project-context-item ctx-export-excel"><span class="ctx-icon is-success"><i class="bi bi-file-earmark-excel"></i></span><span data-menu-label="exportExcel">${t('export_excel')}</span></button>
@@ -434,11 +477,24 @@ function renderProjectsContent() {
             <div class="modal-dialog modal-lg modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="project-material-docs-title">Tài liệu mã liệu</h5>
+                        <h5 class="modal-title" id="project-material-docs-title">${t('context_material_docs')}</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body" id="project-material-docs-body">
-                        <div class="text-muted">Đang tải...</div>
+                        <div class="text-muted">${t('loading')}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal fade" id="excel-viewer-modal" tabindex="-1">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="excel-viewer-title">Excel Viewer</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="excel-viewer-body">
+                        <div class="text-muted">Đang tải file...</div>
                     </div>
                 </div>
             </div>
@@ -447,11 +503,11 @@ function renderProjectsContent() {
             <div class="modal-dialog modal-lg modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="project-change-log-title">Lịch sử chỉnh sửa</h5>
+                        <h5 class="modal-title" id="project-change-log-title">${t('context_change_log')}</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body" id="project-change-log-body">
-                        <div class="text-muted">Đang tải...</div>
+                        <div class="text-muted">${t('loading')}</div>
                     </div>
                 </div>
             </div>
@@ -460,17 +516,17 @@ function renderProjectsContent() {
             <div class="modal-dialog modal-lg modal-dialog-scrollable">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="project-comments-title">Bình luận</h5>
+                        <h5 class="modal-title" id="project-comments-title">${t('context_comments')}</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <div id="project-comments-body" class="project-comments-body">
-                            <div class="text-muted">Đang tải...</div>
+                            <div class="text-muted">${t('loading')}</div>
                         </div>
                         <div class="project-comment-compose">
-                            <textarea class="form-control" id="project-comment-input" rows="3" maxlength="1000" placeholder="Nhập bình luận..."></textarea>
+                            <textarea class="form-control" id="project-comment-input" rows="3" maxlength="1000" placeholder="${t('comment_placeholder')}"></textarea>
                             <button type="button" class="btn btn-primary" id="btn-send-project-comment">
-                                <i class="bi bi-send"></i><span>Gửi</span>
+                                <i class="bi bi-send"></i><span>${t('submit')}</span>
                             </button>
                         </div>
                     </div>
@@ -602,19 +658,25 @@ function renderProjectsContent() {
         </div>
         
         <!-- Confirm Delete Modal -->
-        <div class="modal fade" id="confirm-delete-modal-project" tabindex="-1">
-            <div class="modal-dialog modal-sm">
+        <div class="modal fade confirm-delete-modal" id="confirm-delete-modal-project" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">
-                    <div class="modal-header bg-danger text-white">
-                        <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> <span data-i18n="confirm_delete">${t('confirm_delete')}</span></h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <div class="modal-header">
+                        <div class="confirm-delete-icon">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                        </div>
+                        <h5 class="modal-title"><span data-i18n="confirm_delete">${t('confirm_delete')}</span></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <p><span data-i18n="confirm_delete_message">${t('confirm_delete_message', { count: 0 })}</span></p>
+                        <p class="confirm-delete-message" id="confirm-delete-message-project">${t('confirm_delete_message', { count: 0 })}</p>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">${t('cancel')}</button>
-                        <button type="button" class="btn btn-danger" id="btn-confirm-delete-project">${t('delete')}</button>
+                        <button type="button" class="btn btn-outline-secondary confirm-delete-cancel" data-bs-dismiss="modal">${t('cancel')}</button>
+                        <button type="button" class="btn btn-danger confirm-delete-action" id="btn-confirm-delete-project">
+                            <i class="bi bi-trash3-fill"></i>
+                            <span>${t('delete')}</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -653,6 +715,18 @@ function setupProjectsEvents() {
     $('#btn-toggle-columns').click(function(e) {
         e.preventDefault();
         toggleColumnSelector();
+        const selector = $('#column-selector');
+        if (selector.length && selector.is(':visible')) {
+            const btn = $(this);
+            const btnOffset = btn.offset();
+            const left = Math.min(btnOffset.left, window.innerWidth - selector.outerWidth() - 8);
+            const top = Math.min(btnOffset.top + btn.outerHeight(), window.innerHeight - selector.outerHeight() - 8);
+            selector.css({
+                position: 'fixed',
+                left: `${Math.max(8, left)}px`,
+                top: `${Math.max(8, top)}px`
+            });
+        }
     });
 
     $('#btn-add-project').click(function() {
@@ -665,6 +739,10 @@ function setupProjectsEvents() {
 
     $('#btn-undo-project').click(function() {
         undoLastProjectAction();
+    });
+
+    $('#btn-load-all-data').click(function() {
+        loadAllProjectsInChunks();
     });
 
     $('#btn-send-project-comment').click(function() {
@@ -683,37 +761,57 @@ function setupProjectsEvents() {
         .on('click.projectMaterialFolder', '.btn-open-material-folder', function() {
             const listUrl = String($(this).data('listUrl') || '');
             const folderName = String($(this).data('folderName') || '');
-            if (listUrl) loadProjectMaterialFolder(listUrl, folderName);
+            const browserTarget = String($(this).data('browserTarget') || '#material-folder-browser');
+            if (listUrl) loadProjectMaterialFolder(listUrl, folderName, browserTarget);
+        })
+        .off('click.projectMaterialExplorer')
+        .on('click.projectMaterialExplorer', '.btn-open-material-explorer', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const $button = $(this);
+            if ($button.data('opening')) return;
+            const openUrl = String($(this).data('openUrl') || '');
+            const listUrl = String($(this).data('listUrl') || '');
+            $button.data('opening', true).prop('disabled', true);
+            try {
+                await openProjectMaterialFolderExplorer(openUrl || getProjectMaterialFolderOpenUrl(listUrl));
+            } finally {
+                setTimeout(() => {
+                    $button.data('opening', false).prop('disabled', false);
+                }, 800);
+            }
+        });
+
+    $('#view-content-project')
+        .off('click.projectDetailMaterialFolder')
+        .on('click.projectDetailMaterialFolder', '.btn-open-material-folder', function() {
+            const listUrl = String($(this).data('listUrl') || '');
+            const folderName = String($(this).data('folderName') || '');
+            const browserTarget = String($(this).data('browserTarget') || '#project-detail-material-browser');
+            if (listUrl) loadProjectMaterialFolder(listUrl, folderName, browserTarget);
+        })
+        .off('click.projectDetailMaterialExplorer')
+        .on('click.projectDetailMaterialExplorer', '.btn-open-material-explorer', async function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const $button = $(this);
+            if ($button.data('opening')) return;
+            const openUrl = String($(this).data('openUrl') || '');
+            const listUrl = String($(this).data('listUrl') || '');
+            $button.data('opening', true).prop('disabled', true);
+            try {
+                await openProjectMaterialFolderExplorer(openUrl || getProjectMaterialFolderOpenUrl(listUrl));
+            } finally {
+                setTimeout(() => {
+                    $button.data('opening', false).prop('disabled', false);
+                }, 800);
+            }
         });
 
     $(document).off('change.projectDeadline').on('change.projectDeadline', '#field-ngay, #field-capbach', function() {
         updateProjectExpectedDrawingTime();
     });
     
-    // Filter: Status
-    $('#filter-status').change(function() {
-        ProjectsState.filterStatus = $(this).val();
-        ProjectsState.currentPage = 1;
-        saveProjectFilterState();
-        renderProjectsTablePreservingViewport();
-    });
-    
-    // Filter: Urgency
-    $('#filter-urgency').change(function() {
-        ProjectsState.filterUrgency = $(this).val();
-        ProjectsState.currentPage = 1;
-        saveProjectFilterState();
-        renderProjectsTablePreservingViewport();
-    });
-
-    $('#filter-customer').change(function() {
-        ProjectsState.filterCustomer = $(this).val();
-        ProjectsState.currentPage = 1;
-        saveProjectFilterState();
-        renderProjectsTablePreservingViewport();
-    });
-    
-    // Search input
     $('#search-input-project').on('input', debounce(function(e) {
         ProjectsState.searchDraft = e?.target?.value || '';
         updateProjectSearchDirtyState();
@@ -739,7 +837,7 @@ function setupProjectsEvents() {
         ProjectsState.currentPage = 1;
         saveProjectFilterState();
         updateProjectSearchDirtyState();
-        renderProjectsTablePreservingViewport();
+        renderProjectsTableFromFirstRow();
     });
     
     // Save button
@@ -766,7 +864,7 @@ function setupProjectsEvents() {
             delete ProjectsState.columnFilters[key];
             hideProjectColumnFilter();
             saveProjectFilterState();
-            renderProjectsTablePreservingViewport();
+            renderProjectsTableFromFirstRow();
         }
     });
 
@@ -890,10 +988,6 @@ function updateToolbarButtonsI18n() {
 }
 
 function applyProjectFilterControlsState() {
-    $('#filter-status').val(ProjectsState.filterStatus || '');
-    $('#filter-urgency').val(ProjectsState.filterUrgency || '');
-    updateProjectCustomerFilterOptions();
-    $('#filter-customer').val(ProjectsState.filterCustomer || '');
     $('#search-input-project').val(ProjectsState.searchDraft || ProjectsState.searchText || '');
     updateProjectSearchDirtyState();
 }
@@ -913,7 +1007,7 @@ function applyProjectSearchFromInput() {
     ProjectsState.currentPage = 1;
     saveProjectFilterState();
     updateProjectSearchDirtyState();
-    renderProjectsTablePreservingViewport();
+    renderProjectsTableFromFirstRow();
 }
 
 /**
@@ -930,7 +1024,12 @@ function updateQuickActionsI18n() {
 function updateDeleteModalI18n() {
     const deleteModal = $('#confirm-delete-modal-project');
     if (deleteModal.length) {
-        deleteModal.find('.modal-title').html('<i class="bi bi-exclamation-triangle"></i> ' + t('confirm_delete'));
+        deleteModal.find('.modal-title').html('<span data-i18n="confirm_delete">' + t('confirm_delete') + '</span>');
+        deleteModal.find('.confirm-delete-cancel').text(t('cancel'));
+        deleteModal.find('.confirm-delete-action span').text(t('delete'));
+        deleteModal.find('#confirm-delete-message-project').text(
+            t('confirm_delete_message', { count: ProjectsState.selectedIds.length || 0 })
+        );
     }
 }
 
@@ -938,26 +1037,6 @@ function updateDeleteModalI18n() {
  * Update filter options with i18n
  */
 function updateProjectsFilterOptions() {
-    // Status filter
-    const statusFilter = $('#filter-status');
-    if (statusFilter.length) {
-        statusFilter.find('option').eq(0).text(t('all_status'));
-        statusFilter.find('option').eq(1).text(t('status_pending'));
-        statusFilter.find('option').eq(2).text(t('status_in_progress'));
-        statusFilter.find('option').eq(3).text(t('status_completed'));
-    }
-    
-    // Urgency filter
-    const urgencyFilter = $('#filter-urgency');
-    if (urgencyFilter.length) {
-        urgencyFilter.find('option').eq(0).text(t('all_urgency'));
-        urgencyFilter.find('option').eq(1).text(t('urgency_normal'));
-        urgencyFilter.find('option').eq(2).text(t('urgency_urgent'));
-        urgencyFilter.find('option').eq(3).text(t('urgency_very_urgent'));
-    }
-
-    updateProjectCustomerFilterOptions();
-    
 }
 
 // ============================================
@@ -968,29 +1047,53 @@ function updateProjectsFilterOptions() {
  * Load projects data
  */
 async function loadProjects(options = {}) {
-    console.log('[Projects] Loading projects...');
+    console.log('[Projects] Loading projects (on-demand cursor)...');
+    const loadToken = ++ProjectsState.dataLoadToken;
     const viewportSnapshot = options.preserveScroll ? (options.viewportSnapshot || captureProjectViewport()) : null;
+    const silent = !!options.silent;
     
     const tbody = $('#projects-table-body');
     renderProjectsSpreadsheetHeader();
-    tbody.html(createLoadingState(getVisibleProjectColumns().length));
+    if (!silent) {
+        tbody.html(createLoadingState(getVisibleProjectColumns().length));
+    }
     
     ProjectsState.isLoading = true;
+    // Reset on-demand state for fresh load
+    ProjectsState.nextCursor = null;
+    ProjectsState.hasMore = true;
+    ProjectsState.isLoadingMore = false;
+    ProjectsState.isPrefetching = false;
+    ProjectsState.prefetchBuffer = null;
+    ProjectsState.loadedRecordSet = new Set();
+    ProjectsState.loadMoreError = null;
+    ProjectsState.allDataLoaded = false;
     updateToolbarState();
     
     try {
         const result = await api.getProjects({
-            page: ProjectsState.currentPage,
             limit: ProjectsState.pageSize
         });
+        if (loadToken !== ProjectsState.dataLoadToken) return;
         
         if (result && result.data) {
-            ProjectsState.projects = result.data || [];
-            ProjectsState.totalRecords = result.total || 0;
+            // Deduplicate and track loaded IDs
+            const uniqueData = [];
+            for (const item of result.data) {
+                const id = String(getProjectId(item) || '');
+                if (id && !ProjectsState.loadedRecordSet.has(id)) {
+                    ProjectsState.loadedRecordSet.add(id);
+                    uniqueData.push(item);
+                }
+            }
+            ProjectsState.projects = uniqueData;
+            ProjectsState.totalRecords = result.total || uniqueData.length;
+            ProjectsState.nextCursor = result.next_cursor || null;
+            ProjectsState.hasMore = result.has_more !== false;
             ProjectsState.totalPages = Math.ceil(ProjectsState.totalRecords / ProjectsState.pageSize) || 1;
-            updateProjectCustomerFilterOptions();
-            
-            renderProjectsTable();
+
+            renderProjectsTablePreservingViewport();
+            setupOnDemandScrollSentinel();
             if (viewportSnapshot) {
                 restoreProjectViewport(viewportSnapshot);
             } else if (ProjectsState.autoScrollToBottomOnLoad) {
@@ -1000,20 +1103,309 @@ async function loadProjects(options = {}) {
             ProjectsState.projects = [];
             ProjectsState.totalRecords = 0;
             ProjectsState.totalPages = 1;
+            ProjectsState.hasMore = false;
+            setupOnDemandScrollSentinel();
+            setupSpreadsheetHandlers();
             tbody.html(createEmptyState(t('no_data_projects'), 22));
         }
     } catch (error) {
+        if (loadToken !== ProjectsState.dataLoadToken) return;
         console.error('[Projects] Load error:', error);
-        tbody.html(createErrorState(t('load_error_projects') + ': ' + error.message, 22));
+        if (!silent) {
+            tbody.html(createErrorState(t('load_error_projects') + ': ' + error.message, 22));
+        }
     } finally {
+        if (loadToken !== ProjectsState.dataLoadToken) return;
         ProjectsState.isLoading = false;
+        setupSpreadsheetHandlers();
         updateToolbarState();
     }
 }
 
+/**
+ * On-Demand: Tải batch tiếp theo (Infinite Scroll)
+ */
+async function loadNextProjectBatch() {
+    if (ProjectsState.isLoadingMore || ProjectsState.isLoading) return;
+    if (!ProjectsState.hasMore || !ProjectsState.nextCursor) return;
+
+    // Nếu có prefetch buffer sẵn, dùng luôn
+    if (ProjectsState.prefetchBuffer) {
+        const buf = ProjectsState.prefetchBuffer;
+        ProjectsState.prefetchBuffer = null;
+        appendProjectBatchData(buf);
+        return;
+    }
+
+    ProjectsState.isLoadingMore = true;
+    ProjectsState.loadMoreError = null;
+    updateToolbarState();
+
+    try {
+        const result = await api.getProjects({
+            limit: ProjectsState.pageSize,
+            cursor: ProjectsState.nextCursor
+        });
+        appendProjectBatchData(result);
+    } catch (error) {
+        console.error('[Projects] Load more error:', error);
+        ProjectsState.loadMoreError = error.message || 'Lỗi tải dữ liệu';
+        // Không cập nhật nextCursor khi lỗi → giữ cursor hiện tại để retry
+    } finally {
+        ProjectsState.isLoadingMore = false;
+        updateToolbarState();
+    }
+}
+
+/**
+ * Load toàn bộ dữ liệu theo chunk (cursor pagination liên tục)
+ */
+async function loadAllProjectsInChunks() {
+    if (ProjectsState.isLoadingAll) return;
+
+    const loadToken = ++ProjectsState.dataLoadToken;
+    ProjectsState.isLoadingAll = true;
+    ProjectsState.isLoading = true;
+    ProjectsState.allDataLoaded = false;
+    ProjectsState.loadAllStartTime = Date.now();
+    ProjectsState.loadedRecordSet = new Set();
+    ProjectsState.projects = [];
+    ProjectsState.nextCursor = null;
+    ProjectsState.hasMore = true;
+    ProjectsState.isLoadingMore = false;
+    ProjectsState.isPrefetching = false;
+    ProjectsState.prefetchBuffer = null;
+    ProjectsState.selectedIds = [];
+    updateToolbarState();
+
+    const tbody = $('#projects-table-body');
+    tbody.html(createLoadingState(getVisibleProjectColumns().length));
+
+    showLoading(t('toast_load_all_start'));
+
+    try {
+        await syncProjectsFromScannerBeforeLoadAll();
+
+        const result = await api.getProjects({
+            limit: ProjectsState.pageSize
+        });
+        if (loadToken !== ProjectsState.dataLoadToken) return;
+
+        if (result && result.data && result.data.length > 0) {
+            const uniqueData = [];
+            for (const item of result.data) {
+                const id = String(getProjectId(item) || '');
+                if (id && !ProjectsState.loadedRecordSet.has(id)) {
+                    ProjectsState.loadedRecordSet.add(id);
+                    uniqueData.push(item);
+                }
+            }
+            ProjectsState.projects = uniqueData;
+            ProjectsState.totalRecords = result.total || uniqueData.length;
+            ProjectsState.nextCursor = result.next_cursor || null;
+            ProjectsState.hasMore = result.has_more !== false;
+            ProjectsState.totalPages = Math.ceil(ProjectsState.totalRecords / ProjectsState.pageSize) || 1;
+
+
+            let batchCount = 1;
+            console.log(`[LoadAll] Batch ${batchCount}: loaded ${uniqueData.length} records, total: ${ProjectsState.totalRecords}`);
+
+            let prefetchPromise = null;
+
+            while (ProjectsState.hasMore && ProjectsState.nextCursor) {
+                let batchResult;
+                if (prefetchPromise) {
+                    batchResult = await prefetchPromise;
+                    prefetchPromise = null;
+                } else {
+                    batchResult = await api.getProjects({
+                        limit: ProjectsState.pageSize,
+                        cursor: ProjectsState.nextCursor
+                    });
+                }
+                if (loadToken !== ProjectsState.dataLoadToken) return;
+
+                if (!batchResult || !batchResult.data || batchResult.data.length === 0) {
+                    ProjectsState.hasMore = false;
+                    ProjectsState.nextCursor = null;
+                    break;
+                }
+
+                const newItems = [];
+                for (const item of batchResult.data) {
+                    const id = String(getProjectId(item) || '');
+                    if (id && !ProjectsState.loadedRecordSet.has(id)) {
+                        ProjectsState.loadedRecordSet.add(id);
+                        newItems.push(item);
+                    }
+                }
+
+                if (newItems.length > 0) {
+                    ProjectsState.projects = ProjectsState.projects.concat(newItems);
+                }
+                ProjectsState.totalRecords = batchResult.total || ProjectsState.projects.length;
+                ProjectsState.nextCursor = batchResult.next_cursor || null;
+                ProjectsState.hasMore = batchResult.has_more !== false;
+
+                console.log(`[LoadAll] Batch ${batchCount}: loaded ${newItems.length} new records, total in array: ${ProjectsState.projects.length}, hasMore: ${ProjectsState.hasMore}`);
+                updateToolbarState();
+                batchCount += 1;
+
+                if (ProjectsState.hasMore && ProjectsState.nextCursor) {
+                    prefetchPromise = api.getProjects({
+                        limit: ProjectsState.pageSize,
+                        cursor: ProjectsState.nextCursor
+                    });
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 30));
+            }
+
+            console.log(`[LoadAll] Completed: ${ProjectsState.projects.length} records in ${batchCount} batches`);
+            ProjectsState.allDataLoaded = !ProjectsState.hasMore && ProjectsState.projects.length >= ProjectsState.totalRecords;
+        } else {
+            ProjectsState.projects = [];
+            ProjectsState.totalRecords = 0;
+            ProjectsState.totalPages = 1;
+            ProjectsState.hasMore = false;
+            ProjectsState.allDataLoaded = true;
+            tbody.html(createEmptyState(t('no_data_projects'), 22));
+        }
+    } catch (error) {
+        console.error('[Projects] Load all error:', error);
+        tbody.html(createErrorState(t('load_error_projects') + ': ' + error.message, 22));
+    } finally {
+        if (loadToken !== ProjectsState.dataLoadToken) return;
+        ProjectsState.isLoadingAll = false;
+        ProjectsState.isLoading = false;
+        hideLoading();
+
+        const elapsed = ((Date.now() - ProjectsState.loadAllStartTime) / 1000).toFixed(1);
+        if (ProjectsState.projects.length < ProjectsState.totalRecords && ProjectsState.totalRecords > 0) {
+            showToast(
+                t('warning'),
+                t('toast_load_all_partial', { count: ProjectsState.projects.length, total: ProjectsState.totalRecords, time: elapsed }),
+                'warning'
+            );
+        } else {
+            showToast(
+                t('success'),
+                t('toast_load_all_complete', { count: ProjectsState.projects.length, time: elapsed }),
+                'success'
+            );
+        }
+
+        updateToolbarState();
+        renderProjectsVirtualRows({ force: true });
+        setupSpreadsheetHandlers();
+    }
+}
+
+/**
+ * Append batch data vào ProjectsState (dedup + prefetch trigger)
+ */
+function appendProjectBatchData(result) {
+    if (!result || !result.data || result.data.length === 0) {
+        ProjectsState.hasMore = false;
+        ProjectsState.nextCursor = null;
+        return;
+    }
+
+    const newItems = [];
+    for (const item of result.data) {
+        const id = String(getProjectId(item) || '');
+        if (id && !ProjectsState.loadedRecordSet.has(id)) {
+            ProjectsState.loadedRecordSet.add(id);
+            newItems.push(item);
+        }
+    }
+
+    if (newItems.length > 0) {
+        ProjectsState.projects = ProjectsState.projects.concat(newItems);
+        ProjectsState.totalRecords = result.total || ProjectsState.projects.length;
+    }
+    ProjectsState.nextCursor = result.next_cursor || null;
+    ProjectsState.hasMore = result.has_more !== false;
+
+    // Smooth incremental update: DO NOT destroy table header or reset scroll position!
+    renderProjectsVirtualRows();
+    updateToolbarState();
+
+    // Trigger prefetch khi gần hết dữ liệu
+    maybeStartPrefetch();
+}
+
+/**
+ * Prefetch: tải trước batch tiếp theo nếu dữ liệu còn lại ít
+ */
+function maybeStartPrefetch() {
+    if (ProjectsState.isPrefetching || !ProjectsState.hasMore || !ProjectsState.nextCursor) return;
+    if (ProjectsState.prefetchBuffer) return;
+
+    const displayProjects = getDisplayProjects();
+    const wrap = document.getElementById('projects-table-wrap');
+    if (!wrap) return;
+
+    const rowHeight = getProjectRowHeight();
+    const scrollBottom = wrap.scrollTop + wrap.clientHeight;
+    const totalContentHeight = displayProjects.length * rowHeight;
+    const remainingRows = Math.max(0, displayProjects.length - Math.floor(scrollBottom / rowHeight));
+
+    if (remainingRows <= PROJECT_PREFETCH_THRESHOLD) {
+        ProjectsState.isPrefetching = true;
+        api.getProjects({
+            limit: ProjectsState.pageSize,
+            cursor: ProjectsState.nextCursor
+        }).then(result => {
+            ProjectsState.prefetchBuffer = result;
+            ProjectsState.isPrefetching = false;
+        }).catch(() => {
+            ProjectsState.isPrefetching = false;
+        });
+    }
+}
+
+/**
+ * Setup IntersectionObserver sentinel cho on-demand infinite scroll
+ */
+function setupOnDemandScrollSentinel() {
+    // Cleanup previous observer
+    if (ProjectsState.scrollSentinelObserver) {
+        ProjectsState.scrollSentinelObserver.disconnect();
+        ProjectsState.scrollSentinelObserver = null;
+    }
+
+    const wrap = document.getElementById('projects-table-wrap');
+    if (!wrap) return;
+
+    // Tạo sentinel element nếu chưa có
+    let sentinel = document.getElementById('projects-scroll-sentinel');
+    if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.id = 'projects-scroll-sentinel';
+        sentinel.style.cssText = 'height:1px;width:100%;pointer-events:none;';
+        wrap.appendChild(sentinel);
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting && ProjectsState.hasMore && !ProjectsState.isLoadingMore && !ProjectsState.isLoading) {
+                loadNextProjectBatch();
+            }
+        }
+    }, {
+        root: wrap,
+        rootMargin: '500px 0px',
+        threshold: 0
+    });
+
+    observer.observe(sentinel);
+    ProjectsState.scrollSentinelObserver = observer;
+}
+
 function getProjectsCurrentUser() {
     try {
-        return JSON.parse(localStorage.getItem('current_user') || '{}') || {};
+        return JSON.parse(localStorage.getItem('current_user') || sessionStorage.getItem('current_user') || '{}') || {};
     } catch (error) {
         return {};
     }
@@ -1053,10 +1445,26 @@ function canCurrentUserEditAnyProject() {
 
 function canCurrentUserEditProjectColumn(column) {
     if (!column || column.readOnly || !column.updateKey) return false;
+    if (isProjectColumnEditLocked(column)) return false;
     const role = getProjectCurrentRole();
     if (['admin', 'planner', 'sales', 'engineer'].includes(role)) return true;
     if (role === 'production') return column.key === 'tinhtrang';
     return false;
+}
+
+function canCurrentUserManageProjectColumnLocks() {
+    return getProjectCurrentRole() === 'admin';
+}
+
+function isProjectColumnEditLocked(columnOrKey) {
+    const key = typeof columnOrKey === 'string' ? columnOrKey : columnOrKey?.key;
+    return !!key && ProjectsState.columnEditLocks.includes(String(key));
+}
+
+function isProjectColumnEditLockManageable(columnOrKey) {
+    const key = typeof columnOrKey === 'string' ? columnOrKey : columnOrKey?.key;
+    const column = PROJECT_SPREADSHEET_COLUMNS.find(item => item.key === key);
+    return !!(column && column.updateKey && !column.readOnly);
 }
 
 function getProjectsRealtimeUserId() {
@@ -1245,6 +1653,184 @@ function startProjectsRealtime() {
     };
 }
 
+function stopProjectsRealtime() {
+    if (ProjectsState.realtimeStream) {
+        ProjectsState.realtimeStream.close();
+        ProjectsState.realtimeStream = null;
+    }
+    ProjectsState.realtimeConnected = false;
+    updateProjectsPresence([]);
+}
+
+function reconnectProjectsRealtime() {
+    stopProjectsRealtime();
+    startProjectsRealtime();
+}
+
+function isProjectsTabActive() {
+    const container = document.getElementById('projects-container');
+    if (!container) return false;
+    if (window.AppState && AppState.currentTab) {
+        return AppState.currentTab === 'projects';
+    }
+    return window.location.hash === '' || window.location.hash === '#projects' || $('#projects-container').is(':visible');
+}
+
+function canAutoRefreshProjects() {
+    if (!isProjectsTabActive()) return false;
+    if (document.hidden) return false;
+    if (ProjectsState.isLoading || ProjectsState.isLoadingMore || ProjectsState.isLoadingAll) return false;
+    if (ProjectsState.autoRefreshInFlight) return false;
+    if (ProjectsState.projects.length > ProjectsState.pageSize) return false;
+    if (ProjectsState.editingCell) return false;
+    if (ProjectsState.quickAddStarted) return false;
+    if (ProjectsState.columnResize || ProjectsState.columnDrag || ProjectsState.rowHeightResize || ProjectsState.headerHeightResize) return false;
+    const tableWrap = document.getElementById('projects-table-wrap');
+    if (tableWrap && tableWrap.contains(document.activeElement)) return false;
+    if ($('#projects-container .project-sheet-cell.editing-cell, #projects-container .quick-add-cell:focus').length) return false;
+    return true;
+}
+
+async function refreshProjectsSilently(reason = 'auto') {
+    if (!canAutoRefreshProjects()) return;
+    if (ProjectsState.allDataLoaded) return;
+    ProjectsState.autoRefreshInFlight = true;
+    try {
+        await loadProjects({ preserveScroll: true, silent: true });
+        ProjectsState.lastAutoRefreshAt = Date.now();
+    } catch (error) {
+        console.warn(`[Projects] Silent refresh failed (${reason}):`, error);
+    } finally {
+        ProjectsState.autoRefreshInFlight = false;
+    }
+}
+
+async function runProjectsScannerSync(options = {}) {
+    const showProgress = !!options.showProgress;
+    const warnOnFail = options.warnOnFail !== false;
+    const restoreLoadingText = options.restoreLoadingText || '';
+    const userKey = getProjectsScannerUserKey();
+    const root = await getProjectScannerRoot(userKey);
+    if (!root) return null;
+
+    if (showProgress) {
+        showLoading(t('toast_scanner_sync_start') || 'Đang quét SMB và đồng bộ dữ liệu...');
+    }
+    const params = new URLSearchParams({
+        user_key: userKey,
+        force_documents: 'true'
+    });
+
+    try {
+        const result = await fetchProjectScannerJson(`/scanner-api/scanner/scan?${params.toString()}`, {
+            method: 'POST'
+        });
+        const summary = result?.results || {};
+        const updated = Number(summary.project_sync_updated || 0);
+        const cacheUpdated = Number(summary.document_cache_updated || 0);
+        if (showProgress && (updated || cacheUpdated)) {
+            showToast(
+                t('success'),
+                t('toast_scanner_sync_complete', { updated, cacheUpdated }) || `Đã đồng bộ ${updated} dòng từ SMB`,
+                'success'
+            );
+        }
+        return summary;
+    } catch (error) {
+        console.warn('[Projects] Scanner sync failed:', error);
+        if (warnOnFail) {
+            showToast(
+                t('warning'),
+                t('toast_scanner_sync_failed') || 'Không quét được SMB, bảng sẽ tải dữ liệu hiện có.',
+                'warning'
+            );
+        }
+        return null;
+    } finally {
+        if (restoreLoadingText) {
+            showLoading(restoreLoadingText);
+        }
+    }
+}
+
+async function syncProjectsFromScannerBeforeLoadAll() {
+    await runProjectsScannerSync({
+        showProgress: true,
+        warnOnFail: true,
+        restoreLoadingText: t('toast_load_all_start')
+    });
+}
+
+function isScannerProjectPlanCode(value) {
+    return /^[A-Z][A-Z0-9]{0,7}-\d{4}-\d{3}(?:-[A-Z0-9]+)?$/i.test(normalizeProjectPlanCode(value));
+}
+
+function getProjectPlanCode(project) {
+    return getProjectValue(project, [
+        'ma_ban_ve',
+        'Mã bản vẽ',
+        'Mã bản vẽ phương án',
+        'Mã bản vẽ phương án (mã trước khi đặt hàng)'
+    ], '');
+}
+
+function waitProjectDelay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function refreshProjectsAfterScannerDelete(planCodes = []) {
+    const scannerCodes = planCodes
+        .map(normalizeProjectPlanCode)
+        .filter(isScannerProjectPlanCode);
+    if (!scannerCodes.length) {
+        await loadProjects({ preserveScroll: true, silent: true });
+        return;
+    }
+
+    showLoading('Đang quét lại scanner để đồng bộ dự án...');
+    await runProjectsScannerSync({ showProgress: false, warnOnFail: false });
+
+    // Backend repair may still be creating the replacement row, so refresh a
+    // few times without blocking the UI on realtime/SSE availability.
+    for (const delay of [800, 1800, 3200]) {
+        await waitProjectDelay(delay);
+        await loadProjects({ preserveScroll: true, silent: true });
+        const found = scannerCodes.every(code => ProjectsState.projects.some(project => normalizeProjectPlanCode(getProjectPlanCode(project)) === code));
+        if (found) break;
+    }
+}
+
+function startProjectsAutoRefresh() {
+    if (ProjectsState.autoRefreshTimer) return;
+    ProjectsState.autoRefreshTimer = setInterval(() => {
+        refreshProjectsSilently(ProjectsState.realtimeConnected ? 'scanner-poll' : 'fallback');
+    }, PROJECT_AUTO_REFRESH_INTERVAL_MS);
+
+    document.removeEventListener('visibilitychange', handleProjectsVisibilityRefresh);
+    document.addEventListener('visibilitychange', handleProjectsVisibilityRefresh);
+    window.removeEventListener('focus', handleProjectsWindowFocusRefresh);
+    window.addEventListener('focus', handleProjectsWindowFocusRefresh);
+}
+
+function stopProjectsAutoRefresh() {
+    if (ProjectsState.autoRefreshTimer) {
+        clearInterval(ProjectsState.autoRefreshTimer);
+        ProjectsState.autoRefreshTimer = null;
+    }
+    document.removeEventListener('visibilitychange', handleProjectsVisibilityRefresh);
+    window.removeEventListener('focus', handleProjectsWindowFocusRefresh);
+}
+
+function handleProjectsVisibilityRefresh() {
+    if (!document.hidden) {
+        refreshProjectsSilently('visible');
+    }
+}
+
+function handleProjectsWindowFocusRefresh() {
+    refreshProjectsSilently('focus');
+}
+
 function handleProjectRealtimeEvent(event) {
     let payload;
     try {
@@ -1270,6 +1856,12 @@ function handleProjectRealtimeEvent(event) {
     }
     if (payload.type === 'cursor') {
         upsertProjectRemoteCursor(payload.cursor);
+        return;
+    }
+    if (payload.type === 'column_edit_locks_updated') {
+        ProjectsState.columnEditLocks = normalizeProjectColumnLockKeys(payload.locked_columns || payload.extra?.locked_columns || []);
+        localStorage.setItem(PROJECT_COLUMN_EDIT_LOCKS_STORAGE_KEY, JSON.stringify(ProjectsState.columnEditLocks));
+        renderProjectsTablePreservingViewport();
         return;
     }
     if (payload.type === 'comment_added' || payload.type === 'comment_deleted') {
@@ -1350,7 +1942,8 @@ function scheduleProjectsRealtimeReload() {
     if (ProjectsState.realtimeReloadTimer) return;
     ProjectsState.realtimeReloadTimer = setTimeout(() => {
         ProjectsState.realtimeReloadTimer = null;
-        loadProjects({ preserveScroll: true });
+        if (ProjectsState.allDataLoaded) return;
+        loadProjects({ preserveScroll: true, silent: true });
     }, 500);
 }
 
@@ -1435,6 +2028,13 @@ function renderProjectsTablePreservingViewport() {
     restoreProjectViewport(viewportSnapshot);
 }
 
+function renderProjectsTableFromFirstRow() {
+    const wrap = document.getElementById('projects-table-wrap');
+    if (wrap) wrap.scrollTop = 0;
+    ProjectsState.activeCell = null;
+    renderProjectsTable();
+}
+
 function captureProjectViewport() {
     const wrap = document.getElementById('projects-table-wrap');
     const activeCell = ProjectsState.activeCell ? { ...ProjectsState.activeCell } : null;
@@ -1447,23 +2047,17 @@ function captureProjectViewport() {
 
 function restoreProjectViewport(snapshot) {
     if (!snapshot) return;
-    const restore = () => {
-        const wrap = document.getElementById('projects-table-wrap');
-        if (!wrap) return;
-        wrap.scrollTop = snapshot.scrollTop || 0;
-        wrap.scrollLeft = snapshot.scrollLeft || 0;
-        renderProjectsVirtualRows();
-        if (snapshot.activeCell) {
-            requestAnimationFrame(() => {
-                const $cell = $(`#projects-table-body .project-sheet-cell[data-row="${snapshot.activeCell.row}"][data-col="${snapshot.activeCell.col}"]`);
-                if ($cell.length) activateProjectCell($cell);
-            });
-        }
-    };
-    requestAnimationFrame(() => {
-        restore();
-        setTimeout(restore, 80);
-    });
+    const wrap = document.getElementById('projects-table-wrap');
+    if (!wrap) return;
+    wrap.scrollTop = snapshot.scrollTop || 0;
+    wrap.scrollLeft = snapshot.scrollLeft || 0;
+    renderProjectsVirtualRows();
+    if (snapshot.activeCell) {
+        requestAnimationFrame(() => {
+            const $cell = $(`#projects-table-body .project-sheet-cell[data-row="${snapshot.activeCell.row}"][data-col="${snapshot.activeCell.col}"]`);
+            if ($cell.length) activateProjectCell($cell);
+        });
+    }
 }
 
 function setupProjectsVirtualScroll() {
@@ -1476,6 +2070,12 @@ function setupProjectsVirtualScroll() {
         ProjectsState.virtualScrollFrame = requestAnimationFrame(() => {
             ProjectsState.virtualScrollFrame = null;
             renderProjectsVirtualRows();
+            maybeStartPrefetch();
+            const scrollBottom = wrap.scrollTop + wrap.clientHeight;
+            const totalHeight = wrap.scrollHeight;
+            if (totalHeight - scrollBottom <= 600 && ProjectsState.hasMore && !ProjectsState.isLoadingMore && !ProjectsState.isLoading) {
+                loadNextProjectBatch();
+            }
         });
     }, { passive: true });
 }
@@ -1500,7 +2100,7 @@ function getProjectVirtualRange() {
 
 function renderProjectsVirtualRows(options = {}) {
     const tbody = $('#projects-table-body');
-    let html = '';
+    const parts = [];
     const columns = getVisibleProjectColumns();
     const displayProjects = getDisplayProjects();
     const totalRows = getProjectVirtualTotalRows(displayProjects.length);
@@ -1513,22 +2113,18 @@ function renderProjectsVirtualRows(options = {}) {
     const rowHeight = getProjectRowHeight();
 
     if (start > 0) {
-        html += renderProjectSpacerRow(columns.length, start * rowHeight, 'top');
+        parts.push(renderProjectSpacerRow(columns.length, start * rowHeight, 'top'));
     }
-    
-    for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
-        if (rowIndex === displayProjects.length) {
-            html += renderQuickAddProjectRow(columns, rowIndex);
-            continue;
-        }
 
+    for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
         const project = displayProjects[rowIndex];
         if (!project) {
-            html += renderProjectBlankRow(columns, rowIndex);
+            parts.push(renderProjectBlankRow(columns, rowIndex));
             continue;
         }
         const trackingId = getProjectValue(project, ['Tracking ID', 'tracking_id'], '');
-        html += `<tr data-id="${escapeHtml(String(trackingId))}" data-row-index="${rowIndex}">`;
+        const rowParts = [];
+        rowParts.push(`<tr data-id="${escapeHtml(String(trackingId))}" data-row-index="${rowIndex}">`);
 
         columns.forEach((column, colIndex) => {
             const rawValue = getProjectValue(project, column.fields, '');
@@ -1542,7 +2138,7 @@ function renderProjectsVirtualRows(options = {}) {
                 getProjectCellStateClass(column, rawValue),
                 selectionClasses
             ].filter(Boolean).join(' ');
-            html += `
+            rowParts.push(`
                 <td class="${classes}"
                     tabindex="0"
                     data-row="${rowIndex}"
@@ -1554,17 +2150,18 @@ function renderProjectsVirtualRows(options = {}) {
                     ${wrapProjectCellContent(displayValue)}
                     ${colIndex === 0 ? '<span class="project-row-height-resizer" title="Kéo để đổi chiều cao hàng"></span>' : ''}
                 </td>
-            `;
+            `);
         });
 
-        html += '</tr>';
+        rowParts.push('</tr>');
+        parts.push(rowParts.join(''));
     }
 
     if (end < totalRows) {
-        html += renderProjectSpacerRow(columns.length, (totalRows - end) * rowHeight, 'bottom');
+        parts.push(renderProjectSpacerRow(columns.length, (totalRows - end) * rowHeight, 'bottom'));
     }
-    
-    tbody.html(html);
+
+    tbody.html(parts.join(''));
     applyProjectLocksToRenderedCells();
 }
 
@@ -1573,7 +2170,7 @@ function getProjectBottomBlankRowCount() {
 }
 
 function getProjectVirtualTotalRows(displayCount = getDisplayProjects().length) {
-    return displayCount + 1 + getProjectBottomBlankRowCount();
+    return displayCount + getProjectBottomBlankRowCount();
 }
 
 function renderProjectSpacerRow(colspan, height, position) {
@@ -1765,16 +2362,20 @@ function renderProjectsSpreadsheetHeader() {
         .map((column, index) => `<col data-key="${escapeHtml(column.key)}" style="width: ${columnWidths[index]}px;">`)
         .join('');
     const header = columns
-        .map((column, index) => `
-            <th class="project-sheet-header" data-key="${escapeHtml(column.key)}" data-col-index="${index}" style="width: ${columnWidths[index]}px; height: ${headerHeight}px;" title="${escapeHtml(column.label)} / ${escapeHtml(column.zhLabel || '')}">
+        .map((column, index) => {
+            const editLocked = isProjectColumnEditLocked(column);
+            return `
+            <th class="project-sheet-header ${editLocked ? 'edit-locked-column' : ''}" data-key="${escapeHtml(column.key)}" data-col-index="${index}" style="width: ${columnWidths[index]}px; height: ${headerHeight}px;" title="${escapeHtml(column.label)} / ${escapeHtml(column.zhLabel || '')}${editLocked ? ' · Đã khóa chỉnh sửa' : ''}">
                 <button type="button" class="project-filter-trigger${ProjectsState.columnFilters[column.key] ? ' active' : ''}" data-key="${escapeHtml(column.key)}" title="Lọc ${escapeHtml(getProjectColumnHeaderLabel(column))}">
                     <span class="project-sheet-header-main">${escapeHtml(getProjectColumnHeaderLabel(column))}</span>
+                    ${editLocked ? '<i class="bi bi-lock-fill project-header-lock-icon" title="Đã khóa chỉnh sửa"></i>' : ''}
                     <i class="bi bi-funnel${ProjectsState.columnFilters[column.key] ? '-fill' : ''}"></i>
                 </button>
                 <span class="project-column-resizer" data-key="${escapeHtml(column.key)}" data-col-index="${index}" title="Kéo để đổi độ rộng cột"></span>
                 <span class="project-header-height-resizer" title="Kéo để đổi chiều cao header"></span>
             </th>
-        `)
+        `;
+        })
         .join('');
 
     const table = $('#projects-table');
@@ -1792,12 +2393,148 @@ function renderProjectsSpreadsheetHeader() {
     `);
 
     table.find('.project-filter-trigger').off('click.projectColumnFilter').on('click.projectColumnFilter', function(e) {
+        if (ProjectsState.suppressNextHeaderClick) {
+            e.preventDefault();
+            e.stopPropagation();
+            ProjectsState.suppressNextHeaderClick = false;
+            return;
+        }
         e.preventDefault();
         e.stopPropagation();
         showProjectColumnFilter($(this).data('key'), this);
     });
+    table.find('th.project-sheet-header').off('contextmenu.projectHeaderCtx').on('contextmenu.projectHeaderCtx', function(e) {
+        if ($(e.target).closest('.project-column-resizer, .project-header-height-resizer').length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        showProjectContextMenu(e.clientX, e.clientY, null, null, {
+            columnKey: $(this).data('key')
+        });
+    });
+    setupProjectHeaderDragHandlers();
     setupProjectColumnResizeHandlers();
     setupProjectTableHeightResizeHandlers();
+}
+
+function setupProjectHeaderDragHandlers() {
+    const table = $('#projects-table');
+    table.find('th.project-sheet-header')
+        .off('mousedown.projectHeaderDrag')
+        .on('mousedown.projectHeaderDrag', function(e) {
+            if (e.button !== 0) return;
+            if ($(e.target).closest('.project-column-resizer, .project-header-height-resizer').length) return;
+
+            const key = String($(this).data('key') || '');
+            if (!key || getVisibleProjectColumns().length < 2) return;
+
+            ProjectsState.columnDrag = {
+                key,
+                startX: e.clientX,
+                startY: e.clientY,
+                isDragging: false,
+                overKey: key,
+                dropSide: 'before'
+            };
+        });
+
+    $(document)
+        .off('mousemove.projectHeaderDrag')
+        .on('mousemove.projectHeaderDrag', function(e) {
+            const drag = ProjectsState.columnDrag;
+            if (!drag || ProjectsState.columnResize || ProjectsState.headerHeightResize || ProjectsState.rowHeightResize) return;
+
+            const distance = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY);
+            if (!drag.isDragging) {
+                if (distance < 5) return;
+                drag.isDragging = true;
+                $('body').addClass('project-column-dragging');
+                $('#projects-table th.project-sheet-header')
+                    .removeClass('is-dragging is-drop-before is-drop-after')
+                    .filter(`[data-key="${cssEscapeProjectKey(drag.key)}"]`)
+                    .addClass('is-dragging');
+            }
+
+            e.preventDefault();
+            updateProjectHeaderDropTarget(e.clientX, e.clientY);
+        })
+        .off('mouseup.projectHeaderDrag')
+        .on('mouseup.projectHeaderDrag', function(e) {
+            const drag = ProjectsState.columnDrag;
+            if (!drag) return;
+
+            ProjectsState.columnDrag = null;
+            clearProjectHeaderDragClasses();
+
+            if (!drag.isDragging) return;
+
+            e.preventDefault();
+            ProjectsState.suppressNextHeaderClick = true;
+            const changed = moveProjectColumnInOrder(drag.key, drag.overKey, drag.dropSide);
+            if (changed) {
+                saveProjectTableLayout();
+                initColumnSelector();
+                renderProjectsTablePreservingViewport();
+            }
+            setTimeout(() => {
+                ProjectsState.suppressNextHeaderClick = false;
+            }, 0);
+        });
+}
+
+function updateProjectHeaderDropTarget(clientX, clientY) {
+    const drag = ProjectsState.columnDrag;
+    if (!drag?.isDragging) return;
+
+    const headerEl = document.elementFromPoint(clientX, clientY)?.closest?.('#projects-table th.project-sheet-header');
+    const fallbackHeaders = Array.from(document.querySelectorAll('#projects-table th.project-sheet-header'));
+    const target = headerEl || fallbackHeaders.find(th => {
+        const box = th.getBoundingClientRect();
+        return clientX >= box.left && clientX <= box.right && clientY >= box.top && clientY <= box.bottom;
+    });
+    if (!target) return;
+
+    const targetKey = String(target.dataset.key || '');
+    if (!targetKey || targetKey === drag.key) return;
+
+    const box = target.getBoundingClientRect();
+    drag.overKey = targetKey;
+    drag.dropSide = clientX < box.left + box.width / 2 ? 'before' : 'after';
+
+    $('#projects-table th.project-sheet-header')
+        .removeClass('is-drop-before is-drop-after')
+        .filter(`[data-key="${cssEscapeProjectKey(targetKey)}"]`)
+        .addClass(drag.dropSide === 'before' ? 'is-drop-before' : 'is-drop-after');
+}
+
+function clearProjectHeaderDragClasses() {
+    $('body').removeClass('project-column-dragging');
+    $('#projects-table th.project-sheet-header')
+        .removeClass('is-dragging is-drop-before is-drop-after');
+}
+
+function moveProjectColumnInOrder(sourceKey, targetKey, dropSide = 'before') {
+    if (!sourceKey || !targetKey || sourceKey === targetKey) return false;
+
+    const defaultOrder = getDefaultProjectColumnOrder();
+    const currentOrder = Array.isArray(ProjectsState.columnOrder) && ProjectsState.columnOrder.length
+        ? ProjectsState.columnOrder
+        : defaultOrder;
+    const orderedKeys = currentOrder.filter(key => defaultOrder.includes(key));
+    defaultOrder.forEach(key => {
+        if (!orderedKeys.includes(key)) orderedKeys.push(key);
+    });
+
+    const sourceIndex = orderedKeys.indexOf(sourceKey);
+    if (sourceIndex === -1 || !orderedKeys.includes(targetKey)) return false;
+
+    orderedKeys.splice(sourceIndex, 1);
+    const targetIndex = orderedKeys.indexOf(targetKey);
+    if (targetIndex === -1) return false;
+
+    orderedKeys.splice(dropSide === 'after' ? targetIndex + 1 : targetIndex, 0, sourceKey);
+    const changed = orderedKeys.join('|') !== currentOrder.join('|');
+    ProjectsState.columnOrder = orderedKeys;
+    return changed;
 }
 
 function setupProjectColumnResizeHandlers() {
@@ -2019,59 +2756,7 @@ function matchProjectQuickFilters(project) {
         if (ProjectsState.filterStatus === 'completed' && !completion.includes('hoan thanh') && !completion.includes('完成')) return false;
         if (ProjectsState.filterStatus === 'in_progress' && (pending === 'yes' || pending === 'pending' || completion.includes('hoan thanh') || completion.includes('完成'))) return false;
     }
-
-    if (ProjectsState.filterCustomer) {
-        const customer = normalizeProjectFilterText(getProjectValue(project, ['Khách hàng', 'khach_hang', 'khachhang'], ''));
-        if (customer !== ProjectsState.filterCustomer) return false;
-    }
-
     return true;
-}
-
-function getProjectCustomerFilterOptions() {
-    const names = [];
-    const addName = value => {
-        const name = String(value || '').trim();
-        if (name) names.push(name);
-    };
-
-    ProjectsState.projects.forEach(project => {
-        addName(getProjectValue(project, ['Khách hàng', 'khach_hang', 'khachhang'], ''));
-    });
-
-    ProjectsState.customers.forEach(customer => {
-        addName(customer && customer.name ? customer.name : customer);
-    });
-
-    const byNormalized = new Map();
-    names.forEach(name => {
-        const normalized = normalizeProjectFilterText(name);
-        if (normalized && !byNormalized.has(normalized)) {
-            byNormalized.set(normalized, name);
-        }
-    });
-
-    return [...byNormalized.entries()]
-        .map(([value, label]) => ({ value, label }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'vi'));
-}
-
-function updateProjectCustomerFilterOptions() {
-    const select = $('#filter-customer');
-    if (!select.length) return;
-
-    const current = ProjectsState.filterCustomer || select.val() || '';
-    const options = getProjectCustomerFilterOptions();
-    select.empty();
-    select.append($('<option></option>').val('').text(t('all_customers')));
-    options.forEach(option => {
-        select.append($('<option></option>').val(option.value).text(option.label));
-    });
-
-    if (current && !options.some(option => option.value === current)) {
-        ProjectsState.filterCustomer = '';
-    }
-    select.val(ProjectsState.filterCustomer || '');
 }
 
 function focusFirstProjectSearchResult() {
@@ -2168,14 +2853,19 @@ function applyProjectColumnFilterOnly(value) {
     
     hideProjectColumnFilter();
     saveProjectFilterState();
-    renderProjectsTablePreservingViewport();
+    renderProjectsTableFromFirstRow();
 }
 
 function applyProjectColumnFilter() {
     const key = ProjectsState.activeFilterKey;
     if (!key) return;
     const allOptions = getProjectColumnFilterOptions(key);
-    const previousValues = ProjectsState.columnFilters[key] || allOptions.map(option => option.value);
+    const hasExistingFilter = Array.isArray(ProjectsState.columnFilters[key]);
+    const searchText = $('#project-filter-search').val() || '';
+    const isSearchingOptions = !!normalizeProjectFilterText(searchText);
+    const previousValues = hasExistingFilter
+        ? ProjectsState.columnFilters[key]
+        : (isSearchingOptions ? [] : allOptions.map(option => option.value));
     const visibleValues = $('#project-filter-values input[type="checkbox"]')
         .map(function() { return $(this).val(); })
         .get();
@@ -2195,7 +2885,7 @@ function applyProjectColumnFilter() {
     }
     hideProjectColumnFilter();
     saveProjectFilterState();
-    renderProjectsTablePreservingViewport();
+    renderProjectsTableFromFirstRow();
 }
 
 function hideProjectColumnFilter() {
@@ -2233,7 +2923,7 @@ function setProjectDraftValue(column, value) {
 }
 
 function getCurrentUserDisplayName() {
-    const currentUserStr = localStorage.getItem('current_user');
+    const currentUserStr = localStorage.getItem('current_user') || sessionStorage.getItem('current_user');
     if (!currentUserStr) return '';
     try {
         const currentUser = JSON.parse(currentUserStr);
@@ -2554,6 +3244,26 @@ function setupSpreadsheetHandlers() {
         if ($(e.target).closest('.view-project, input, select, textarea, button').length) return;
         if ($(this).data('blank')) return;
         activateProjectCell($(this));
+    });
+
+    tbody.off('dblclick.materialDocs').on('dblclick.materialDocs', '.project-sheet-cell[data-key="mabave"], .project-sheet-cell[data-key="mabavkythuat"], .project-sheet-cell[data-key="mame"]', function(e) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const $cell = $(this);
+        if ($cell.data('blank')) return;
+        const rawValue = String($cell.data('raw-value') || '').trim();
+        if (!rawValue) return;
+        const key = String($cell.data('key') || '');
+        const rowProject = getDisplayProjects()[Number($cell.data('row'))];
+        const cellMeta = {
+            key,
+            rawValue,
+            parentCode: rowProject ? getProjectValue(rowProject, ['Mã mẹ', 'Mã mẹ ', 'Mã thành phẩm (Mã mẹ)', 'ma_me'], '') : '',
+            column: getVisibleProjectColumns()[Number($cell.data('col'))],
+            row: Number($cell.data('row')),
+            id: String($cell.data('id') || '')
+        };
+        openProjectMaterialDocuments(cellMeta);
     });
 
     tbody.off('focus.projectSheet').on('focus.projectSheet', '.project-sheet-cell', function() {
@@ -2910,7 +3620,9 @@ async function beginProjectCellEdit($cell, seedValue = null) {
         const options = getProjectColumnOptions(column, originalValue);
         const selectHtml = options.map(option => {
             const value = getProjectOptionValue(option);
-            const label = getProjectOptionLabel(option);
+            const label = column.optionsSource === 'productTypes'
+                ? getProjectOptionEditorLabel(option)
+                : getProjectOptionLabel(option);
             return `<option value="${escapeHtml(String(value))}" ${String(value) === String(originalValue) ? 'selected' : ''}>${escapeHtml(String(label))}</option>`;
         }).join('');
         $cell.html(`<select class="project-cell-editor form-select form-select-sm">${selectHtml}</select>`);
@@ -2964,7 +3676,7 @@ function getProjectColumnOptions(column, currentValue) {
     const normalizedUrgency = column.optionsSource === 'urgency' ? normalizeProjectUrgency(currentValue) : null;
     if (normalizedUrgency?.value && !values.some(option => String(getProjectOptionValue(option)) === normalizedUrgency.value)) {
         values.unshift({ value: normalizedUrgency.value, label: normalizedUrgency.label });
-    } else if (currentValue && !hasCurrentValue && column.optionsSource !== 'urgency') {
+    } else if (currentValue && !hasCurrentValue && !['urgency', 'engineers'].includes(column.optionsSource)) {
         values.unshift(currentValue);
     }
     return values;
@@ -3215,9 +3927,23 @@ function updateToolbarState() {
     const activeColumnFilters = Object.keys(ProjectsState.columnFilters).length;
     const hasQuickFilters = !!ProjectsState.filterStatus || !!ProjectsState.filterUrgency;
     const hasSearch = !!String(ProjectsState.searchText || '').trim();
-    const countText = activeColumnFilters || hasQuickFilters || hasSearch
-        ? t('rows_count_filtered', { display: displayCount, total: ProjectsState.projects.length })
-        : t('rows_count', { count: ProjectsState.projects.length });
+    
+    // On-Demand progress display
+    let countText;
+    if (activeColumnFilters || hasQuickFilters || hasSearch) {
+        countText = t('rows_count_filtered', { display: displayCount, total: ProjectsState.projects.length });
+    } else if (ProjectsState.hasMore && ProjectsState.totalRecords > ProjectsState.projects.length) {
+        countText = `${ProjectsState.projects.length} / ${ProjectsState.totalRecords} ${t('rows_count', { count: '' }).replace(/^\s*\/\s*/, '').trim() || 'dòng'}`;
+    } else {
+        countText = t('rows_count', { count: ProjectsState.projects.length });
+    }
+    // Loading indicator
+    if (ProjectsState.isLoadingMore) {
+        countText += ' ⏳';
+    }
+    if (ProjectsState.loadMoreError) {
+        countText += ' ⚠️';
+    }
     $('#projects-filter-count').text(countText);
 }
 
@@ -3309,7 +4035,7 @@ function showProjectModal() {
     updateTechnicalRequirementCounter();
     
     // Auto-fill current logged in user's name as sales person
-    const currentUserStr = localStorage.getItem('current_user');
+    const currentUserStr = localStorage.getItem('current_user') || sessionStorage.getItem('current_user');
     if (currentUserStr) {
         try {
             const currentUser = JSON.parse(currentUserStr);
@@ -3323,7 +4049,7 @@ function showProjectModal() {
         }
     }
     
-    // Populate customer dropdown
+    // Populate customer dropdown from API
     populateCustomerDropdown();
     
     // Setup real-time validation
@@ -3422,6 +4148,31 @@ function updateTechnicalRequirementCounter() {
 }
 
 /**
+ * Populate customer dropdown from API
+ */
+async function populateCustomerDropdown() {
+    const $select = $('#field-khachhang-select');
+    if (!$select.length) return;
+
+    try {
+        const result = await api.getCustomers();
+        if (result && result.success && result.data) {
+            $select.empty();
+            $select.append('<option value="">' + t('select_customer') + '</option>');
+            result.data.forEach(customer => {
+                const displayName = customer.name || customer.english_name || customer.code || '';
+                if (displayName) {
+                    $select.append('<option value="' + escapeHtml(displayName) + '">' + 
+                                   escapeHtml(displayName) + '</option>');
+                }
+            });
+        }
+    } catch (error) {
+        console.error('[Projects] Error populating customer dropdown:', error);
+    }
+}
+
+/**
  * Validate a single field on blur
  */
 function validateFieldOnBlur($input, messageKey) {
@@ -3472,93 +4223,7 @@ function clearFieldError($input) {
     $input.next('.invalid-feedback').remove();
 }
 
-/**
- * Load customers from API and populate dropdown
- */
-async function loadCustomers() {
-    try {
-        const result = await api.getCustomers();
-        if (result.success && result.data) {
-            ProjectsState.customers = result.data;
-            updateProjectCustomerFilterOptions();
-            return result.data;
-        }
-        ProjectsState.customers = [];
-        updateProjectCustomerFilterOptions();
-        return [];
-    } catch (error) {
-        console.error('[Projects] Error loading customers:', error);
-        ProjectsState.customers = [];
-        updateProjectCustomerFilterOptions();
-        return [];
-    }
-}
 
-/**
- * Populate customer dropdown with customers data
- */
-function populateCustomerDropdown() {
-    // If no customers loaded yet, load them first
-    if (ProjectsState.customers.length === 0) {
-        return loadCustomers().then(customers => {
-            addCustomerOptions(customers);
-        });
-    }
-    addCustomerOptions(ProjectsState.customers);
-    return Promise.resolve();
-}
-
-/**
- * Add customer options to dropdown
- */
-function addCustomerOptions(customers) {
-    const customerSelect = $('#field-khachhang-select');
-    const input = $('#field-khachhang');
-    const currentValue = (input.val() || '').trim();
-    customerSelect.empty();
-    customerSelect.append(
-        $('<option></option>')
-            .val('')
-            .text(t('select_customer'))
-    );
-
-    const normalized = Array.isArray(customers)
-        ? customers
-            .map(customer => (customer && customer.name ? String(customer.name).trim() : ''))
-            .filter(Boolean)
-        : [];
-
-    // Fallback: nếu bảng customers rỗng, lấy danh sách từ dữ liệu projects đã có.
-    if (normalized.length === 0 && Array.isArray(ProjectsState.projects)) {
-        ProjectsState.projects.forEach(project => {
-            const name = String(
-                project['Khách hàng']
-                || project['khach_hang']
-                || project['khachhang']
-                || ''
-            ).trim();
-            if (name) normalized.push(name);
-        });
-    }
-
-    const uniqueNames = [...new Set(normalized)].sort((a, b) => a.localeCompare(b, 'vi'));
-
-    uniqueNames.forEach(name => {
-        customerSelect.append($('<option></option>').val(name).text(name));
-    });
-
-    if (currentValue) {
-        const matched = uniqueNames.includes(currentValue);
-        customerSelect.val(matched ? currentValue : '');
-        input.val(currentValue);
-    }
-
-    input.attr('placeholder', uniqueNames.length > 0 ? t('new_customer_placeholder') : t('enter_customer_placeholder'));
-}
-
-/**
- * Update project form labels with i18n
- */
 function updateProjectFormLabels() {
     // Section headers
     $('#project-form .section-title').eq(0).text(t('basic_info'));
@@ -3616,7 +4281,6 @@ async function editProject(id) {
             $('#field-nhanvienkd').val(result['nhan_vien_kinh_doanh'] || result['Nhân viên KD'] || result['Nhân viên kinh doanh'] || '');
             
             // Populate customer options first
-            await populateCustomerDropdown();
             const customerName = (result['khach_hang'] || result['Khách hàng'] || '').trim();
             $('#field-khachhang').val(customerName);
             const hasOption = $('#field-khachhang-select option').filter(function() {
@@ -3662,12 +4326,14 @@ async function viewProject(id) {
         const result = await api.getProject(id);
         
         if (result) {
+            ensureProjectDetailModal();
             // Update modal title
             $('#view-modal-project .modal-title').html('<i class="bi bi-eye"></i> ' + t('view_project_title'));
             $('#view-content-project').html(buildProjectDetailView(result));
             
             const modal = new bootstrap.Modal('#view-modal-project');
             modal.show();
+            loadProjectDetailMaterialSection(result);
         }
     } catch (error) {
         console.error('[Projects] View error:', error);
@@ -3804,7 +4470,10 @@ function showDeleteConfirmModal() {
         showToast(t('warning'), 'Bạn không có quyền xóa dự án.', 'warning');
         return;
     }
-    $('#delete-count-project').text(ProjectsState.selectedIds.length);
+    $('#confirm-delete-message-project').text(
+        t('confirm_delete_message', { count: ProjectsState.selectedIds.length })
+    );
+    $('#btn-confirm-delete-project').prop('disabled', ProjectsState.selectedIds.length === 0);
     
     const modal = new bootstrap.Modal('#confirm-delete-modal-project');
     modal.show();
@@ -3823,6 +4492,9 @@ async function deleteSelectedProjects() {
     const deletedRecords = ProjectsState.projects
         .filter(project => idSet.has(getProjectId(project)))
         .map(project => ({ ...project }));
+    const deletedScannerPlanCodes = deletedRecords
+        .map(getProjectPlanCode)
+        .filter(isScannerProjectPlanCode);
     
     showLoading(t('deleting'));
     
@@ -3844,9 +4516,10 @@ async function deleteSelectedProjects() {
             
             // Clear selection
             ProjectsState.selectedIds = [];
-            
-            // Reload data
-            loadProjects();
+
+            ids.forEach(id => removeRealtimeProjectRecord(id));
+
+            await refreshProjectsAfterScannerDelete(deletedScannerPlanCodes);
         } else {
             throw new Error(result.error || t('error'));
         }
@@ -3862,11 +4535,49 @@ async function deleteSelectedProjects() {
 // EXPORT
 // ============================================
 
+function getProjectExportColumns() {
+    return getVisibleProjectColumns();
+}
+
+function getProjectExportRows() {
+    return getDisplayProjects();
+}
+
+function getProjectExportCellValue(project, column, rowIndex) {
+    const rawValue = getProjectValue(project, column.fields, '');
+    if (column.key === 'tracking_id') {
+        return rawValue || rowIndex + 1;
+    }
+    if (rawValue === undefined || rawValue === null || rawValue === '') return '';
+    if (column.key === 'ngay') return formatProjectMonthCell(rawValue);
+    if (column.key === 'tg_tiepnhan') return formatProjectDateOnlyCell(rawValue);
+    if (column.key === 'trangthai') return stripProjectHtml(renderPendingStatus(rawValue)).trim();
+    if (column.key === 'dokhan') return normalizeProjectUrgency(rawValue).label || String(rawValue);
+    if (column.key === 'yeucaukythuat') return t('click_to_view');
+    return String(rawValue);
+}
+
+function buildProjectExportData() {
+    const columns = getProjectExportColumns();
+    const rows = getProjectExportRows();
+    const data = [
+        columns.map(column => getProjectColumnHeaderLabel(column)),
+        columns.map(column => column.zhLabel || '')
+    ];
+
+    rows.forEach((project, rowIndex) => {
+        data.push(columns.map(column => getProjectExportCellValue(project, column, rowIndex)));
+    });
+
+    return { columns, rows, data };
+}
+
 /**
  * Export to Excel
  */
 function exportToExcel() {
-    if (ProjectsState.projects.length === 0) {
+    const { columns, rows, data } = buildProjectExportData();
+    if (rows.length === 0) {
         showToast(t('warning'), t('toast_no_data_export'), 'warning');
         return;
     }
@@ -3875,20 +4586,6 @@ function exportToExcel() {
     
     try {
         const wb = XLSX.utils.book_new();
-        const columns = getVisibleProjectColumns();
-        const data = [
-            columns.map(column => column.label),
-            columns.map(column => column.zhLabel || '')
-        ];
-
-        ProjectsState.projects.forEach((project, rowIndex) => {
-            data.push(columns.map(column => {
-                const value = getProjectValue(project, column.fields, '');
-                if (column.key === 'tracking_id') return value || rowIndex + 1;
-                return value;
-            }));
-        });
-
         const ws = XLSX.utils.aoa_to_sheet(data);
         ws['!cols'] = columns.map(column => ({ wch: Math.max(8, Math.round(column.width / 8)) }));
         XLSX.utils.book_append_sheet(wb, ws, '25年');
@@ -3907,7 +4604,8 @@ function exportToExcel() {
  * Export to CSV
  */
 function exportToCSV() {
-    if (ProjectsState.projects.length === 0) {
+    const { rows, data } = buildProjectExportData();
+    if (rows.length === 0) {
         showToast(t('warning'), t('toast_no_data_export'), 'warning');
         return;
     }
@@ -3915,16 +4613,9 @@ function exportToCSV() {
     showLoading(t('exporting_data'));
     
     try {
-        const headers = Object.keys(ProjectsState.projects[0]);
-        let csv = headers.join(',') + '\n';
-        
-        ProjectsState.projects.forEach(row => {
-            const values = headers.map(h => {
-                const val = row[h] || '';
-                return '"' + String(val).replace(/"/g, '""') + '"';
-            });
-            csv += values.join(',') + '\n';
-        });
+        const csv = data
+            .map(row => row.map(value => '"' + String(value ?? '').replace(/"/g, '""') + '"').join(','))
+            .join('\n') + '\n';
         
         const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
@@ -4079,7 +4770,7 @@ function updateColumnSelectorSummary() {
 function getProjectLayoutStorageKey() {
     let userKey = 'anonymous';
     try {
-        const currentUser = JSON.parse(localStorage.getItem('current_user') || '{}');
+        const currentUser = JSON.parse(localStorage.getItem('current_user') || sessionStorage.getItem('current_user') || '{}');
         userKey = currentUser.id || currentUser.user_id || currentUser.username || currentUser.full_name || userKey;
     } catch (error) {
         userKey = 'anonymous';
@@ -4163,7 +4854,7 @@ function saveProjectTableLayout() {
 }
 
 async function syncProjectTableLayoutFromServer() {
-    if (!api?.getUserPreference || !localStorage.getItem('auth_token')) return;
+    if (!api?.getUserPreference || !(localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token'))) return;
     try {
         const result = await api.getUserPreference(PROJECT_LAYOUT_PREFERENCE_KEY);
         const layout = result?.value;
@@ -4184,7 +4875,7 @@ async function syncProjectTableLayoutFromServer() {
 }
 
 function saveProjectTableLayoutToServer(payload = getProjectTableLayoutPayload()) {
-    if (!api?.setUserPreference || !localStorage.getItem('auth_token')) return;
+    if (!api?.setUserPreference || !(localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token'))) return;
     api.setUserPreference(PROJECT_LAYOUT_PREFERENCE_KEY, payload)
         .catch(error => console.warn('[Projects] Cannot persist table layout:', error));
 }
@@ -4192,7 +4883,7 @@ function saveProjectTableLayoutToServer(payload = getProjectTableLayoutPayload()
 function getProjectFilterStorageKey() {
     let userKey = 'anonymous';
     try {
-        const currentUser = JSON.parse(localStorage.getItem('current_user') || '{}');
+        const currentUser = JSON.parse(localStorage.getItem('current_user') || sessionStorage.getItem('current_user') || '{}');
         userKey = currentUser.id || currentUser.user_id || currentUser.username || currentUser.full_name || userKey;
     } catch (error) {
         userKey = 'anonymous';
@@ -4204,7 +4895,6 @@ function getProjectFilterStatePayload() {
     return {
         filterStatus: ProjectsState.filterStatus || '',
         filterUrgency: ProjectsState.filterUrgency || '',
-        filterCustomer: ProjectsState.filterCustomer || '',
         searchText: ProjectsState.searchText || '',
         searchDraft: ProjectsState.searchDraft || ProjectsState.searchText || '',
         columnFilters: { ...ProjectsState.columnFilters }
@@ -4215,7 +4905,6 @@ function applyProjectFilterStatePayload(parsed) {
     if (!parsed || typeof parsed !== 'object') return false;
     ProjectsState.filterStatus = typeof parsed.filterStatus === 'string' ? parsed.filterStatus : '';
     ProjectsState.filterUrgency = typeof parsed.filterUrgency === 'string' ? parsed.filterUrgency : '';
-    ProjectsState.filterCustomer = typeof parsed.filterCustomer === 'string' ? normalizeProjectFilterText(parsed.filterCustomer) : '';
     ProjectsState.searchText = typeof parsed.searchText === 'string' ? parsed.searchText : '';
     ProjectsState.searchDraft = typeof parsed.searchDraft === 'string' ? parsed.searchDraft : ProjectsState.searchText;
 
@@ -4257,7 +4946,7 @@ function saveProjectFilterState() {
 }
 
 async function syncProjectFilterStateFromServer() {
-    if (!api?.getUserPreference || !localStorage.getItem('auth_token')) return;
+    if (!api?.getUserPreference || !(localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token'))) return;
     try {
         const result = await api.getUserPreference(PROJECT_FILTER_PREFERENCE_KEY);
         const filters = result?.value;
@@ -4278,9 +4967,96 @@ async function syncProjectFilterStateFromServer() {
 }
 
 function saveProjectFilterStateToServer(payload = getProjectFilterStatePayload()) {
-    if (!api?.setUserPreference || !localStorage.getItem('auth_token')) return;
+    if (!api?.setUserPreference || !(localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token'))) return;
     api.setUserPreference(PROJECT_FILTER_PREFERENCE_KEY, payload)
         .catch(error => console.warn('[Projects] Cannot persist filters:', error));
+}
+
+function normalizeProjectColumnLockKeys(keys) {
+    return [...new Set((Array.isArray(keys) ? keys : [])
+        .map(key => String(key || '').trim())
+        .filter(key => isProjectColumnEditLockManageable(key)))];
+}
+
+function loadProjectColumnEditLocksFromLocal() {
+    try {
+        ProjectsState.columnEditLocks = normalizeProjectColumnLockKeys(JSON.parse(localStorage.getItem(PROJECT_COLUMN_EDIT_LOCKS_STORAGE_KEY) || '[]'));
+    } catch (error) {
+        ProjectsState.columnEditLocks = [];
+    }
+}
+
+function ensureProjectDetailModal() {
+    const existing = document.getElementById('view-modal-project');
+    if (existing) {
+        if (existing.parentElement !== document.body) {
+            document.body.appendChild(existing);
+        }
+        return;
+    }
+    document.body.insertAdjacentHTML('beforeend', `
+        <div class="modal fade project-detail-modal" id="view-modal-project" tabindex="-1">
+            <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header bg-info text-white">
+                        <h5 class="modal-title"><i class="bi bi-eye"></i> ${t('view_project_title')}</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="view-content-project"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">${t('close')}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `);
+}
+
+async function syncProjectColumnEditLocksFromServer() {
+    loadProjectColumnEditLocksFromLocal();
+    try {
+        const result = await api.getProjectColumnEditLocks();
+        const lockedColumns = normalizeProjectColumnLockKeys(result.locked_columns || result.value || []);
+        ProjectsState.columnEditLocks = lockedColumns;
+        localStorage.setItem(PROJECT_COLUMN_EDIT_LOCKS_STORAGE_KEY, JSON.stringify(lockedColumns));
+        renderProjectsTablePreservingViewport();
+    } catch (error) {
+        console.warn('[Projects] Cannot sync column edit locks:', error);
+    }
+}
+
+async function saveProjectColumnEditLocks() {
+    const lockedColumns = normalizeProjectColumnLockKeys(ProjectsState.columnEditLocks);
+    ProjectsState.columnEditLocks = lockedColumns;
+    localStorage.setItem(PROJECT_COLUMN_EDIT_LOCKS_STORAGE_KEY, JSON.stringify(lockedColumns));
+    try {
+        await api.setProjectColumnEditLocks(lockedColumns);
+    } catch (error) {
+        showToast(t('error'), error.message || 'Không lưu được khóa chỉnh sửa cột', 'error');
+        await syncProjectColumnEditLocksFromServer();
+        throw error;
+    }
+}
+
+async function toggleProjectColumnEditLockFromContext(columnMeta) {
+    if (!columnMeta || !canCurrentUserManageProjectColumnLocks()) return;
+    const key = String(columnMeta.key || '');
+    if (!key) return;
+
+    const locked = isProjectColumnEditLocked(key);
+    ProjectsState.columnEditLocks = locked
+        ? ProjectsState.columnEditLocks.filter(item => item !== key)
+        : normalizeProjectColumnLockKeys([...ProjectsState.columnEditLocks, key]);
+    hideProjectContextMenu();
+    renderProjectsTablePreservingViewport();
+
+    try {
+        await saveProjectColumnEditLocks();
+        const columnName = columnMeta.columnLabel || key;
+        showToast(t('success'), locked ? `Đã mở khóa chỉnh sửa cột ${columnName}` : `Đã khóa chỉnh sửa cột ${columnName}`, 'success');
+    } catch (error) {
+        // saveProjectColumnEditLocks already shows and resyncs the error state.
+    }
 }
 
 /**
@@ -4334,33 +5110,44 @@ function hideProjectContextMenu() {
     $('#project-row-context-menu')
         .hide()
         .removeData('rowId')
-        .removeData('cellMeta');
+        .removeData('cellMeta')
+        .removeData('columnMeta');
 }
 
-function showProjectContextMenu(x, y, rowId, $cell = null) {
+function showProjectContextMenu(x, y, rowId, $cell = null, options = {}) {
     const menu = $('#project-row-context-menu');
     if (!menu.length) return;
     const hasRow = rowId !== undefined && rowId !== null && rowId !== '__new__';
-    const cellMeta = getProjectContextCellMeta(rowId, $cell);
+    const columnMeta = getProjectContextColumnMeta(options.columnKey);
+    const cellMeta = columnMeta || getProjectContextCellMeta(rowId, $cell);
     const hasCellValue = !!(cellMeta && String(cellMeta.rawValue || '').trim());
+    const isHeader = !!columnMeta;
 
     menu.data('rowId', rowId);
     menu.data('cellMeta', cellMeta);
-    setProjectContextItemState(menu.find('.ctx-view, .ctx-copy-row'), hasRow);
-    setProjectContextItemState(menu.find('.ctx-edit'), hasRow && canCurrentUserEditAnyProject());
+    menu.data('columnMeta', columnMeta);
+    setProjectContextItemState(menu.find('.ctx-view, .ctx-copy-row'), hasRow && !isHeader);
+    setProjectContextItemState(menu.find('.ctx-edit'), hasRow && !isHeader && canCurrentUserEditAnyProject());
     setProjectContextItemState(menu.find('.ctx-add'), canCurrentUserCreateProject());
-    setProjectContextItemState(menu.find('.ctx-delete'), hasRow && canCurrentUserDeleteProject());
-    setProjectContextItemState(menu.find('.ctx-comments'), hasRow);
-    setProjectContextItemState(menu.find('.ctx-change-log'), hasRow);
-    setProjectContextItemState(menu.find('.ctx-copy-cell'), !!cellMeta);
-    setProjectContextItemState(menu.find('.ctx-filter-value'), !!cellMeta && hasCellValue);
-    setProjectContextItemState(menu.find('.ctx-material-docs'), isProjectMaterialCodeCell(cellMeta));
+    setProjectContextItemState(menu.find('.ctx-delete'), hasRow && !isHeader && canCurrentUserDeleteProject());
+    setProjectContextItemState(menu.find('.ctx-comments'), hasRow && !isHeader);
+    setProjectContextItemState(menu.find('.ctx-change-log'), hasRow && !isHeader);
+    setProjectContextItemState(menu.find('.ctx-copy-cell'), !!cellMeta && !isHeader);
+    setProjectContextItemState(menu.find('.ctx-filter-value'), !!cellMeta && !isHeader && hasCellValue);
+    setProjectContextItemState(menu.find('.ctx-material-docs'), !isHeader && isProjectMaterialCodeCell(cellMeta));
+    setProjectContextItemState(menu.find('.ctx-lock-column-edit'), !!columnMeta && isProjectColumnEditLockManageable(columnMeta.key) && canCurrentUserManageProjectColumnLocks());
+    setProjectContextItemState(menu.find('.ctx-hide-column'), !!columnMeta && getVisibleProjectColumns().length > 1);
+    const columnLocked = !!columnMeta && isProjectColumnEditLocked(columnMeta.key);
+    menu.find('.ctx-lock-column-edit i')
+        .toggleClass('bi-lock', !columnLocked)
+        .toggleClass('bi-unlock', columnLocked);
+    menu.find('[data-menu-label="lockColumnEdit"]').text(t(columnLocked ? 'unlock_column_edit' : 'lock_column_edit'));
 
     const rowLabel = hasRow ? `#${rowId}` : t('project_table');
     const columnLabel = cellMeta?.columnLabel || '';
     const valuePreview = hasCellValue ? String(cellMeta.rawValue).trim() : t('empty_cell');
     menu.find('[data-menu-meta="title"]').text(hasRow ? `${t('project_label')} ${rowLabel}` : t('project_table'));
-    menu.find('[data-menu-meta="subtitle"]').text(columnLabel ? `${columnLabel}: ${valuePreview}` : t('no_row_selected'));
+    menu.find('[data-menu-meta="subtitle"]').text(isHeader && columnLabel ? `${t('column') || 'Cột'}: ${columnLabel}` : (columnLabel ? `${columnLabel}: ${valuePreview}` : t('no_row_selected')));
     menu.find('[data-menu-meta="badge"]').text(cellMeta?.columnZhLabel || (hasRow ? 'Row' : 'Sheet'));
 
     menu.css({ left: 0, top: 0, display: 'block', visibility: 'hidden' });
@@ -4390,6 +5177,19 @@ function getProjectContextCellMeta(rowId, $cell) {
         columnLabel: getProjectColumnDisplayName(column) || key,
         columnZhLabel: column?.zhLabel || '',
         rawValue
+    };
+}
+
+function getProjectContextColumnMeta(columnKey) {
+    const key = String(columnKey || '');
+    if (!key) return null;
+    const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === key);
+    if (!column) return null;
+    return {
+        key,
+        columnLabel: getProjectColumnDisplayName(column) || key,
+        columnZhLabel: column.zhLabel || '',
+        rawValue: ''
     };
 }
 
@@ -4473,7 +5273,7 @@ function buildProjectDetailView(project) {
                 </div>
                 <div class="project-progress-steps">
                     ${progress.steps.map(step => `
-                        <div class="project-progress-step ${step.active ? 'is-active' : ''} ${step.done ? 'is-done' : ''}">
+                        <div class="project-progress-step ${step.active ? 'is-active' : ''} ${step.done ? 'is-done' : ''} ${step.past ? 'is-past' : ''}">
                             <span class="project-progress-dot"><i class="bi ${step.icon}"></i></span>
                             <span>${escapeHtml(step.label)}</span>
                         </div>
@@ -4484,8 +5284,27 @@ function buildProjectDetailView(project) {
             <div class="project-detail-sections">
                 ${sectionsHtml}
                 ${extraHtml}
+                ${buildProjectDetailMaterialSection(project)}
             </div>
         </div>
+    `;
+}
+
+function buildProjectDetailMaterialSection(project) {
+    const code = getProjectDetailMaterialCode(project);
+    return `
+        <section class="project-detail-card project-detail-material-card">
+            <div class="project-detail-card-title project-detail-material-title">
+                <span><i class="bi bi-folder2-open"></i><span>物料资料</span></span>
+                <small id="project-detail-material-status">${code ? 'Đang tải tài liệu...' : 'Chưa có mã phương án'}</small>
+            </div>
+            <div id="project-detail-material-body" class="project-detail-material-body" data-material-code="${escapeProjectAttr(code)}">
+                <div class="project-detail-material-empty">
+                    <i class="bi bi-hourglass-split"></i>
+                    <span>${code ? 'Đang tìm PDF và thư mục vật liệu...' : 'Dự án này chưa có mã bản vẽ phương án để tìm tài liệu.'}</span>
+                </div>
+            </div>
+        </section>
     `;
 }
 
@@ -4503,6 +5322,95 @@ function buildProjectDetailSection(project, section, usedRawKeys) {
             </div>
         </section>
     `;
+}
+
+function getProjectDetailMaterialCode(project) {
+    return String(getProjectValue(project, [
+        'Mã bản vẽ phương án',
+        'Mã bản vẽ phương án (mã trước khi đặt hàng)',
+        'Mã bản vẽ',
+        'ma_ban_ve',
+        'Mã bản vẽ kỹ thuật (sau khi đặt hàng)',
+        'Mã bản vẽ kỹ thuật',
+        'ma_ban_ve_ky_thuat',
+        'Mã mẹ',
+        'ma_me'
+    ], '') || '').trim();
+}
+
+async function loadProjectDetailMaterialSection(project) {
+    const code = getProjectDetailMaterialCode(project);
+    const body = $('#project-detail-material-body');
+    const status = $('#project-detail-material-status');
+    if (!body.length) return;
+    if (!code) {
+        status.text('Chưa có mã phương án');
+        return;
+    }
+
+    body.attr('data-material-code', code);
+    status.text('Đang tải tài liệu...');
+    try {
+        const result = await getScannerPlanFolderDocuments(code);
+        if (String(body.attr('data-material-code') || '') !== code) return;
+        renderProjectDetailMaterialDocuments(result);
+    } catch (error) {
+        console.warn('[Projects] Detail material load failed:', error);
+        if (String(body.attr('data-material-code') || '') !== code) return;
+        status.text('Không tải được');
+        body.html(`
+            <div class="project-detail-material-empty is-error">
+                <i class="bi bi-exclamation-triangle"></i>
+                <span>${escapeHtml(error.message || 'Không tải được tài liệu vật liệu.')}</span>
+            </div>
+        `);
+    }
+}
+
+function renderProjectDetailMaterialDocuments(result) {
+    const body = $('#project-detail-material-body');
+    const status = $('#project-detail-material-status');
+    if (!body.length) return;
+
+    const docs = result?.documents || [];
+    const folders = result?.folders || [];
+    const pdfDocuments = result?.pdf_documents || [];
+    const parentOpenUrl = getProjectMaterialParentOpenUrl(result);
+    const totalFiles = Number(result?.file_count || docs.length || 0);
+    const totalFolders = Number(result?.folder_count || folders.length || 0);
+    const totalPdf = Number(result?.pdf_count || pdfDocuments.length || 0);
+
+    if (!docs.length && !folders.length && !pdfDocuments.length) {
+        status.text('Không tìm thấy');
+        body.html(`
+            <div class="project-detail-material-empty">
+                <i class="bi bi-folder-x"></i>
+                <span>${escapeHtml(result?.message || 'Không tìm thấy tài liệu vật liệu.')}</span>
+            </div>
+        `);
+        return;
+    }
+
+    status.text(`${totalPdf} PDF · ${totalFolders} thư mục`);
+    body.html(`
+        <div class="project-detail-material-summary">
+            <div>
+                <strong>${escapeHtml(result?.message || 'Tìm thấy tài liệu vật liệu')}</strong>
+                ${result?.resolved_code && result.resolved_code !== result.code ? `<span>Mã mẹ: ${escapeHtml(result.resolved_code)}</span>` : ''}
+            </div>
+            <div class="project-detail-material-stats">
+                <span><i class="bi bi-file-earmark"></i>${totalFiles} file</span>
+                <span><i class="bi bi-file-earmark-pdf"></i>${totalPdf} PDF</span>
+                <span><i class="bi bi-folder2-open"></i>${totalFolders} thư mục</span>
+            </div>
+        </div>
+        ${renderMaterialErpInfo(result?.erp_info)}
+        ${renderMaterialPdfPanel(pdfDocuments)}
+        ${renderMaterialFolders(folders, parentOpenUrl, 'project-detail-material-browser')}
+        ${docs.length ? `<div class="material-doc-list project-detail-material-list">
+            ${docs.map(doc => renderMaterialDocumentItem(doc)).join('')}
+        </div>` : ''}
+    `);
 }
 
 function getProjectDetailField(project, column, usedRawKeys) {
@@ -4609,12 +5517,19 @@ function getProjectDetailProgress(project) {
     const isCompleted = /完成|ho[aà]n th[aà]nh|done|completed/i.test(completionRaw);
     const percent = isCompleted ? 100 : hasInProgress ? 75 : hasAccepted ? 50 : 25;
 
-    const steps = [
-        { label: t('detail_stage_created'), icon: 'bi-flag', done: true, active: percent === 25 },
-        { label: t('detail_stage_accepted'), icon: 'bi-person-check', done: percent >= 50, active: percent === 50 },
-        { label: t('detail_stage_in_progress'), icon: 'bi-tools', done: percent >= 75, active: percent === 75 },
-        { label: t('detail_stage_completed'), icon: 'bi-check2-circle', done: percent >= 100, active: percent === 100 }
+    const stages = [
+        { threshold: 25, label: t('detail_stage_created'), icon: 'bi-flag' },
+        { threshold: 50, label: t('detail_stage_accepted'), icon: 'bi-person-check' },
+        { threshold: 75, label: isCompleted ? t('detail_stage_processed') : t('detail_stage_in_progress'), icon: 'bi-tools' },
+        { threshold: 100, label: t('detail_stage_completed'), icon: 'bi-check2-circle' }
     ];
+    const steps = stages.map(stage => ({
+        label: stage.label,
+        icon: stage.icon,
+        done: percent >= stage.threshold,
+        active: percent === stage.threshold,
+        past: percent > stage.threshold
+    }));
 
     return { percent, steps };
 }
@@ -4630,34 +5545,202 @@ function applyProjectContextFilter(cellMeta) {
     if (!cellMeta || !cellMeta.key) return;
     const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === cellMeta.key);
     const project = ProjectsState.projects.find(item => getProjectId(item) === String(cellMeta.rowId || ''));
-    const value = project && column
-        ? getProjectRenderedFilterValue(project, column)
-        : normalizeProjectFilterText(cellMeta.rawValue);
+    const label = project && column
+        ? getProjectRenderedFilterLabel(project, column)
+        : String(cellMeta.rawValue || '').trim();
+    const value = normalizeProjectFilterText(label);
     if (!value) return;
+    ProjectsState.activeFilterKey = cellMeta.key;
     ProjectsState.columnFilters[cellMeta.key] = [value];
     hideProjectContextMenu();
     saveProjectFilterState();
+    renderProjectsTableFromFirstRow();
+    showToast(t('success'), `${t('filtered_column', { column: cellMeta.columnLabel })}: ${label}`, 'success');
+}
+
+function hideProjectColumnFromContext(columnMeta) {
+    const key = String(columnMeta?.key || '');
+    if (!key) return;
+    if (getVisibleProjectColumns().length <= 1) {
+        showToast(t('warning'), t('cannot_hide_last_column') || 'Không thể ẩn cột cuối cùng', 'warning');
+        return;
+    }
+
+    ProjectsState.visibleColumns[key] = false;
+    hideProjectContextMenu();
+    saveProjectTableLayout();
     renderProjectsTablePreservingViewport();
-    showToast(t('success'), t('filtered_column', { column: cellMeta.columnLabel }), 'success');
+    showToast(t('success'), t('hidden_column', { column: columnMeta.columnLabel }) || `Đã ẩn cột ${columnMeta.columnLabel}`, 'success');
 }
 
 async function openProjectMaterialDocuments(cellMeta) {
     if (!isProjectMaterialCodeCell(cellMeta)) return;
     const code = String(cellMeta.rawValue || '').trim();
+    const parentCode = String(cellMeta.parentCode || '').trim();
+    const materialParams = { include_erp: '0' };
+    if (parentCode && ['mabave', 'mabavkythuat'].includes(String(cellMeta.key || ''))) {
+        materialParams.cinv_code = parentCode;
+    }
     const modalEl = document.getElementById('project-material-docs-modal');
     if (!modalEl) return;
 
-    $('#project-material-docs-title').text(`Tài liệu mã liệu: ${code}`);
-    $('#project-material-docs-body').html('<div class="text-muted">Đang tải...</div>');
+    $('#project-material-docs-title').text(`${t('context_material_docs')}: ${code}`);
+    $('#project-material-docs-body').html(`<div class="text-muted">${t('loading')}</div>`);
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
 
+    const preferScanner = String(cellMeta.key || '') === 'mabave';
     try {
-        const result = await api.getMaterialDocuments(code);
+        const result = preferScanner
+            ? await getScannerPlanFolderDocuments(code)
+            : await api.getMaterialDocuments(code, materialParams);
         renderProjectMaterialDocuments(result);
+        refreshProjectRowAfterMaterialSync(cellMeta, result);
     } catch (error) {
-        $('#project-material-docs-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tìm thấy tài liệu')}</div>`);
+        try {
+            const fallbackResult = preferScanner
+                ? await api.getMaterialDocuments(code, materialParams)
+                : await getScannerPlanFolderDocuments(code);
+            renderProjectMaterialDocuments(fallbackResult);
+            refreshProjectRowAfterMaterialSync(cellMeta, fallbackResult);
+        } catch (fallbackError) {
+            const message = preferScanner
+                ? (error.message || fallbackError.message)
+                : (fallbackError.message || error.message);
+            $('#project-material-docs-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(message || 'Không tìm thấy tài liệu')}</div>`);
+        }
     }
+}
+
+async function refreshProjectRowAfterMaterialSync(cellMeta, result) {
+    const syncResult = result?.metadata_refresh?.project_sync || {};
+    if (!syncResult.updated && !syncResult.created) return;
+
+    const rowId = String(cellMeta?.id || cellMeta?.rowId || syncResult.tracking_id || '').trim();
+    if (!rowId) return;
+
+    try {
+        const freshProject = await api.getProject(rowId);
+        const rowIndex = ProjectsState.projects.findIndex(project => String(getProjectId(project)) === rowId);
+        if (rowIndex === -1) return;
+
+        ProjectsState.projects[rowIndex] = freshProject;
+        renderProjectsVirtualRows({ force: true });
+        setupSpreadsheetHandlers();
+    } catch (error) {
+        console.warn('[Projects] Cannot refresh project row after material sync:', error);
+    }
+}
+
+function getProjectsScannerUserKey() {
+    try {
+        const rawUser = localStorage.getItem('current_user') || sessionStorage.getItem('current_user') || '{}';
+        const user = JSON.parse(rawUser);
+        return String(user.user_id || user.id || user.username || user.full_name || 'anonymous');
+    } catch (error) {
+        return 'anonymous';
+    }
+}
+
+function normalizeProjectPlanCode(value) {
+    return String(value || '').trim().toUpperCase();
+}
+
+async function fetchProjectScannerJson(url, options = {}) {
+    let response;
+    try {
+        response = await fetch(url, {
+            ...options,
+            headers: {
+                'Accept': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+    } catch (error) {
+        throw new Error('Không kết nối được Scanner backend. Hãy kiểm tra Scanner đang chạy rồi thử lại.');
+    }
+
+    let result = null;
+    try {
+        result = await response.json();
+    } catch (error) {
+        result = null;
+    }
+
+    if (!response.ok) {
+        throw new Error(result?.error || result?.message || result?.detail || `Scanner trả lỗi HTTP ${response.status}`);
+    }
+    return result;
+}
+
+async function getProjectScannerRoot(userKey) {
+    try {
+        const saved = await fetchProjectScannerJson(`/scanner-api/scanner/user-root?user_key=${encodeURIComponent(userKey)}`);
+        return saved?.smb_root || localStorage.getItem(`scanner_smb_root:${userKey}`) || '';
+    } catch (error) {
+        return localStorage.getItem(`scanner_smb_root:${userKey}`) || '';
+    }
+}
+
+function getScannerFolderPlanMatchScore(folder, code) {
+    const target = normalizeProjectPlanCode(code);
+    const name = normalizeProjectPlanCode(folder?.name);
+    const relativePath = normalizeProjectPlanCode(folder?.relative_path);
+    const absolutePath = normalizeProjectPlanCode(folder?.absolute_path);
+    const drawingCodes = (folder?.drawing_codes || []).map(normalizeProjectPlanCode);
+
+    if (!target) return 0;
+    if (name === target) return 100;
+    if (name.startsWith(target)) return 90;
+    if (drawingCodes.includes(target)) return 80;
+    if (name.includes(target)) return 70;
+    if (relativePath.includes(target)) return 60;
+    if (absolutePath.includes(target)) return 50;
+    return 0;
+}
+
+function findScannerFoldersByPlanCode(folders, code) {
+    return (folders || [])
+        .map(folder => ({ folder, score: getScannerFolderPlanMatchScore(folder, code) }))
+        .filter(item => item.score > 0)
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            const aTime = Date.parse(a.folder?.last_seen || a.folder?.updated_at || a.folder?.created_at || '') || 0;
+            const bTime = Date.parse(b.folder?.last_seen || b.folder?.updated_at || b.folder?.created_at || '') || 0;
+            return bTime - aTime;
+        })
+        .map(item => item.folder);
+}
+
+async function getScannerPlanFolderDocuments(code) {
+    const userKey = getProjectsScannerUserKey();
+    const root = await getProjectScannerRoot(userKey);
+    const params = new URLSearchParams({ limit: '400' });
+    if (root) params.set('root', root);
+
+    const folders = await fetchProjectScannerJson(`/scanner-api/folders?${params.toString()}`);
+    const candidates = findScannerFoldersByPlanCode(folders, code);
+    if (!candidates.length) {
+        throw new Error(`Không tìm thấy thư mục SMB cho mã: ${code}`);
+    }
+
+    let lastError = null;
+    for (const folder of candidates) {
+        if (!folder?.id) continue;
+        try {
+            const result = await fetchProjectScannerJson(`/scanner-api/documents/folders/${encodeURIComponent(folder.id)}`);
+            return {
+                ...result,
+                code,
+                resolved_code: result.resolved_code || result.code || code,
+                scanner_folder_id: folder.id
+            };
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw new Error(lastError?.message || `Không tìm thấy tài liệu SMB cho mã: ${code}`);
 }
 
 function getMaterialDocumentIcon(type) {
@@ -4688,6 +5771,39 @@ function formatMaterialFileSize(size) {
     return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
+const EXCEL_PREVIEW_MAX_BYTES = 5 * 1024 * 1024;
+const EXCEL_PREVIEW_MAX_ROWS = 250;
+const EXCEL_PREVIEW_MAX_COLS = 80;
+const EXCEL_PREVIEW_TIMEOUT_MS = 15000;
+
+function getMaterialDownloadUrl(viewUrl, downloadUrl = '') {
+    if (downloadUrl) return downloadUrl;
+    if (!viewUrl || viewUrl === '#') return '#';
+    return viewUrl.includes('?') ? `${viewUrl}&download=1` : `${viewUrl}?download=1`;
+}
+
+function getProjectMaterialFolderOpenUrl(listUrl = '') {
+    const value = String(listUrl || '');
+    if (!value) return '';
+    if (/^\/scanner-api\/documents\/folders\/[^/]+\/folder(?:\?|$)/.test(value)) {
+        return value.replace('/folder', '/open');
+    }
+    if (/^\/api\/materials\/folder\/[^/]+(?:\?|$)/.test(value)) {
+        return value.split('?')[0] + '/open';
+    }
+    return '';
+}
+
+async function openProjectMaterialFolderExplorer(openUrl = '') {
+    if (!openUrl) return;
+    try {
+        await api.openMaterialFolder(openUrl);
+        showToast(t('success'), 'Đã mở thư mục trong Explorer.', 'success');
+    } catch (error) {
+        showToast(t('error'), error.message || 'Không mở được thư mục trong Explorer', 'error');
+    }
+}
+
 function escapeProjectAttr(value) {
     return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -4698,16 +5814,35 @@ function renderMaterialErpInfo(erpInfo) {
     if (!rows.length) {
         return `
             <div class="material-erp-panel">
-                <div class="material-section-title"><i class="bi bi-database"></i><span>ERP</span></div>
+                <div class="material-section-title"><i class="bi bi-database"></i><span>${t('material_erp_section')}</span></div>
                 <div class="text-muted small">${escapeHtml(erpInfo.message || 'Không có thông tin ERP')}</div>
             </div>
         `;
     }
 
+    const erpFieldLabels = {
+        cEngineerFigNo: 'material_field_cEngineerFigNo',
+        cInvCode: 'material_field_cInvCode',
+        cInvName: 'material_field_cInvName',
+        cInvStd: 'material_field_cInvStd',
+        cInvCCode: 'material_field_cInvCCode',
+        cComUnitName: 'material_field_cComUnitName',
+        cInvDefine1: 'material_field_cInvDefine1',
+        cInvDefine2: 'material_field_cInvDefine2',
+        cInvDefine3: 'material_field_cInvDefine3',
+        cInvDefine4: 'material_field_cInvDefine4',
+        cInvDefine5: 'material_field_cInvDefine5',
+        cInvDefine6: 'material_field_cInvDefine6',
+        cInvDefine7: 'material_field_cInvDefine7',
+        cInvDefine8: 'material_field_cInvDefine8',
+        cInvDefine9: 'material_field_cInvDefine9',
+        cInvDefine10: 'material_field_cInvDefine10'
+    };
+
     return `
         <div class="material-erp-panel">
             <div class="material-section-title">
-                <i class="bi bi-database"></i><span>ERP</span>
+                <i class="bi bi-database"></i><span>${t('material_erp_section')}</span>
                 ${erpInfo.source ? `<small>${escapeHtml(erpInfo.source)}</small>` : ''}
             </div>
             <div class="material-erp-list">
@@ -4715,9 +5850,11 @@ function renderMaterialErpInfo(erpInfo) {
                     <div class="material-erp-item">
                         ${row.sheet ? `<div class="material-erp-sheet">${escapeHtml(row.sheet)}</div>` : ''}
                         <div class="material-erp-grid">
-                            ${Object.entries(row.values || {}).map(([key, value]) => `
-                                <div><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>
-                            `).join('')}
+                            ${Object.entries(row.values || {}).map(([key, value]) => {
+                                const labelKey = erpFieldLabels[key] || key;
+                                const label = t(labelKey);
+                                return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+                            }).join('')}
                         </div>
                     </div>
                 `).join('')}
@@ -4726,28 +5863,93 @@ function renderMaterialErpInfo(erpInfo) {
     `;
 }
 
-function renderMaterialFolders(folders) {
+function getProjectMaterialParentOpenUrl(result) {
+    if (result?.open_url) return result.open_url;
+    if (result?.scanner_folder_id) {
+        return `/scanner-api/documents/folders/${encodeURIComponent(result.scanner_folder_id)}/open`;
+    }
+    return '';
+}
+
+function renderMaterialFolders(folders, parentOpenUrl = '', browserId = 'material-folder-browser') {
     if (!folders?.length) return '';
+    const browserSelector = `#${browserId}`;
     return `
         <div class="material-folder-panel">
-            <div class="material-section-title"><i class="bi bi-folder2-open"></i><span>Thư mục vật liệu</span></div>
+            <div class="material-section-title">
+                <span class="material-section-title-main"><i class="bi bi-folder2-open"></i><span>${t('material_folder_section')}</span></span>
+                ${parentOpenUrl ? `
+                    <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-explorer" data-open-url="${escapeProjectAttr(parentOpenUrl)}" title="Mở thư mục cha bằng Explorer">
+                        <i class="bi bi-folder-symlink"></i>
+                    </button>
+                ` : ''}
+            </div>
             <div class="material-folder-list">
                 ${folders.map(folder => `
-                    <button type="button" class="material-folder-item btn-open-material-folder" data-list-url="${escapeProjectAttr(folder.list_url || '')}" data-folder-name="${escapeProjectAttr(folder.name || '')}" ${folder.exists ? '' : 'disabled'}>
-                        <i class="bi bi-folder2-open"></i>
-                        <span>${escapeHtml(folder.name || 'Thư mục')}</span>
-                        <small>${Number(folder.file_count || 0)} file</small>
-                    </button>
+                    <div class="material-folder-item-wrap ${folder.exists ? '' : 'is-disabled'}">
+                        <button type="button" class="material-folder-item btn-open-material-folder" data-list-url="${escapeProjectAttr(folder.list_url || '')}" data-folder-name="${escapeProjectAttr(folder.name || '')}" data-browser-target="${escapeProjectAttr(browserSelector)}" ${folder.exists ? '' : 'disabled'}>
+                            <i class="bi bi-folder2-open"></i>
+                            <span>${escapeHtml(folder.name || 'Thư mục')}</span>
+                            <small>${Number(folder.file_count || 0)} file</small>
+                        </button>
+                        <button type="button" class="material-folder-explorer btn-open-material-explorer" title="Mở bằng Explorer" data-open-url="${escapeProjectAttr(folder.open_url || '')}" data-list-url="${escapeProjectAttr(folder.list_url || '')}" ${folder.exists ? '' : 'disabled'}>
+                            <i class="bi bi-folder-symlink"></i>
+                        </button>
+                    </div>
                 `).join('')}
             </div>
-            <div id="material-folder-browser" class="material-folder-browser"></div>
+            <div id="${escapeProjectAttr(browserId)}" class="material-folder-browser"></div>
+        </div>
+    `;
+}
+
+function renderMaterialDocumentItem(doc, extraMeta = '') {
+    return `
+        <div class="material-doc-item ${doc.exists ? '' : 'is-missing'}">
+            <div class="material-doc-icon"><i class="bi ${getMaterialDocumentIcon(doc.type)}"></i></div>
+            <div class="material-doc-main">
+                <div class="material-doc-name">${escapeHtml(doc.name || '')}</div>
+                <div class="material-doc-meta">${escapeHtml(getMaterialDocumentTypeLabel(doc.type))}${doc.folder_name ? ` · ${escapeHtml(doc.folder_name)}` : ''}${extraMeta ? ` · ${escapeHtml(extraMeta)}` : ''}${doc.size ? ` · ${escapeHtml(formatMaterialFileSize(doc.size))}` : ''}${doc.modified_at ? ` · ${escapeHtml(formatProjectChangeTime(doc.modified_at))}` : ''}${doc.exists ? '' : ' · Server không truy cập được file'}</div>
+            </div>
+            <div class="material-doc-actions">
+                ${doc.type === 'bom' ? `
+                    <button type="button" class="btn btn-sm btn-outline-primary btn-open-bom ${doc.exists ? '' : 'disabled'}" data-view-url="${escapeProjectAttr(doc.view_url || '')}" data-download-url="${escapeProjectAttr(doc.download_url || '')}" data-file-name="${escapeProjectAttr(doc.name || '')}" data-file-size="${escapeProjectAttr(doc.size || '')}" ${doc.exists ? '' : 'disabled'}>
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </button>
+                ` : `
+                    <a class="btn btn-sm btn-outline-primary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.view_url || '#')}" target="_blank" rel="noopener">
+                        <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                `}
+                <a class="btn btn-sm btn-outline-secondary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.download_url || '#')}" download>
+                    <i class="bi bi-download"></i>
+                </a>
+            </div>
+        </div>
+    `;
+}
+
+function renderMaterialPdfPanel(pdfDocuments = []) {
+    if (!pdfDocuments.length) return '';
+    return `
+        <div class="material-pdf-panel">
+            <div class="material-section-title">
+                <span class="material-section-title-main"><i class="bi bi-file-earmark-pdf"></i><span>PDF tìm thấy</span></span>
+                <small>${pdfDocuments.length} file</small>
+            </div>
+            <div class="material-doc-list material-pdf-list">
+                ${pdfDocuments.map(doc => renderMaterialDocumentItem(doc, doc.relative_folder || '')).join('')}
+            </div>
         </div>
     `;
 }
 
 function renderProjectMaterialDocuments(result) {
     const docs = result?.documents || [];
-    if (!docs.length) {
+    const folders = result?.folders || [];
+    const pdfDocuments = result?.pdf_documents || [];
+    const parentOpenUrl = getProjectMaterialParentOpenUrl(result);
+    if (!docs.length && !folders.length && !pdfDocuments.length) {
         $('#project-material-docs-body').html(`<div class="alert alert-warning mb-0">${escapeHtml(result?.message || 'Không tìm thấy tài liệu')}</div>`);
         return;
     }
@@ -4758,45 +5960,47 @@ function renderProjectMaterialDocuments(result) {
             ${result.resolved_code && result.resolved_code !== result.code ? `<span>Mã mẹ: ${escapeHtml(result.resolved_code)}</span>` : ''}
         </div>
         ${renderMaterialErpInfo(result.erp_info)}
-        ${renderMaterialFolders(result.folders || [])}
-        <div class="material-doc-list">
-            ${docs.map(doc => `
-                <div class="material-doc-item ${doc.exists ? '' : 'is-missing'}">
-                    <div class="material-doc-icon"><i class="bi ${getMaterialDocumentIcon(doc.type)}"></i></div>
-                    <div class="material-doc-main">
-                        <div class="material-doc-name">${escapeHtml(doc.name || '')}</div>
-                        <div class="material-doc-meta">${escapeHtml(getMaterialDocumentTypeLabel(doc.type))}${doc.folder_name ? ` · ${escapeHtml(doc.folder_name)}` : ''}${doc.exists ? '' : ' · Server không truy cập được file'}</div>
-                    </div>
-                    <div class="material-doc-actions">
-                        <a class="btn btn-sm btn-outline-primary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.view_url || '#')}" target="_blank" rel="noopener">
-                            <i class="bi bi-box-arrow-up-right"></i>
-                        </a>
-                        <a class="btn btn-sm btn-outline-secondary ${doc.exists ? '' : 'disabled'}" href="${escapeHtml(doc.download_url || '#')}">
-                            <i class="bi bi-download"></i>
-                        </a>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
+        ${renderMaterialPdfPanel(pdfDocuments)}
+        ${renderMaterialFolders(folders, parentOpenUrl)}
+        ${docs.length ? `<div class="material-doc-list">
+            ${docs.map(doc => renderMaterialDocumentItem(doc)).join('')}
+        </div>` : ''}
     `;
     $('#project-material-docs-body').html(html);
 }
 
-async function loadProjectMaterialFolder(listUrl, folderName = '') {
-    const target = $('#material-folder-browser');
+async function loadProjectMaterialFolder(listUrl, folderName = '', targetSelector = '#material-folder-browser') {
+    const target = $(targetSelector || '#material-folder-browser');
     if (!target.length) return;
     target.html('<div class="text-muted small">Đang tải thư mục...</div>');
     try {
         const result = await api.getMaterialFolder(listUrl);
         const entries = result.entries || [];
+        const folderOpenUrl = result.open_url || getProjectMaterialFolderOpenUrl(listUrl);
         if (!entries.length) {
-            target.html(`<div class="alert alert-info mb-0">Thư mục ${escapeHtml(folderName || result.folder_name || '')} không có file hiển thị.</div>`);
+            target.html(`
+                <div class="alert alert-info mb-0 d-flex align-items-center justify-content-between gap-2">
+                    <span>Thư mục ${escapeHtml(folderName || result.folder_name || '')} không có file hiển thị.</span>
+                    ${folderOpenUrl ? `
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-explorer" data-open-url="${escapeProjectAttr(folderOpenUrl)}" title="Mở bằng Explorer">
+                            <i class="bi bi-folder-symlink"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `);
             return;
         }
         const html = `
             <div class="material-folder-browser-head">
                 <strong>${escapeHtml(result.folder_name || folderName || 'Thư mục')}</strong>
-                <span>${entries.length}${result.truncated ? ` / ${Number(result.total || entries.length)}` : ''} mục</span>
+                <div class="d-flex align-items-center gap-2">
+                    <span>${entries.length}${result.truncated ? ` / ${Number(result.total || entries.length)}` : ''} mục</span>
+                    ${folderOpenUrl ? `
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-explorer" data-open-url="${escapeProjectAttr(folderOpenUrl)}" title="Mở bằng Explorer">
+                            <i class="bi bi-folder-symlink"></i>
+                        </button>
+                    ` : ''}
+                </div>
             </div>
             <div class="material-folder-entry-list">
                 ${entries.map(entry => `
@@ -4808,17 +6012,24 @@ async function loadProjectMaterialFolder(listUrl, folderName = '') {
                         </div>
                         <div class="material-doc-actions">
                             ${entry.is_dir ? `
-                                <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-folder" data-list-url="${escapeProjectAttr(entry.list_url || '')}" data-folder-name="${escapeProjectAttr(entry.name || '')}">
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-folder" data-list-url="${escapeProjectAttr(entry.list_url || '')}" data-folder-name="${escapeProjectAttr(entry.name || '')}" data-browser-target="${escapeProjectAttr(targetSelector || '#material-folder-browser')}">
                                     <i class="bi bi-folder2-open"></i>
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-open-material-explorer" data-open-url="${escapeProjectAttr(entry.open_url || '')}" data-list-url="${escapeProjectAttr(entry.list_url || '')}" title="Mở bằng Explorer">
+                                    <i class="bi bi-folder-symlink"></i>
+                                </button>
+                            ` : entry.type === 'bom' ? `
+                                <button type="button" class="btn btn-sm btn-outline-primary btn-open-bom" data-view-url="${escapeProjectAttr(entry.view_url || '')}" data-download-url="${escapeProjectAttr(entry.download_url || '')}" data-file-name="${escapeProjectAttr(entry.name || '')}" data-file-size="${escapeProjectAttr(entry.size || '')}">
+                                    <i class="bi bi-box-arrow-up-right"></i>
                                 </button>
                             ` : `
                                 <a class="btn btn-sm btn-outline-primary" href="${escapeHtml(entry.view_url || '#')}" target="_blank" rel="noopener">
                                     <i class="bi bi-box-arrow-up-right"></i>
                                 </a>
-                                <a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(entry.download_url || '#')}">
-                                    <i class="bi bi-download"></i>
-                                </a>
                             `}
+                            <a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(entry.download_url || '#')}" download>
+                                <i class="bi bi-download"></i>
+                            </a>
                         </div>
                     </div>
                 `).join('')}
@@ -4829,6 +6040,191 @@ async function loadProjectMaterialFolder(listUrl, folderName = '') {
         target.html(`<div class="alert alert-warning mb-0">${escapeHtml(error.message || 'Không tải được thư mục')}</div>`);
     }
 }
+
+async function getExcelPreviewSize(viewUrl) {
+    try {
+        const response = await fetch(viewUrl, { method: 'HEAD' });
+        if (!response.ok) return 0;
+        return Number(response.headers.get('Content-Length') || response.headers.get('X-Material-File-Size') || 0);
+    } catch (error) {
+        return 0;
+    }
+}
+
+function renderExcelTooLargeMessage(fileName, downloadUrl, size) {
+    const sizeText = size ? ` (${formatMaterialFileSize(size)})` : '';
+    $('#excel-viewer-body').html(`
+        <div class="alert alert-warning mb-3">
+            File Excel${sizeText} khá nặng nên không xem trước trong trình duyệt để tránh đơ máy.
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-primary" href="${escapeHtml(downloadUrl || '#')}" download>
+                <i class="bi bi-download me-1"></i> Tải xuống
+            </a>
+            <span class="text-muted align-self-center">${escapeHtml(fileName || '')}</span>
+        </div>
+    `);
+}
+
+async function openExcelViewer(viewUrl, fileName, downloadUrl = '', fileSize = 0) {
+    if (!viewUrl || viewUrl === '#') return;
+    const modalEl = document.getElementById('excel-viewer-modal');
+    if (!modalEl) return;
+    const finalDownloadUrl = getMaterialDownloadUrl(viewUrl, downloadUrl);
+    $('#excel-viewer-title').text(fileName || 'Excel Viewer');
+    $('#excel-viewer-body').html(`
+        <div class="d-flex align-items-center justify-content-between gap-3">
+            <div class="text-muted">Đang kiểm tra file...</div>
+            <a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(finalDownloadUrl)}" download>
+                <i class="bi bi-download me-1"></i> Tải xuống
+            </a>
+        </div>
+    `);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    try {
+        let size = Number(fileSize || 0);
+        if (!size) {
+            size = await getExcelPreviewSize(viewUrl);
+        }
+        if (size > EXCEL_PREVIEW_MAX_BYTES) {
+            renderExcelTooLargeMessage(fileName, finalDownloadUrl, size);
+            return;
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), EXCEL_PREVIEW_TIMEOUT_MS);
+        $('#excel-viewer-body').html(`
+            <div class="d-flex align-items-center justify-content-between gap-3">
+                <div class="text-muted">Đang tải file để xem nhanh...</div>
+                <a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(finalDownloadUrl)}" download>
+                    <i class="bi bi-download me-1"></i> Tải xuống
+                </a>
+            </div>
+        `);
+        const response = await fetch(viewUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error('Không tải được file Excel');
+        const buffer = await response.arrayBuffer();
+        if (buffer.byteLength > EXCEL_PREVIEW_MAX_BYTES) {
+            renderExcelTooLargeMessage(fileName, finalDownloadUrl, buffer.byteLength);
+            return;
+        }
+        const wb = XLSX.read(buffer, {
+            type: 'array',
+            sheetRows: EXCEL_PREVIEW_MAX_ROWS,
+            cellStyles: false,
+            cellNF: false,
+            cellHTML: false
+        });
+        const sheetNames = wb.SheetNames || [];
+        if (!sheetNames.length) {
+            $('#excel-viewer-body').html('<div class="alert alert-warning mb-0">File Excel trống</div>');
+            return;
+        }
+        renderExcelSheet(wb, sheetNames[0], finalDownloadUrl, fileName);
+    } catch (error) {
+        const message = error.name === 'AbortError'
+            ? 'Tải file quá lâu. Nên tải xuống để mở bằng Excel.'
+            : (error.message || 'Lỗi đọc file Excel');
+        $('#excel-viewer-body').html(`
+            <div class="alert alert-warning mb-3">${escapeHtml(message)}</div>
+            <a class="btn btn-primary" href="${escapeHtml(finalDownloadUrl)}" download>
+                <i class="bi bi-download me-1"></i> Tải xuống
+            </a>
+        `);
+    }
+}
+
+function renderExcelSheet(wb, sheetName, downloadUrl = '', fileName = '') {
+    const ws = wb.Sheets[sheetName];
+    if (!ws) {
+        $('#excel-viewer-body').html('<div class="alert alert-warning mb-0">Không tìm thấy sheet</div>');
+        return;
+    }
+    const sheetNames = wb.SheetNames || [];
+    const currentIndex = sheetNames.indexOf(sheetName);
+    let html = '<div class="excel-viewer-toolbar">';
+    if (sheetNames.length > 1) {
+        html += '<div class="btn-group btn-group-sm">';
+        sheetNames.forEach((name, idx) => {
+            html += `<button type="button" class="btn btn-outline-primary excel-sheet-tab ${idx === currentIndex ? 'active' : ''}" data-sheet="${escapeHtml(name)}">${escapeHtml(name)}</button>`;
+        });
+        html += '</div>';
+    }
+    html += `<a class="btn btn-sm btn-outline-secondary" href="${escapeHtml(downloadUrl || '#')}" download><i class="bi bi-download me-1"></i> Tải xuống</a>`;
+    html += '</div>';
+    html += '<div class="table-responsive"><table class="table table-sm table-bordered excel-table">';
+    const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+    const previewRows = data.slice(0, EXCEL_PREVIEW_MAX_ROWS);
+    previewRows.forEach(row => {
+        html += '<tr>';
+        row.slice(0, EXCEL_PREVIEW_MAX_COLS).forEach(cell => {
+            const text = cell == null ? '' : String(cell);
+            html += `<td>${escapeHtml(text)}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</table></div>';
+    if (data.length >= EXCEL_PREVIEW_MAX_ROWS || previewRows.some(row => row.length > EXCEL_PREVIEW_MAX_COLS)) {
+        html += `<div class="alert alert-info mt-2 mb-0">Chỉ hiển thị nhanh ${EXCEL_PREVIEW_MAX_ROWS} dòng và ${EXCEL_PREVIEW_MAX_COLS} cột đầu để tránh đơ trình duyệt.</div>`;
+    }
+    $('#excel-viewer-body').html(html);
+    $('#excel-viewer-body').off('click', '.excel-sheet-tab').on('click', '.excel-sheet-tab', function () {
+        const name = $(this).data('sheet');
+        if (name) renderExcelSheet(wb, name, downloadUrl, fileName);
+    });
+}
+
+function focusProjectRowById(trackingId, columnKey = 'loaisanpham', retries = 10) {
+    const id = String(trackingId || '').trim();
+    if (!id) return false;
+
+    const displayProjects = getDisplayProjects();
+    const rowIndex = displayProjects.findIndex(project => String(getProjectId(project)) === id);
+    const wrap = document.getElementById('projects-table-wrap');
+    if (rowIndex < 0 || !wrap) {
+        if (retries > 0) setTimeout(() => focusProjectRowById(id, columnKey, retries - 1), 180);
+        return false;
+    }
+
+    const columns = getVisibleProjectColumns();
+    const colIndex = Math.max(0, columns.findIndex(column => column.key === columnKey));
+    const rowHeight = getProjectRowHeight();
+    wrap.scrollTop = Math.max(0, rowIndex * rowHeight - rowHeight * 2);
+    renderProjectsVirtualRows({ force: true });
+
+    requestAnimationFrame(() => {
+        const selector = `#projects-table-body .project-sheet-cell[data-id="${CSS.escape(id)}"][data-key="${CSS.escape(columnKey)}"]`;
+        let $cell = $(selector);
+        if (!$cell.length) {
+            $cell = $(`#projects-table-body .project-sheet-cell[data-row="${rowIndex}"][data-col="${colIndex}"]`);
+        }
+        if ($cell.length) {
+            activateProjectCell($cell);
+            $cell.trigger('focus');
+            const $row = $cell.closest('tr');
+            $row.addClass('project-focus-flash');
+            $cell.addClass('project-focus-flash-cell');
+            setTimeout(() => {
+                $row.removeClass('project-focus-flash');
+                $cell.removeClass('project-focus-flash-cell');
+            }, 2600);
+        }
+    });
+    return true;
+}
+
+$(document).ready(function () {
+    $(document).on('click', '#project-material-docs-body .btn-open-bom, #view-content-project .btn-open-bom', function (e) {
+        e.preventDefault();
+        const viewUrl = $(this).data('view-url');
+        const downloadUrl = $(this).data('download-url');
+        const fileName = $(this).data('file-name');
+        const fileSize = Number($(this).data('file-size') || 0);
+        if (viewUrl) openExcelViewer(viewUrl, fileName, downloadUrl, fileSize);
+    });
+});
 
 function getProjectColumnByFieldName(fieldName) {
     const normalized = normalizeProjectUpdateField(fieldName);
@@ -4847,8 +6243,8 @@ async function openProjectChangeLog(rowId, cellMeta = null) {
         fieldName: column?.updateKey || '',
         fieldLabel: fieldName
     };
-    $('#project-change-log-title').text(fieldName ? `Lịch sử chỉnh sửa: #${rowId} · ${fieldName}` : `Lịch sử chỉnh sửa: #${rowId}`);
-    $('#project-change-log-body').html('<div class="text-muted">Đang tải...</div>');
+    $('#project-change-log-title').text(fieldName ? `${t('context_change_log')}: #${rowId} · ${fieldName}` : `${t('context_change_log')}: #${rowId}`);
+    $('#project-change-log-body').html(`<div class="text-muted">${t('loading')}</div>`);
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 
     try {
@@ -4956,8 +6352,8 @@ async function openProjectComments(rowId, cellMeta = null) {
         fieldName,
         fieldLabel: cellMeta?.columnLabel || ''
     };
-    $('#project-comments-title').text(fieldName ? `Bình luận: #${rowId} · ${cellMeta.columnLabel}` : `Bình luận: #${rowId}`);
-    $('#project-comments-body').html('<div class="text-muted">Đang tải...</div>');
+    $('#project-comments-title').text(fieldName ? `${t('context_comments')}: #${rowId} · ${cellMeta.columnLabel}` : `${t('context_comments')}: #${rowId}`);
+    $('#project-comments-body').html(`<div class="text-muted">${t('loading')}</div>`);
     $('#project-comment-input').val('');
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
     await loadProjectComments();
@@ -5003,7 +6399,7 @@ async function submitProjectComment() {
     if (!context) return;
     const text = $('#project-comment-input').val().trim();
     if (!text) {
-        showToast(t('warning'), 'Bình luận không được để trống', 'warning');
+        showToast(t('warning'), t('comment_cannot_be_empty'), 'warning');
         return;
     }
     $('#btn-send-project-comment').prop('disabled', true);
@@ -5095,6 +6491,14 @@ function setupProjectContextMenuHandlers() {
         ProjectsState.autoScrollToBottomOnLoad = true;
         loadProjects();
     });
+    menu.on('click.ctxActions', '.ctx-hide-column', function() {
+        const columnMeta = menu.data('columnMeta');
+        hideProjectColumnFromContext(columnMeta);
+    });
+    menu.on('click.ctxActions', '.ctx-lock-column-edit', function() {
+        const columnMeta = menu.data('columnMeta');
+        toggleProjectColumnEditLockFromContext(columnMeta);
+    });
     menu.on('click.ctxActions', '.ctx-columns', function(e) {
         const menuOffset = menu.offset();
         hideProjectContextMenu();
@@ -5140,7 +6544,9 @@ function updateProjectContextMenuI18n() {
     menu.find('[data-menu-label="edit"]').text(t('quick_edit'));
     menu.find('[data-menu-label="delete"]').text(t('quick_delete'));
     menu.find('[data-menu-label="refresh"]').text(t('refresh'));
-    menu.find('[data-menu-label="columns"]').text(t('btn_toggle_columns'));
+    menu.find('[data-menu-label="lockColumnEdit"]').text(t('lock_column_edit'));
+    menu.find('[data-menu-label="hideColumn"]').text(t('hide_column'));
+    menu.find('[data-menu-label="columns"]').text(t('column_settings'));
     menu.find('[data-menu-label="exportExcel"]').text(t('export_excel'));
     menu.find('[data-menu-label="exportCsv"]').text(t('export_csv'));
     menu.find('[data-menu-label="copyCell"]').text(t('copy_cell'));
@@ -5153,6 +6559,14 @@ function updateProjectContextMenuI18n() {
 // ============================================
 
 window.initProjectsModule = initProjectsModule;
+window.focusProjectRowById = focusProjectRowById;
+window.viewProject = viewProject;
+window.addEventListener('appUserChanged', function() {
+    if (document.getElementById('projects-container')) {
+        syncProjectDesignerOptionsFromUsers();
+        reconnectProjectsRealtime();
+    }
+});
 window.onProjectsTabInit = function() {
     // Called when projects tab is shown
     // Translate the content when tab is shown
@@ -5163,6 +6577,9 @@ window.onProjectsTabInit = function() {
     if (!ProjectsState.isLoading && ProjectsState.projects.length === 0) {
         loadProjects();
     }
+
+    startProjectsAutoRefresh();
+    refreshProjectsSilently('tab');
     
     if (ProjectsState.autoScrollToBottomOnLoad) {
         ensureProjectsInitialScrollToBottom();

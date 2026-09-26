@@ -9,7 +9,9 @@
 
 const ProfileState = {
     user: null,
-    isLoading: false
+    isLoading: false,
+    isSaving: false,
+    isDirty: false
 };
 
 // ============================================
@@ -106,14 +108,20 @@ function renderProfileContent() {
                     <!-- Lịch sử đăng nhập -->
                     <div class="profile-section">
                         <h5 class="mb-3"><i class="bi bi-clock-history"></i> <span data-i18n="login_history">登录历史</span></h5>
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label profile-label" data-i18n="form_last_login">最后登录</label>
-                                <input type="text" class="form-control read-only-field" id="field-last-login-profile" readonly>
+                        <div class="profile-readonly-stack">
+                            <div class="profile-readonly-item">
+                                <span class="profile-readonly-icon"><i class="bi bi-box-arrow-in-right"></i></span>
+                                <div class="profile-readonly-content">
+                                    <span class="profile-readonly-label" data-i18n="form_last_login">最后登录</span>
+                                    <strong id="field-last-login-profile">-</strong>
+                                </div>
                             </div>
-                            <div class="col-md-6">
-                                <label class="form-label profile-label" data-i18n="form_created_at">账号创建时间</label>
-                                <input type="text" class="form-control read-only-field" id="field-created-at-profile" readonly>
+                            <div class="profile-readonly-item">
+                                <span class="profile-readonly-icon"><i class="bi bi-calendar-plus"></i></span>
+                                <div class="profile-readonly-content">
+                                    <span class="profile-readonly-label" data-i18n="form_created_at">账号创建时间</span>
+                                    <strong id="field-created-at-profile">-</strong>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -204,25 +212,30 @@ function renderProfileContent() {
  */
 function setupProfileEvents() {
     // Save profile button
-    $('#btn-save-profile').click(function() {
+    $('#btn-save-profile').off('click.profile').on('click.profile', function() {
         saveProfile();
     });
     
     // Change password button
-    $('#btn-change-password-profile').click(function() {
+    $('#btn-change-password-profile').off('click.profile').on('click.profile', function() {
         showPasswordModal();
     });
     
     // Refresh button
-    $('#btn-refresh-profile').click(function() {
+    $('#btn-refresh-profile').off('click.profile').on('click.profile', function() {
         loadProfile();
+    });
+
+    $('#profile-container').off('input.profile change.profile', 'input:not([readonly])').on('input.profile change.profile', 'input:not([readonly])', function() {
+        ProfileState.isDirty = true;
+        updateProfileActionState();
     });
     
     // Toggle password visibility
     setupPasswordToggles();
     
     // Confirm change password
-    $('#btn-confirm-change-password-profile').click(function() {
+    $('#btn-confirm-change-password-profile').off('click.profile').on('click.profile', function() {
         changePassword();
     });
 }
@@ -232,17 +245,17 @@ function setupProfileEvents() {
  */
 function setupPasswordToggles() {
     // Current password
-    $('#toggle-current-password-profile').click(function() {
+    $('#toggle-current-password-profile').off('click.profile').on('click.profile', function() {
         togglePasswordVisibility('current-password-profile', 'toggle-current-password-icon-profile');
     });
     
     // New password
-    $('#toggle-new-password-profile').click(function() {
+    $('#toggle-new-password-profile').off('click.profile').on('click.profile', function() {
         togglePasswordVisibility('new-password-profile', 'toggle-new-password-icon-profile');
     });
     
     // Confirm password
-    $('#toggle-confirm-password-profile').click(function() {
+    $('#toggle-confirm-password-profile').off('click.profile').on('click.profile', function() {
         togglePasswordVisibility('confirm-password-profile', 'toggle-confirm-password-icon-profile');
     });
 }
@@ -278,6 +291,7 @@ async function loadProfile() {
     console.log('[Profile] Loading profile...');
     
     ProfileState.isLoading = true;
+    updateProfileActionState();
     
     try {
         const result = await getCurrentUser();
@@ -285,6 +299,7 @@ async function loadProfile() {
         if (result.authenticated && result.user) {
             ProfileState.user = result.user;
             populateProfileForm(result.user);
+            ProfileState.isDirty = false;
         } else {
             showToast(t('error'), t('error_loading_profile'), 'error');
         }
@@ -293,6 +308,7 @@ async function loadProfile() {
         showToast(t('error'), t('error_loading') + ': ' + error.message, 'error');
     } finally {
         ProfileState.isLoading = false;
+        updateProfileActionState();
     }
 }
 
@@ -301,21 +317,81 @@ async function loadProfile() {
  * @param {object} user - User data
  */
 function populateProfileForm(user) {
-    $('#profile-username').text(user.full_name || user.username);
-    $('#profile-role').text(user.role || 'User');
+    const displayName = user.full_name || user.username || '-';
+    const roleLabel = getProfileRoleLabel(user.role);
+    $('#profile-username').text(displayName);
+    $('#profile-role').text(roleLabel);
+    $('#profile-avatar').attr('data-initials', getProfileInitials(displayName));
     
     $('#field-username-profile').val(user.username || '');
-    $('#field-role-profile').val(user.role || 'User');
+    $('#field-role-profile').val(roleLabel);
     $('#field-fullname-profile').val(user.full_name || '');
     $('#field-employee-id-profile').val(user.employee_id || '');
     $('#field-department-profile').val(user.department || '');
-    $('#field-status-profile').val(user.status || 'Active');
+    $('#field-status-profile').val(getProfileStatusLabel(user.status));
     
     $('#field-email-profile').val(user.email || '');
     $('#field-phone-profile').val(user.phone || '');
     
-    $('#field-last-login-profile').val(user.last_login ? formatDateTime(user.last_login) : '-');
-    $('#field-created-at-profile').val(user.created_at ? formatDateTime(user.created_at) : '-');
+    $('#field-last-login-profile').text(formatProfileDateTime(getFirstProfileValue(user, ['last_login', 'lastLogin'])));
+    $('#field-created-at-profile').text(formatProfileDateTime(getFirstProfileValue(user, ['user_created_at', 'created_at', 'createdAt'])));
+}
+
+function getFirstProfileValue(source, keys) {
+    for (const key of keys) {
+        const value = source?.[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            return value;
+        }
+    }
+    return '';
+}
+
+function formatProfileDateTime(value) {
+    return value ? formatDateTime(value) : '-';
+}
+
+function getProfileInitials(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'U';
+    return parts.slice(-2).map(part => part.charAt(0).toUpperCase()).join('');
+}
+
+function getProfileRoleLabel(role) {
+    const value = String(role || '').trim();
+    if (!value) return '-';
+    if (value.toLowerCase() === 'admin') return t('role_admin') || 'Admin';
+    return value;
+}
+
+function getProfileStatusLabel(status) {
+    const value = String(status || '').trim().toLowerCase();
+    if (value === 'active') return t('status_active_profile') || 'Active';
+    if (value === 'inactive') return t('status_inactive_profile') || 'Inactive';
+    return status || '-';
+}
+
+function getProfileAuthToken() {
+    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+}
+
+function updateProfileActionState() {
+    const busy = ProfileState.isLoading || ProfileState.isSaving;
+    $('#btn-save-profile').prop('disabled', busy || !ProfileState.isDirty);
+    $('#btn-refresh-profile, #btn-change-password-profile').prop('disabled', busy);
+    $('#profile-container').toggleClass('is-profile-busy', busy);
+}
+
+function validateProfileFormData(formData) {
+    const email = String(formData.email || '').trim();
+    const phone = String(formData.phone || '').trim();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return t('profile_invalid_email') || 'Email không hợp lệ';
+    }
+    if (phone && !/^[0-9+()\-\s.]{6,24}$/.test(phone)) {
+        return t('profile_invalid_phone') || 'Số điện thoại không hợp lệ';
+    }
+    return '';
 }
 
 // ============================================
@@ -326,18 +402,27 @@ function populateProfileForm(user) {
  * Save profile - gọi API để lưu vào database
  */
 async function saveProfile() {
+    if (ProfileState.isSaving) return;
     const formData = {
-        full_name: $('#field-fullname-profile').val(),
-        employee_id: $('#field-employee-id-profile').val(),
-        department: $('#field-department-profile').val(),
-        email: $('#field-email-profile').val(),
-        phone: $('#field-phone-profile').val()
+        full_name: $('#field-fullname-profile').val().trim(),
+        employee_id: $('#field-employee-id-profile').val().trim(),
+        department: $('#field-department-profile').val().trim(),
+        email: $('#field-email-profile').val().trim(),
+        phone: $('#field-phone-profile').val().trim()
     };
+
+    const validationError = validateProfileFormData(formData);
+    if (validationError) {
+        showToast(t('warning'), validationError, 'warning');
+        return;
+    }
     
+    ProfileState.isSaving = true;
+    updateProfileActionState();
     showLoading(t('saving') + ' ' + t('profile_title').toLowerCase() + '...');
     
     try {
-        const token = localStorage.getItem('auth_token');
+        const token = getProfileAuthToken();
         if (!token) {
             showToast(t('error'), t('error_session_expired'), 'error');
             return;
@@ -359,12 +444,17 @@ async function saveProfile() {
             
             // Update session storage with new data
             if (result.user) {
-                localStorage.setItem('current_user', JSON.stringify(result.user));
+                if (localStorage.getItem('current_user')) {
+                    localStorage.setItem('current_user', JSON.stringify(result.user));
+                }
+                if (sessionStorage.getItem('current_user')) {
+                    sessionStorage.setItem('current_user', JSON.stringify(result.user));
+                }
                 ProfileState.user = result.user;
+                populateProfileForm(result.user);
+                window.dispatchEvent(new CustomEvent('appUserChanged', { detail: { user: result.user } }));
             }
-            
-            // Reload to update form
-            loadProfile();
+            ProfileState.isDirty = false;
         } else {
             showToast(t('error'), result.error || t('error_saving_profile'), 'error');
         }
@@ -372,6 +462,8 @@ async function saveProfile() {
         console.error('[Profile] Save error:', error);
         showToast(t('error'), t('error_saving') + ': ' + error.message, 'error');
     } finally {
+        ProfileState.isSaving = false;
+        updateProfileActionState();
         hideLoading();
     }
 }
@@ -418,7 +510,7 @@ async function changePassword() {
     $('#btn-confirm-change-password-profile').prop('disabled', true);
     
     try {
-        const token = localStorage.getItem('auth_token');
+        const token = getProfileAuthToken();
         if (!token) {
             showPasswordError(t('error_session_expired'));
             return;
