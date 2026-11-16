@@ -30,6 +30,8 @@ const ProjectsState = {
     filterUrgency: '',
     // Customers list for dropdown
     customers: [],
+    customerLookup: new Map(),
+    customerLoadPromise: null,
     quickAddDraft: {},
     quickAddStarted: false,
     quickAddPreviewId: null,
@@ -208,6 +210,108 @@ const PROJECT_SELECT_OPTIONS = {
     engineers: []
 };
 
+const PROJECT_CUSTOMER_PHONETIC_FALLBACK = {
+    '歌尔': { phonetic: 'Gē\'ěr', english_name: 'Goertek' },
+    '立讯': { phonetic: 'Lìxùn', english_name: 'Luxshare' },
+    '纬创': { phonetic: 'Wěichuàng', english_name: 'Wistron' },
+    '和硕': { phonetic: 'Héshuò', english_name: 'Pegatron' },
+    '易来安': { phonetic: 'Yìlái\'ān', english_name: 'Innovation' },
+    '同维': { phonetic: 'Tóngwéi', english_name: 'Tongwei' },
+    '昊阳天宇（智邦）': { phonetic: 'Hàoyáng Tiānyǔ (Zhìbāng)', english_name: 'ACCTON' },
+    '比亚迪': { phonetic: 'Bǐyàdí', english_name: 'BYD' },
+    '瑞声': { phonetic: 'Ruìshēng', english_name: 'AAC' },
+    '通力': { phonetic: 'Tōnglì', english_name: 'Tonly' },
+    '华勤': { phonetic: 'Huáqín', english_name: 'HuaQin' },
+    '龙旗': { phonetic: 'Lóngqí', english_name: 'LONGCHEER' },
+    '维达力': { phonetic: 'Wéidálì', english_name: 'WeiDaLi' },
+    '啟碁': { phonetic: 'Qǐqí', english_name: 'WNC' },
+    '讯越': { phonetic: 'Xùnyuè', english_name: 'COOLER MASTER' },
+    '国光声学': { phonetic: 'Guóguāng Shēngxué', english_name: 'AH QUOC QUANG' },
+    '三光': { phonetic: 'SānGuāng', english_name: 'Samkawang' },
+    '智易': { phonetic: 'Zhìyì', english_name: 'AVC' },
+    '广基达': { phonetic: 'Guǎngjīdá', english_name: 'KKT' },
+    '光弘': { phonetic: 'Guānghóng', english_name: 'Guānghóng' },
+    '讯芸': { phonetic: 'Xùnyún', english_name: 'Xun Yun' },
+    '海华': { phonetic: 'Hǎihuá', english_name: 'Hai Hua' },
+    '润动': { phonetic: 'Rùndòng', english_name: 'Run Dong' },
+    '国人': { phonetic: 'Guórén', english_name: 'Guo Ren' },
+    '万力': { phonetic: 'Wànlì', english_name: 'Wan Li' },
+    '达瑞': { phonetic: 'Dárùi', english_name: 'Da Rui' },
+    '鸿凌达': { phonetic: 'Hónglíngdá', english_name: 'Hong Ling Da' },
+    '格力博': { phonetic: 'Gélìbó', english_name: 'Ge Li Bo' },
+    '訊芯': { phonetic: 'XìnXīn', english_name: 'Xin Xin' },
+    '神达': { phonetic: 'Shéndá', english_name: 'MITAC' },
+    '东江': { phonetic: 'DōngJiāng', english_name: 'TK Dong Jiang' },
+    '藤美': { phonetic: 'Téngměi', english_name: 'Teng Mei' },
+    '华荣': { phonetic: 'Huáróng', english_name: 'Hua Rong' },
+    '利光': { phonetic: 'Lìguāng', english_name: 'Li Guang' },
+    '赫比': { phonetic: 'Hèbǐ', english_name: 'He Bi' },
+    '艾迪孚贝': { phonetic: 'Àidífúbèi', english_name: 'Ai Di Fu Bei' },
+    '铭鸿特': { phonetic: 'Mínghóngtè', english_name: 'Ming Hong Te' },
+    '六淳': { phonetic: 'Liùchún', english_name: 'Liu Chun' },
+    '兴千田': { phonetic: 'Xìngqiāntián', english_name: 'Xing Qian Tian' },
+    '蓝微': { phonetic: 'Lánwēi', english_name: 'Lan Wei' },
+    '爱康': { phonetic: 'Àikāng', english_name: 'Ai Kang' },
+    '佳联': { phonetic: 'Jiālián', english_name: 'Jia Lian' },
+    '永德利': { phonetic: 'Yǒngdélì', english_name: 'Yong De Li' },
+    '越洋': { phonetic: 'Yuèyáng', english_name: 'Yue Yang' },
+    '星视': { phonetic: 'Xīngshì', english_name: 'Xing Shi' },
+    '千葆': { phonetic: 'Qiānbǎo', english_name: 'Qian Bao' },
+    '新联': { phonetic: 'Xīnlián', english_name: 'Xin Lian' },
+    '越南广达': { phonetic: 'Yuènán Guǎngdá', english_name: 'Quanta Vietnam' },
+    '长银': { phonetic: 'Chángyín', english_name: 'Chang Yin' },
+    '美利达': { phonetic: 'Měilìdá', english_name: 'Mei Li Da' },
+    '亚旭': { phonetic: 'Yàxù', english_name: 'Ya Xu' },
+    '海鸥': { phonetic: 'Hǎi\'ōu', english_name: 'Hai Ou' },
+    '联越': { phonetic: 'Liányuè', english_name: 'Lian Yue' },
+    '诺德': { phonetic: 'Nuòdé', english_name: 'Nuo De' },
+    '雷士': { phonetic: 'Léishì', english_name: 'Lei Shi' },
+    '联创达': { phonetic: 'Liánchuàngdá', english_name: 'Lian Chuang Da' },
+    '华瑞': { phonetic: 'Huárùi', english_name: 'Hua Rui' },
+    '安美': { phonetic: 'Ānměi', english_name: 'An Mei' },
+    '大麦': { phonetic: 'Dàmài', english_name: 'Da Mai' },
+    '华盛昌': { phonetic: 'Huáshèngchāng', english_name: 'Hua Sheng Chang' },
+    '松田': { phonetic: 'Sōngtián', english_name: 'Song Tian' },
+    '福鑫': { phonetic: 'Fúxīn', english_name: 'Fu Xin' },
+    '力子': { phonetic: 'Lìzǐ', english_name: 'Li Zi' },
+    '兴南': { phonetic: 'Xìngnán', english_name: 'Xing Nan' },
+    '友务': { phonetic: 'Yǒuwù', english_name: 'You Wu' },
+    '苏州兴千田': { phonetic: 'Sūzhōu Xìngqiāntián', english_name: 'Suzhou Xing Qian Tian' },
+    '东欣昌': { phonetic: 'Dōngxīnchāng', english_name: 'Dong Xin Chang' },
+    '成良智能': { phonetic: 'Chéngliáng Zhìnéng', english_name: 'Cheng Liang Zhi Neng' },
+    '潍坊兴宝': { phonetic: 'Wéifāng Xìngbǎo', english_name: 'Weifang Xing Bao' },
+    '良泽': { phonetic: 'Liángzé', english_name: 'Liang Ze' },
+    '三和': { phonetic: 'Sānhé', english_name: 'San He' },
+    '瑞勤': { phonetic: 'Ruìqín', english_name: 'RuiQin' },
+    '创源': { phonetic: 'Chuàngyuán', english_name: 'CHUANG-YUAN ALLEGRO' },
+    '瑞鑫晟': { phonetic: 'Ruìxīnshèng', english_name: 'Rui Xin Sheng' },
+    '银石创新': { phonetic: 'Yínshí Chuàngxīn', english_name: 'YingShi Innovation' },
+    '东川': { phonetic: 'Dōngchuān', english_name: 'Dong Chuan' },
+    '百达': { phonetic: 'Bǎidá', english_name: 'BAI DA' },
+    '和志五金': { phonetic: 'Hézhì Wǔjīn', english_name: 'He Zhi Wu Jin' },
+    'Chưa rõ khách hàng 未知客户': { phonetic: 'Wèizhī Kèhù', english_name: 'Unknown Customer' },
+    '观塘': { phonetic: 'Guāntáng', english_name: 'Guan Tang' },
+    '泛亚电子': { phonetic: 'FànYà Diànzǐ', english_name: 'PAN ASIA' },
+    '郑总': { phonetic: 'Zhèngzǒng', english_name: 'Zheng Zong' },
+    '硕贝德 THAC BOI DUC': { phonetic: 'Shuòbèidé', english_name: 'THAC BOI DUC' },
+    '连乘': { phonetic: 'Liánchéng', english_name: 'Lian Cheng' },
+    '睿佑精密': { phonetic: 'Ruìyòu Jīngmì', english_name: 'Rui You Jing Mi' }
+};
+
+const PROJECT_SALESPERSON_PHONETIC_FALLBACK = {
+    '万中阳': 'Wàn Zhōngyáng',
+    '义安立讯': 'Yìān Lìxùn',
+    '刘明': 'Liú Míng',
+    '刘颖': 'Liú Yǐng',
+    '崔永杰': 'Cuī Yǒngjié',
+    '张利刚': 'Zhāng Lìgāng',
+    '张建': 'Zhāng Jiàn',
+    '张立刚': 'Zhāng Lìgāng',
+    '田亚弟': 'Tián Yàdì',
+    '联越': 'Liányuè',
+    '肖伟': 'Xiāo Wěi'
+};
+
 function getProjectsLanguage() {
     return typeof getCurrentLanguage === 'function' ? getCurrentLanguage() : (window.currentLanguage || 'vi');
 }
@@ -248,6 +352,10 @@ function getProjectOptionEditorLabel(option) {
     return String(label || '').trim();
 }
 
+function shouldUseFullProjectEditorLabel(column) {
+    return ['productTypes', 'completionStatus'].includes(column?.optionsSource);
+}
+
 function getDefaultProjectColumnOrder() {
     return PROJECT_SPREADSHEET_COLUMNS.map(column => column.key);
 }
@@ -270,6 +378,7 @@ function initProjectsModule() {
     loadProjectFilterState();
     loadProjectColumnEditLocksFromLocal();
     syncProjectDesignerOptionsFromUsers();
+    loadProjectCustomers();
 
     // Render the module content
     renderProjectsContent();
@@ -874,6 +983,18 @@ function setupProjectsEvents() {
 
     $('#project-filter-search').on('input', function() {
         renderProjectFilterValues($(this).val());
+    });
+
+    $('#project-filter-search').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyProjectColumnFilter();
+            return;
+        }
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            hideProjectColumnFilter();
+        }
     });
 
     $(window).off('resize.projectsFitTable').on('resize.projectsFitTable', debounce(function() {
@@ -2683,6 +2804,104 @@ function normalizeProjectFilterText(value) {
     return String(value ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
 
+function compactProjectFilterText(value) {
+    return normalizeProjectFilterText(value).replace(/[^a-z0-9\u4e00-\u9fff]+/g, '');
+}
+
+function projectFilterTextIncludes(haystack, needle) {
+    const normalizedHaystack = normalizeProjectFilterText(haystack);
+    const normalizedNeedle = normalizeProjectFilterText(needle);
+    if (!normalizedNeedle) return true;
+    if (normalizedHaystack.includes(normalizedNeedle)) return true;
+    const compactNeedle = compactProjectFilterText(normalizedNeedle);
+    return !!compactNeedle && compactProjectFilterText(normalizedHaystack).includes(compactNeedle);
+}
+
+function isProjectCustomerColumn(columnOrKey) {
+    const key = typeof columnOrKey === 'string' ? columnOrKey : columnOrKey?.key;
+    return key === 'khachhang';
+}
+
+function isProjectSalespersonColumn(columnOrKey) {
+    const key = typeof columnOrKey === 'string' ? columnOrKey : columnOrKey?.key;
+    return key === 'nhanvienkd';
+}
+
+function buildProjectCustomerLookup(customers = []) {
+    const lookup = new Map();
+    customers.forEach(customer => {
+        const fallback = PROJECT_CUSTOMER_PHONETIC_FALLBACK[String(customer.name || '').trim()] || {};
+        const enrichedCustomer = {
+            ...customer,
+            phonetic: customer.phonetic || fallback.phonetic || '',
+            english_name: customer.english_name || fallback.english_name || ''
+        };
+        const names = [
+            enrichedCustomer.name,
+            enrichedCustomer.english_name,
+            enrichedCustomer.code
+        ].map(value => String(value || '').trim()).filter(Boolean);
+        names.forEach(name => {
+            lookup.set(normalizeProjectFilterText(name), enrichedCustomer);
+        });
+    });
+    Object.entries(PROJECT_CUSTOMER_PHONETIC_FALLBACK).forEach(([name, customer]) => {
+        const enrichedCustomer = { name, ...customer };
+        [name, customer.english_name].filter(Boolean).forEach(alias => {
+            const normalizedAlias = normalizeProjectFilterText(alias);
+            if (normalizedAlias && !lookup.has(normalizedAlias)) {
+                lookup.set(normalizedAlias, enrichedCustomer);
+            }
+        });
+    });
+    ProjectsState.customerLookup = lookup;
+}
+
+function getProjectCustomerRecordByName(name) {
+    const normalizedName = normalizeProjectFilterText(name);
+    if (!normalizedName) return null;
+    return ProjectsState.customerLookup.get(normalizedName) || null;
+}
+
+function getProjectCustomerFallbackByName(name) {
+    const text = String(name || '').trim();
+    if (!text) return {};
+    if (PROJECT_CUSTOMER_PHONETIC_FALLBACK[text]) return PROJECT_CUSTOMER_PHONETIC_FALLBACK[text];
+
+    const matchedEntry = Object.entries(PROJECT_CUSTOMER_PHONETIC_FALLBACK)
+        .find(([fallbackName]) => fallbackName && (text.includes(fallbackName) || fallbackName.includes(text)));
+    return matchedEntry ? matchedEntry[1] : {};
+}
+
+function getProjectCustomerSearchText(customerName) {
+    const customer = getProjectCustomerRecordByName(customerName);
+    const fallback = getProjectCustomerFallbackByName(customerName);
+    if (!customer && !fallback.phonetic && !fallback.english_name) return String(customerName || '');
+    return [
+        customer?.name || customerName,
+        customer?.phonetic || fallback.phonetic,
+        customer?.english_name || fallback.english_name,
+        customer?.code
+    ].filter(Boolean).join(' ');
+}
+
+function getProjectSalespersonSearchText(salespersonName) {
+    const name = String(salespersonName || '').trim();
+    const phonetic = PROJECT_SALESPERSON_PHONETIC_FALLBACK[name] || '';
+    return [name, phonetic].filter(Boolean).join(' ');
+}
+
+function getProjectOptionSearchText(option, columnKey) {
+    const label = option?.label || '';
+    if (isProjectCustomerColumn(columnKey)) {
+        return `${label} ${getProjectCustomerSearchText(label)}`;
+    }
+    if (isProjectSalespersonColumn(columnKey)) {
+        return `${label} ${getProjectSalespersonSearchText(label)}`;
+    }
+    return label;
+}
+
 function stripProjectHtml(value) {
     const element = document.createElement('div');
     element.innerHTML = String(value ?? '');
@@ -2715,6 +2934,16 @@ function getProjectSearchTokens(searchText) {
 function getProjectSearchHaystack(project) {
     const visibleColumns = getVisibleProjectColumns();
     const visibleValues = visibleColumns.map(column => getProjectRenderedFilterLabel(project, column));
+    const customerColumn = PROJECT_SPREADSHEET_COLUMNS.find(column => isProjectCustomerColumn(column));
+    if (customerColumn) {
+        const customerName = getProjectRenderedFilterLabel(project, customerColumn);
+        visibleValues.push(getProjectCustomerSearchText(customerName));
+    }
+    const salespersonColumn = PROJECT_SPREADSHEET_COLUMNS.find(column => isProjectSalespersonColumn(column));
+    if (salespersonColumn) {
+        const salespersonName = getProjectRenderedFilterLabel(project, salespersonColumn);
+        visibleValues.push(getProjectSalespersonSearchText(salespersonName));
+    }
     return normalizeProjectFilterText(visibleValues.join(' '));
 }
 
@@ -2722,7 +2951,7 @@ function matchProjectSearch(project) {
     const tokens = getProjectSearchTokens(ProjectsState.searchText);
     if (tokens.length === 0) return true;
     const haystack = getProjectSearchHaystack(project);
-    return tokens.every(token => haystack.includes(token));
+    return tokens.every(token => projectFilterTextIncludes(haystack, token));
 }
 
 function getProjectId(project) {
@@ -2802,6 +3031,16 @@ function getProjectColumnFilterOptions(columnKey) {
         .sort((a, b) => a.label.localeCompare(b.label, 'vi'));
 }
 
+function focusProjectColumnFilterSearch() {
+    const input = document.getElementById('project-filter-search');
+    if (!input) return;
+    requestAnimationFrame(() => {
+        input.focus({ preventScroll: true });
+        const caretPosition = input.value.length;
+        input.setSelectionRange(caretPosition, caretPosition);
+    });
+}
+
 function showProjectColumnFilter(columnKey, anchor) {
     const column = PROJECT_SPREADSHEET_COLUMNS.find(col => col.key === columnKey);
     if (!column) return;
@@ -2809,6 +3048,9 @@ function showProjectColumnFilter(columnKey, anchor) {
     $('#project-filter-title').text(t('filter_column_title', { column: getProjectColumnDisplayName(column) }));
     $('#project-filter-search').val('');
     renderProjectFilterValues('');
+    if (isProjectCustomerColumn(columnKey)) {
+        loadProjectCustomers().then(refreshProjectCustomerFilterIfOpen);
+    }
 
     const popup = $('#project-column-filter');
     popup.css({ display: 'block', left: 0, top: 0 });
@@ -2818,6 +3060,7 @@ function showProjectColumnFilter(columnKey, anchor) {
     const left = Math.min(rect.left, window.innerWidth - width - 8);
     const top = Math.min(rect.bottom + 6, window.innerHeight - height - 8);
     popup.css({ left: `${Math.max(8, left)}px`, top: `${Math.max(8, top)}px` });
+    focusProjectColumnFilterSearch();
 }
 
 function renderProjectFilterValues(searchText = '') {
@@ -2825,7 +3068,7 @@ function renderProjectFilterValues(searchText = '') {
     const options = getProjectColumnFilterOptions(key);
     const selected = ProjectsState.columnFilters[key] || options.map(option => option.value);
     const needle = normalizeProjectFilterText(searchText);
-    const visibleOptions = options.filter(option => !needle || normalizeProjectFilterText(option.label).includes(needle));
+    const visibleOptions = options.filter(option => !needle || projectFilterTextIncludes(getProjectOptionSearchText(option, key), needle));
     const html = visibleOptions.map(option => `
         <label class="project-filter-value">
             <input type="checkbox" value="${escapeHtml(option.value)}" data-visible="true" ${selected.includes(option.value) ? 'checked' : ''}>
@@ -3620,7 +3863,7 @@ async function beginProjectCellEdit($cell, seedValue = null) {
         const options = getProjectColumnOptions(column, originalValue);
         const selectHtml = options.map(option => {
             const value = getProjectOptionValue(option);
-            const label = column.optionsSource === 'productTypes'
+            const label = shouldUseFullProjectEditorLabel(column)
                 ? getProjectOptionEditorLabel(option)
                 : getProjectOptionLabel(option);
             return `<option value="${escapeHtml(String(value))}" ${String(value) === String(originalValue) ? 'selected' : ''}>${escapeHtml(String(label))}</option>`;
@@ -4150,25 +4393,52 @@ function updateTechnicalRequirementCounter() {
 /**
  * Populate customer dropdown from API
  */
+async function loadProjectCustomers({ force = false } = {}) {
+    if (!force && ProjectsState.customers.length) {
+        return ProjectsState.customers;
+    }
+    if (!force && ProjectsState.customerLoadPromise) {
+        return ProjectsState.customerLoadPromise;
+    }
+    ProjectsState.customerLoadPromise = (async () => {
+        const result = await api.getCustomers();
+        const customers = result && result.success && Array.isArray(result.data)
+            ? result.data
+            : [];
+        ProjectsState.customers = customers;
+        buildProjectCustomerLookup(customers);
+        refreshProjectCustomerFilterIfOpen();
+        return customers;
+    })();
+    try {
+        return await ProjectsState.customerLoadPromise;
+    } catch (error) {
+        console.error('[Projects] Error loading customers:', error);
+        return ProjectsState.customers;
+    } finally {
+        ProjectsState.customerLoadPromise = null;
+    }
+}
+
 async function populateCustomerDropdown() {
     const $select = $('#field-khachhang-select');
     if (!$select.length) return;
 
-    try {
-        const result = await api.getCustomers();
-        if (result && result.success && result.data) {
-            $select.empty();
-            $select.append('<option value="">' + t('select_customer') + '</option>');
-            result.data.forEach(customer => {
-                const displayName = customer.name || customer.english_name || customer.code || '';
-                if (displayName) {
-                    $select.append('<option value="' + escapeHtml(displayName) + '">' + 
-                                   escapeHtml(displayName) + '</option>');
-                }
-            });
+    const customers = await loadProjectCustomers();
+    $select.empty();
+    $select.append('<option value="">' + t('select_customer') + '</option>');
+    customers.forEach(customer => {
+        const displayName = customer.name || customer.english_name || customer.code || '';
+        if (displayName) {
+            $select.append('<option value="' + escapeHtml(displayName) + '">' +
+                           escapeHtml(displayName) + '</option>');
         }
-    } catch (error) {
-        console.error('[Projects] Error populating customer dropdown:', error);
+    });
+}
+
+function refreshProjectCustomerFilterIfOpen() {
+    if (isProjectCustomerColumn(ProjectsState.activeFilterKey) && $('#project-column-filter').is(':visible')) {
+        renderProjectFilterValues($('#project-filter-search').val() || '');
     }
 }
 
@@ -5405,11 +5675,11 @@ function renderProjectDetailMaterialDocuments(result) {
             </div>
         </div>
         ${renderMaterialErpInfo(result?.erp_info)}
-        ${renderMaterialPdfPanel(pdfDocuments)}
         ${renderMaterialFolders(folders, parentOpenUrl, 'project-detail-material-browser')}
         ${docs.length ? `<div class="material-doc-list project-detail-material-list">
             ${docs.map(doc => renderMaterialDocumentItem(doc)).join('')}
         </div>` : ''}
+        ${renderMaterialPdfPanel(pdfDocuments)}
     `);
 }
 
@@ -5960,11 +6230,11 @@ function renderProjectMaterialDocuments(result) {
             ${result.resolved_code && result.resolved_code !== result.code ? `<span>Mã mẹ: ${escapeHtml(result.resolved_code)}</span>` : ''}
         </div>
         ${renderMaterialErpInfo(result.erp_info)}
-        ${renderMaterialPdfPanel(pdfDocuments)}
         ${renderMaterialFolders(folders, parentOpenUrl)}
         ${docs.length ? `<div class="material-doc-list">
             ${docs.map(doc => renderMaterialDocumentItem(doc)).join('')}
         </div>` : ''}
+        ${renderMaterialPdfPanel(pdfDocuments)}
     `;
     $('#project-material-docs-body').html(html);
 }
