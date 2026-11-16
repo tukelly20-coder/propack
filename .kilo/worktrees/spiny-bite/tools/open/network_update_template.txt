@@ -1,0 +1,44 @@
+/*
+ * CẤU TRÚC THƯ MỤC CẬP NHẬT TRÊN NETWORK
+ * Đường dẫn: \\192.168.2.165\越南vp共享文件夹\13-IT_data\Software\Tool_Open\Mở mã liệu UI
+ * 
+ * Cấu trúc thư mục:
+ * ├── Mở mã liệu UI\
+ * │   ├── update_info.json     <- Thông tin phiên bản mới nhất
+ * │   ├── v1.0.1\
+ * │   │   ├── Mở mã liệu UI.py
+ * │   │   ├── Mở mã liệu 打开链接VP.py
+ * │   │   ├── updater.py
+ * │   │   └── version.json
+ * │   └── v1.0.2\
+ * │       └── ...
+ */
+
+-- File: update_info.json (đặt trong folder Mở mã liệu UI) --
+{
+    "version": "1.0.1",
+    "release_date": "2026-03-15",
+    "version_folder": "v1.0.1",
+    "changelog": "- Sửa lỗi hiển thị kết quả tìm kiếm\n- Cải thiện tốc độ xử lý\n- Thêm tính năng tự động kiểm tra cập nhật",
+    "force_update": false
+}
+
+-- Cách tạo phiên bản mới --
+1. Tạo thư mục v{version} mới (ví dụ: v1.0.2)
+2. Copy các file sau vào thư mục đó:
+   - Mở mã liệu UI.py
+   - Mở mã liệu 打开链接VP.py  
+   - updater.py
+3. Cập nhật version.json trong thư mục đó
+4. Cập nhật update_info.json trong thư mục gốc:
+   - Sửa version thành "1.0.2"
+   - Sửa version_folder thành "v1.0.2"
+   - Sửa release_date và changelog
+
+-- Lưu ý --
+- Tên thư mục version phải bắt đầu bằng "v" (ví dụ: v1.0.1, v1.0.2)
+- Các file trong thư mục version phải giữ nguyên tên gốc
+- Khi người dùng bấm "Kiểm tra cập nhật", app sẽ:
+  1. Đọc update_info.json từ network
+  2. So sánh version với version.json local
+  3. Nếu có version mới, copy các file từ version_folder về máy

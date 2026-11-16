@@ -1,0 +1,16 @@
+{
+	"directories": [
+		"lib"
+	],
+	"finder": [
+		{
+			"name": "*.php",
+			"exclude": [
+				"Tests"
+			],
+			"in": "vendor"
+		}
+	],
+	"main": "updater.php",
+	"force-autodiscovery": true
+}

@@ -1,0 +1,179 @@
+{
+  "console": [
+    {
+      "type": "log",
+      "text": "[Storage] Safe localStorage initialized"
+    },
+    {
+      "type": "log",
+      "text": "[App] Initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[App] setupLanguageSelector called"
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "[App] Switching to tab: projects"
+    },
+    {
+      "type": "log",
+      "text": "[App] Loading module: projects"
+    },
+    {
+      "type": "log",
+      "text": "[App] Initialization complete"
+    },
+    {
+      "type": "log",
+      "text": "[Projects] Initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "[Projects] Loading projects..."
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "App initializing..."
+    },
+    {
+      "type": "log",
+      "text": "jQuery version: 3.7.0"
+    },
+    {
+      "type": "log",
+      "text": "Bootstrap available: true"
+    },
+    {
+      "type": "log",
+      "text": "Login response: {expires_in: 86400, success: true, token: 8401e5489924139c7a3ad6b57c349e8a326d9ccccb366999aa938c264cbfabec, user: Object}"
+    },
+    {
+      "type": "log",
+      "text": "Response ok: true"
+    },
+    {
+      "type": "log",
+      "text": "Result success: true"
+    },
+    {
+      "type": "log",
+      "text": "[App] Loading module: projects"
+    },
+    {
+      "type": "log",
+      "text": "[Projects] Initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "[Projects] Loading projects..."
+    },
+    {
+      "type": "log",
+      "text": "[App] Switching to tab: taomabanve"
+    },
+    {
+      "type": "log",
+      "text": "[App] Loading module: taomabanve"
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] Initializing..."
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] translateCategoryDropdown called (no action needed - bilingual format)"
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] Loading code history..."
+    },
+    {
+      "type": "log",
+      "text": "[i18n] translatePage called"
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] Batch parent lookup: 702 codes in 567ms"
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] Loading code history..."
+    },
+    {
+      "type": "log",
+      "text": "[TaoMaBanVe] Batch parent lookup: 703 codes in 621ms"
+    },
+    {
+      "type": "log",
+      "text": "[App] Switching to tab: ai"
+    },
+    {
+      "type": "log",
+      "text": "[App] Loading module: ai"
+    },
+    {
+      "type": "log",
+      "text": "[AI] Initializing Gemini AI module..."
+    }
+  ],
+  "responses": [
+    {
+      "url": "http://localhost:8001/api/codes/create",
+      "status": 200,
+      "body": "{\"code\":\"PSJT123-0003-00-A0\",\"success\":true}\n"
+    },
+    {
+      "url": "http://localhost:8001/api/openrouter/status",
+      "status": 200,
+      "body": "{\"configured\":false,\"connected\":false,\"error\":null,\"success\":true}\n"
+    },
+    {
+      "url": "http://localhost:8001/api/openrouter/chat/stream",
+      "status": 200,
+      "body": "data: {\"error\": \"OpenRouter API key ch\\u01b0a \\u0111\\u01b0\\u1ee3c c\\u1ea5u h\\u00ecnh\"}\n\n"
+    },
+    {
+      "url": "http://localhost:8001/api/openrouter/status",
+      "status": 200,
+      "body": "{\"configured\":false,\"connected\":false,\"error\":null,\"success\":true}\n"
+    }
+  ],
+  "notes": [
+    {
+      "generatedVisible": false,
+      "generatedCode": ""
+    },
+    {
+      "toastText": [
+        "Đang tạo mã bản vẽ...",
+        "Đã tạo mã: PSJT123-0003-00-A0"
+      ]
+    },
+    {
+      "aiMessages": 3,
+      "aiErrorCount": 1,
+      "aiLastText": " OpenRouter API key chưa được cấu hình"
+    }
+  ]
+}
